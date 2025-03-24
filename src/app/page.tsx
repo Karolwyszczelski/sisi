@@ -1,7 +1,22 @@
+'use client';
+
+import Hero from '@/components/Hero';
+import BurgerMiesiaca from '@/components/BurgerMiesiaca';
+import MenuSection from '@/components/menu/MenuSection';
+import CheckoutModal from '@/components/menu/CheckoutModal';
+import useCartStore from '@/store/cartStore';
+
 export default function Home() {
+  const isCheckoutOpen = useCartStore((state) => state.isCheckoutOpen);
+
   return (
-    <main className="min-h-screen flex items-center justify-center">
-      <h1 className="text-red-500 text-3xl font-bold">Tailwind DZIAŁA 💥</h1>
+    <main>
+      {isCheckoutOpen && <CheckoutModal />}
+      <Hero />
+      <BurgerMiesiaca />
+      <MenuSection />
     </main>
   );
 }
+
+

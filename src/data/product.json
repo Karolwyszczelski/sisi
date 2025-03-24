@@ -1,0 +1,196 @@
+[
+  {
+    "category": "Burger",
+    "subcategories": [
+      {
+        "name": "100% Wołowina",
+        "items": [
+          {
+            "name": "Standard Burger",
+            "price": 25
+          },
+          {
+            "name": "Cheeseburger",
+            "price": 26
+          },
+          {
+            "name": "BBQ Cheeseburger",
+            "price": 27
+          },
+          {
+            "name": "TexMex Cheeseburger",
+    "price": 27,
+    "description": "Delikatne mięso kurczaka w chrupiącej panierce, idealne dla każdego."
+          },
+          {
+            "name": "Sweet Onion Cheeseburger",
+            "price": 29
+          },
+          {
+            "name": "Premium z Karmelizowaną Gruszką",
+            "price": 29
+          },
+          {
+            "name": "Black Burger",
+            "price": 31
+          },
+          {
+            "name": "Serowy Burger",
+            "price": 31
+          }
+        ]
+      },
+      {
+        "name": "100% Kurczak",
+        "items": [
+          {
+            "name": "Chicken Crunchy",
+            "price": 28
+          }
+        ]
+      },
+      {
+        "name": "100% Vege",
+        "items": [
+          {
+            "name": "BBQ Vegeburger",
+            "price": 27
+          },
+          {
+            "name": "TexMex Vegeburger",
+            "price": 27
+          }
+        ]
+      },
+      {
+        "name": "Specjał",
+        "items": [
+          {
+            "name": "Burger Miesiąca",
+            "price": 32
+          },
+          {
+            "name": "Burger po Twojemu",
+            "price": 32
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "category": "Pancake",
+    "items": [
+      {
+        "name": "Classic American",
+        "price": 22
+      },
+      {
+        "name": "Classic Nutella",
+        "price": 25
+      },
+      {
+        "name": "Tutti Frutti",
+        "price": 28
+      },
+      {
+        "name": "Choco Shock",
+        "price": 27
+      },
+      {
+        "name": "Pink Panther",
+        "price": 29
+      },
+      {
+        "name": "Pan B. Maxi King",
+        "price": 29
+      }
+    ]
+  },
+  {
+    "category": "Kids",
+    "items": [
+      {
+        "name": "Mini Zestaw Standard",
+        "price": 27
+      },
+      {
+        "name": "Mini Zestaw Chicken",
+        "price": 26
+      }
+    ]
+  },
+  {
+    "category": "Dodatki",
+    "items": [
+      {
+        "name": "Frytki (150g)",
+        "price": 10
+      },
+      {
+        "name": "Frytki (300g)",
+        "price": 14
+      },
+      {
+        "name": "Frytki z batatów (150g)",
+        "price": 12
+      },
+      {
+        "name": "Frytki z batatów (300g)",
+        "price": 16
+      },
+      {
+        "name": "Frytki z serem (150g)",
+        "price": 14
+      },
+      {
+        "name": "Frytki z serem (300g)",
+        "price": 17
+      }
+    ]
+  },
+  {
+    "category": "Napoje",
+    "items": [
+      {
+        "name": "Coca-Cola 0,3L",
+        "price": 6
+      },
+      {
+        "name": "Coca-Cola Zero 0,3L",
+        "price": 6
+      },
+      {
+        "name": "Coca-Cola 0,5L",
+        "price": 7
+      },
+      {
+        "name": "Coca-Cola Zero 0,5L",
+        "price": 7
+      },
+      {
+        "name": "Fanta 0,5L",
+        "price": 7
+      },
+      {
+        "name": "Sprite 0,5L",
+        "price": 7
+      },
+      {
+        "name": "Kropla Beskidu 0,5L (gazowana/nie)",
+        "price": 6
+      },
+      {
+        "name": "Sok Tymbark 1L",
+        "price": 9
+      },
+      {
+        "name": "Red Bull",
+        "price": 10
+      },
+      {
+        "name": "Lemoniada sezonowa",
+        "price": 9
+      }
+    ]
+  }
+]
