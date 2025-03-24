@@ -6,7 +6,15 @@ import useCartStore from '@/store/cartStore';
 
 export default function CartPopup() {
   const isClient = useIsClient();
-  const { isOpen, toggleCart, items, openCheckoutModal, removeItem } = useCartStore(); // dodaj removeItem
+  const {
+    isOpen,
+    toggleCart,
+    items,
+    removeItem,
+    openCheckoutModal,
+    isCheckoutOpen,
+    goToStep,
+  } = useCartStore();
 
   if (!isClient || !isOpen) return null;
 
@@ -45,7 +53,12 @@ export default function CartPopup() {
 
       {items.length > 0 && (
         <button
-          onClick={openCheckoutModal}
+          onClick={() => {
+            if (!isCheckoutOpen) {
+              goToStep(1);
+              openCheckoutModal();
+            }
+          }}
           className="mt-4 w-full bg-yellow-400 text-black py-2 rounded-full font-semibold"
         >
           Przejdź do kasy

@@ -7,36 +7,52 @@
         "items": [
           {
             "name": "Standard Burger",
-            "price": 25
+            "price": 25,
+            "ingredients": ["bułka", "200g wołowina", "bekon", "sałata masłowa", "pikle", "pomidor", "czerwona cebula", "majonez", "ketchup", "musztarda"],
+            "availableAddons": ["ser cheddar", "jalapeño", "nachosy", "konfitura z cebuli", "gruszka", "płynny ser", "sos BBQ", "sos meksykański"]
           },
           {
             "name": "Cheeseburger",
-            "price": 26
+            "price": 26,
+            "ingredients": ["200g wołowina", "bekon", "ser cheddar", "sałata masłowa", "pomidor", "majonez", "ketchup"],
+            "availableAddons": ["jalapeño", "pikle", "konfitura z cebuli", "gruszka", "płynny ser", "nachosy"]
           },
           {
             "name": "BBQ Cheeseburger",
-            "price": 27
+            "price": 27,
+            "ingredients": ["200g wołowina", "bekon", "ser cheddar", "sos BBQ", "cebula", "majonez", "sałata masłowa"],
+            "availableAddons": ["pikle", "jalapeño", "ketchup", "musztarda", "gruszka"]
           },
           {
             "name": "TexMex Cheeseburger",
-    "price": 27,
-    "description": "Delikatne mięso kurczaka w chrupiącej panierce, idealne dla każdego."
+            "price": 27,
+            "description": "Delikatne mięso kurczaka w chrupiącej panierce, idealne dla każdego.",
+            "ingredients": ["kurczak w panierce", "ser cheddar", "jalapeño", "nachosy", "pikle", "czerwona cebula", "sos meksykański"],
+            "availableAddons": ["bekon", "pomidor", "majonez", "musztarda", "gruszka"]
           },
           {
             "name": "Sweet Onion Cheeseburger",
-            "price": 29
+            "price": 29,
+            "ingredients": ["200g wołowina", "ser cheddar", "konfitura z cebuli", "sałata", "majonez"],
+            "availableAddons": ["jalapeño", "pikle", "płynny ser", "nachosy"]
           },
           {
             "name": "Premium z Karmelizowaną Gruszką",
-            "price": 29
+            "price": 29,
+            "ingredients": ["200g wołowina", "ser cheddar", "bekon", "gruszka", "musztarda", "majonez"],
+            "availableAddons": ["płynny ser", "jalapeño", "ketchup"]
           },
           {
             "name": "Black Burger",
-            "price": 31
+            "price": 31,
+            "ingredients": ["200g wołowina", "czarna maślana bułka", "sos meksykański", "bekon", "jalapeño", "nachosy", "ser cheddar"],
+            "availableAddons": ["pomidor", "ogórek", "musztarda", "majonez"]
           },
           {
             "name": "Serowy Burger",
-            "price": 31
+            "price": 31,
+            "ingredients": ["200g wołowina", "bekon", "ser cheddar", "ketchup", "musztarda", "pomidor", "pikle", "płynny ser"],
+            "availableAddons": ["jalapeño", "gruszka", "majonez"]
           }
         ]
       },
@@ -45,7 +61,9 @@
         "items": [
           {
             "name": "Chicken Crunchy",
-            "price": 28
+            "price": 28,
+            "ingredients": ["kurczak w panierce", "sałata masłowa", "ser cheddar", "majonez", "ketchup", "pomidor", "musztarda"],
+            "availableAddons": ["bekon", "jalapeño", "pikle", "gruszka"]
           }
         ]
       },
@@ -54,11 +72,15 @@
         "items": [
           {
             "name": "BBQ Vegeburger",
-            "price": 27
+            "price": 27,
+            "ingredients": ["burger z ciecierzycy", "ser cheddar", "sos BBQ", "ogórek", "sałata", "pomidor"],
+            "availableAddons": ["pikle", "jalapeño", "bekon", "gruszka"]
           },
           {
             "name": "TexMex Vegeburger",
-            "price": 27
+            "price": 27,
+            "ingredients": ["burger z fasoli", "kukurydza", "papryka", "nachosy", "sos meksykański"],
+            "availableAddons": ["pomidor", "pikle", "płynny ser", "majonez"]
           }
         ]
       },
@@ -74,122 +96,6 @@
             "price": 32
           }
         ]
-      }
-    ]
-  },
-  {
-    "category": "Pancake",
-    "items": [
-      {
-        "name": "Classic American",
-        "price": 22
-      },
-      {
-        "name": "Classic Nutella",
-        "price": 25
-      },
-      {
-        "name": "Tutti Frutti",
-        "price": 28
-      },
-      {
-        "name": "Choco Shock",
-        "price": 27
-      },
-      {
-        "name": "Pink Panther",
-        "price": 29
-      },
-      {
-        "name": "Pan B. Maxi King",
-        "price": 29
-      }
-    ]
-  },
-  {
-    "category": "Kids",
-    "items": [
-      {
-        "name": "Mini Zestaw Standard",
-        "price": 27
-      },
-      {
-        "name": "Mini Zestaw Chicken",
-        "price": 26
-      }
-    ]
-  },
-  {
-    "category": "Dodatki",
-    "items": [
-      {
-        "name": "Frytki (150g)",
-        "price": 10
-      },
-      {
-        "name": "Frytki (300g)",
-        "price": 14
-      },
-      {
-        "name": "Frytki z batatów (150g)",
-        "price": 12
-      },
-      {
-        "name": "Frytki z batatów (300g)",
-        "price": 16
-      },
-      {
-        "name": "Frytki z serem (150g)",
-        "price": 14
-      },
-      {
-        "name": "Frytki z serem (300g)",
-        "price": 17
-      }
-    ]
-  },
-  {
-    "category": "Napoje",
-    "items": [
-      {
-        "name": "Coca-Cola 0,3L",
-        "price": 6
-      },
-      {
-        "name": "Coca-Cola Zero 0,3L",
-        "price": 6
-      },
-      {
-        "name": "Coca-Cola 0,5L",
-        "price": 7
-      },
-      {
-        "name": "Coca-Cola Zero 0,5L",
-        "price": 7
-      },
-      {
-        "name": "Fanta 0,5L",
-        "price": 7
-      },
-      {
-        "name": "Sprite 0,5L",
-        "price": 7
-      },
-      {
-        "name": "Kropla Beskidu 0,5L (gazowana/nie)",
-        "price": 6
-      },
-      {
-        "name": "Sok Tymbark 1L",
-        "price": 9
-      },
-      {
-        "name": "Red Bull",
-        "price": 10
-      },
-      {
-        "name": "Lemoniada sezonowa",
-        "price": 9
       }
     ]
   }

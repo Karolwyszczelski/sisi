@@ -5,6 +5,7 @@ import Header from '@/components/Header';
 import Image from 'next/image';
 import CartButton from '@/components/CartButton';
 import CartPopup from '@/components/menu/CartPopup';
+import CheckoutModal from '@/components/menu/CheckoutModal';
 
 export const metadata: Metadata = {
   title: 'SISI Ordering',
@@ -52,19 +53,26 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           priority
         />
 
-<Image
-  src="/grafittiburger2.jpg"
-  alt="Tło graffiti"
-  fill
-  className="object-cover opacity-20 pointer-events-none select-none -z-10"
-/>
+        {/* 🎨 Graffiti */}
+        <Image
+          src="/grafittiburger2.jpg"
+          alt="Tło graffiti"
+          fill
+          className="object-cover opacity-20 pointer-events-none select-none -z-10"
+        />
 
+        {/* 🔝 Nagłówek */}
         <Header />
+
+        {/* 🔻 Strona */}
         {children}
 
         {/* 🛒 Koszyk zawsze widoczny */}
         <CartButton />
         <CartPopup />
+
+        {/* ✅ Modal zamówienia – raz na całą aplikację */}
+        <CheckoutModal />
       </body>
     </html>
   );
