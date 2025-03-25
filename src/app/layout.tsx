@@ -1,11 +1,8 @@
 import './globals.css';
 import type { Metadata } from 'next';
 import { Montserrat, Covered_By_Your_Grace, Smooch, Anton } from 'next/font/google';
-import Header from '@/components/Header';
+import ClientWrapper from '@/components/ClientWrapper';
 import Image from 'next/image';
-import CartButton from '@/components/CartButton';
-import CartPopup from '@/components/menu/CartPopup';
-import CheckoutModal from '@/components/menu/CheckoutModal';
 
 export const metadata: Metadata = {
   title: 'SISI Ordering',
@@ -61,18 +58,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           className="object-cover opacity-20 pointer-events-none select-none -z-10"
         />
 
-        {/* 🔝 Nagłówek */}
-        <Header />
-
-        {/* 🔻 Strona */}
-        {children}
-
-        {/* 🛒 Koszyk zawsze widoczny */}
-        <CartButton />
-        <CartPopup />
-
-        {/* ✅ Modal zamówienia – raz na całą aplikację */}
-        <CheckoutModal />
+        {/* 🔝 Wszystkie komponenty klientowe */}
+        <ClientWrapper>
+          {children}
+        </ClientWrapper>
+        
       </body>
     </html>
   );

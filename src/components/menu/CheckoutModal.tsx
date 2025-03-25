@@ -7,7 +7,7 @@ import useCartStore from '@/store/cartStore';
 import { createClient } from '@supabase/supabase-js';
 import QRCode from 'react-qr-code';
 import Script from 'next/script';
-import AddressAutocomplete from '@/components/AddressAutocomplete';
+import AddressAutocomplete from '@/components/menu/AddressAutocomplete';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -111,13 +111,12 @@ export default function CheckoutModal() {
   };
 
   return (
-    <>
-      <Script
-        src={`https://maps.googleapis.com/maps/api/js?key=${process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}&libraries=places`}
-        strategy="beforeInteractive"
-      />
-      <div className="fixed inset-0 z-50 bg-black bg-opacity-80 flex items-center justify-center p-4">
-        <div className="bg-white text-black rounded-xl shadow-lg w-full max-w-md relative px-6 py-8">
+  <>
+    <Script
+      src={https://maps.googleapis.com/maps/api/js?key=${process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}&libraries=places}
+      strategy="beforeInteractive"
+    />
+    <div className="fixed inset-0 z-50 bg-black bg-opacity-80 flex items-center justify-center p-4">
           {!orderSent && (
             <button
               onClick={closeCheckoutModal}
@@ -145,6 +144,7 @@ export default function CheckoutModal() {
             </div>
           ) : (
             <>
+
               {/* Krok 1 – wybór sposobu odbioru */}
               {checkoutStep === 1 && (
                 <>
@@ -160,9 +160,9 @@ export default function CheckoutModal() {
                         <button
                           key={option}
                           onClick={() => setSelectedOption(option as any)}
-                          className={`flex flex-col items-center justify-center p-4 rounded-lg border ${
+                          className={flex flex-col items-center justify-center p-4 rounded-lg border ${
                             selectedOption === option ? 'bg-yellow-400 text-black' : 'bg-gray-100 text-gray-700'
-                          }`}
+                          }}
                         >
                           <Icon size={24} />
                           <span className="text-sm mt-1">{label}</span>
@@ -323,25 +323,36 @@ export default function CheckoutModal() {
         <div key={index} className="border p-3 rounded-md bg-gray-50 relative">
           <div className="flex justify-between items-center font-semibold mb-2">
             <span>{item.name} x{item.quantity || 1}</span>
-            <span>{((item.price + (item.addons?.length || 0) * 3 + (item.extraMeatCount || 0) * 10) * (item.quantity || 1)).toFixed(2)} zł</span>
+            <span>
+              {(
+                (item.price +
+                  (item.addons?.length || 0) * 3 +
+                  (item.extraMeatCount || 0) * 10) * (item.quantity || 1)
+              ).toFixed(2)} zł
+            </span>
           </div>
 
           <div className="text-xs text-gray-700 space-y-2">
+            {/* Mięso */}
             <div className="font-semibold">Mięso:</div>
             <div className="flex gap-2">
               <button
-                className={`px-2 py-1 rounded-md text-xs ${item.meatType === 'wołowina' ? 'bg-yellow-300' : 'bg-gray-200'}`}
+                className={px-2 py-1 rounded-md text-xs ${item.meatType === 'wołowina' ? 'bg-yellow-300' : 'bg-gray-200'}}
                 onClick={() => changeMeatType(item.name, 'wołowina')}
               >Wołowina</button>
               <button
-                className={`px-2 py-1 rounded-md text-xs ${item.meatType === 'kurczak' ? 'bg-yellow-300' : 'bg-gray-200'}`}
+                className={px-2 py-1 rounded-md text-xs ${item.meatType === 'kurczak' ? 'bg-yellow-300' : 'bg-gray-200'}}
                 onClick={() => changeMeatType(item.name, 'kurczak')}
               >Kurczak</button>
             </div>
 
+            {/* Dodatki */}
             <div className="font-semibold mt-2">Dodatki:</div>
             <div className="flex flex-wrap gap-2">
-              {["Ser", "Bekon", "Jalapeño", "Ogórek", "Rukola", "Czerwona cebula"].map((addon) => (
+              {[
+                "Ser", "Bekon", "Jalapeño", "Ogórek", "Rukola", "Czerwona cebula",
+                "Pomidor", "Pikle", "Nachosy", "Konfitura z cebuli", "Gruszka", "Płynny ser"
+              ].map((addon) => (
                 <button
                   key={addon}
                   onClick={() =>
@@ -349,13 +360,40 @@ export default function CheckoutModal() {
                       ? removeAddon(item.name, addon)
                       : addAddon(item.name, addon)
                   }
-                  className={`border text-xs px-2 py-1 rounded-md ${item.addons?.includes(addon) ? 'bg-gray-800 text-white' : 'bg-white text-black'}`}
+                  className={border text-xs px-2 py-1 rounded-md ${
+                    item.addons?.includes(addon)
+                      ? 'bg-gray-800 text-white'
+                      : 'bg-white text-black'
+                  }}
                 >
-                  {item.addons?.includes(addon) ? `✓ ${addon}` : `+ ${addon}`}
+                  {item.addons?.includes(addon) ? ✓ ${addon} : + ${addon}}
                 </button>
               ))}
             </div>
 
+            {/* Dodatkowe mięso */}
+            <div className="font-semibold mt-2">Dodatkowe mięso:</div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => addExtraMeat(item.name)}
+                className="px-2 py-1 text-xs bg-gray-200 rounded-md"
+              >
+                +1 mięso (+10 zł)
+              </button>
+              {item.extraMeatCount > 0 && (
+                <button
+                  onClick={() => removeExtraMeat(item.name)}
+                  className="px-2 py-1 text-xs bg-red-200 rounded-md"
+                >
+                  Usuń mięso
+                </button>
+              )}
+              <span className="text-xs text-gray-600">
+                Ilość: {item.extraMeatCount || 0}
+              </span>
+            </div>
+
+            {/* Wymiana składników */}
             <div className="font-semibold mt-2">Wymiana składnika:</div>
             <div className="flex flex-wrap gap-2">
               {item.swaps?.map((sw, i) => (
@@ -374,6 +412,7 @@ export default function CheckoutModal() {
               ))}
             </div>
 
+            {/* Notatka */}
             <textarea
               className="w-full text-xs border rounded-md px-2 py-1 mt-2"
               placeholder="Notatka do produktu"
@@ -382,20 +421,26 @@ export default function CheckoutModal() {
             />
           </div>
 
+          {/* Usuń */}
           <div className="flex justify-end items-center mt-2 gap-2">
             <button
               onClick={() => handleRemoveOneItem(index)}
               className="text-xs text-red-600 underline"
-            >Usuń 1 szt.</button>
+            >
+              Usuń 1 szt.
+            </button>
             <button
               onClick={() => handleRemoveWholeItem(index)}
               className="text-xs text-red-600 underline"
-            >Usuń produkt</button>
+            >
+              Usuń produkt
+            </button>
           </div>
         </div>
       ))}
     </div>
 
+    {/* Podsumowanie cenowe */}
     <div className="mt-4 text-sm space-y-1">
       <div className="flex justify-between">
         <span>Suma produktów:</span>
@@ -413,6 +458,7 @@ export default function CheckoutModal() {
       </div>
     </div>
 
+    {/* Płatność */}
     <h3 className="text-md font-semibold mt-4">Metoda płatności:</h3>
     <div className="flex gap-2 mt-2">
       {['Gotówka', 'Terminal', 'Online'].map((method) => {
@@ -420,8 +466,13 @@ export default function CheckoutModal() {
         return (
           <button
             key={method}
-            onClick={() => setPaymentMethod(method)}
-            className={`px-4 py-2 rounded-md font-semibold ${isSelected ? 'bg-green-500 text-white' : 'bg-gray-200 text-black hover:bg-gray-300'}`}
+            onClick={() => {
+              setPaymentMethod(method);
+              setShowConfirmation(false); // resetuj po zmianie metody
+            }}
+            className={px-4 py-2 rounded-md font-semibold ${
+              isSelected ? 'bg-green-500 text-white' : 'bg-gray-200 text-black hover:bg-gray-300'
+            }}
           >
             {method}
           </button>
@@ -429,6 +480,7 @@ export default function CheckoutModal() {
       })}
     </div>
 
+    {/* Potwierdzenie płatności */}
     {paymentMethod && (
       !showConfirmation ? (
         <button
@@ -455,12 +507,3 @@ export default function CheckoutModal() {
     </button>
   </>
 )}
-
-
-            </>
-          )}
-        </div>
-      </div>
-    </>
-  );
-}
