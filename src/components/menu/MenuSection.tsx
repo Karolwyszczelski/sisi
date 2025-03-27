@@ -26,7 +26,7 @@ export default function MenuSection() {
   return (
     <section
       id="menu"
-      className="relative pt-120 pb-20 px-6 md:px-20 text-white overflow-hidden mt-[-110px]"
+      className="relative pt-120 pb-20 px-6 md:px-20 text-white overflow-hidden"
       style={{
         backgroundImage: "url('/graffitiburger2.png')",
         backgroundPosition: 'center top',
@@ -51,7 +51,7 @@ export default function MenuSection() {
           subcategories={subcategories}
         />
 
-        <div className="grid gap-6 mt-8 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-6 mt-8 sm:grid-cols-2 lg:grid-cols-4">
           {products.map((product, index) => (
             <ProductCard
               key={index}

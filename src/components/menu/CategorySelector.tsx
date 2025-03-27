@@ -15,7 +15,7 @@ export default function CategorySelector({
   setSelectedSubcategory,
   subcategories,
 }: CategorySelectorProps) {
-  const categories = ['Burger', 'Pancake', 'Kids', 'Dodatki', 'Napoje'];
+  const categories = ['Burger', 'Pancake', 'Kids', 'Frytki', 'Napoje'];
 
   return (
     <div className="flex flex-wrap gap-3">

@@ -6,6 +6,15 @@ body {
   @apply bg-[#fff800] text-black font-sans;
 }
 
+.icon-plus path, 
+.icon-check path {
+  fill: #000 !important;
+  stroke: #000 !important;
+  display: inline !important;
+  opacity: 1 !important;
+}
+
+
 @layer utilities {
   .font-permanent-marker {
     font-family: var(--font-permanent-marker);

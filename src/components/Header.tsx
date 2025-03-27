@@ -1,31 +1,40 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { Phone, ShoppingCart, Menu, X } from 'lucide-react';
-import Image from 'next/image';
+import { useState } from "react";
+import { Menu, X } from "lucide-react";
+import Image from "next/image";
 
 export default function Header() {
   const [isOpen, setIsOpen] = useState(false);
 
   return (
-    <header className="relative bg-transparent w-full z-50">
-      <div className="max-w-7xl mx-auto px-6 pt-4 pb-3 flex justify-between items-center relative z-50">
+    <header className="absolute top-0 w-full z-50 bg-transparent">
+      {/* Górny pasek (logo, itp.) */}
+      <div className="max-w-7xl mx-auto px-6 pt-4 pb-3 flex justify-between items-center">
         {/* Logo */}
         <div className="flex items-center gap-2">
           <Image src="/logo.png" alt="SISI Logo" width={70} height={70} />
         </div>
 
         {/* Desktop Nav */}
-        <nav className="hidden md:flex gap-4 items-center font-small text-black text-sm bg-white px-4 py-1 rounded-lg shadow">
-          <a href="#menu" className="hover:text-red-300 transition">Menu</a>
-          <a href="#polityka" className="hover:text-red-300 transition">Polityka Prywatności</a>
-          <a href="#regulamin" className="hover:text-red-300 transition">Regulamin</a>
-          <a href="tel:+48515433488" className="p-2 bg-black text-white rounded-full hover:scale-105 transition">
-            <Phone className="w-4 h-4" />
+        <nav className="hidden md:flex gap-4 items-center text-sm text-white px-6 py-1">
+          <a href="#menu" className="hover:text-yellow-400 transition">
+            Menu
           </a>
-          <button className="p-2 bg-black text-white rounded-full hover:scale-105 transition">
-            <ShoppingCart className="w-4 h-4" />
-          </button>
+          <a href="#polityka" className="hover:text-yellow-400 transition">
+            Polityka Prywatności
+          </a>
+          <a href="#regulamin" className="hover:text-yellow-400 transition">
+            Regulamin
+          </a>
+
+          {/* Numer telefonu (białe tło, żółty tekst) */}
+          <a
+            href="tel:+48515433488"
+            className="px-2 py-1 bg-white text-yellow-400 font-bold rounded hover:scale-100 transition"
+          >
+            515 433 488
+          </a>
         </nav>
 
         {/* Mobile Menu Icon */}
@@ -38,20 +47,39 @@ export default function Header() {
 
       {/* Mobile Menu */}
       {isOpen && (
-        <div className="absolute top-full left-0 w-full bg-white px-4 py-4 flex flex-col gap-3 font-medium text-black shadow-md md:hidden z-40">
-          <a href="#menu" className="hover:text-red-500 transition">Menu</a>
-          <a href="#polityka" className="hover:text-red-500 transition">Polityka Prywatności</a>
-          <a href="#regulamin" className="hover:text-red-500 transition">Regulamin</a>
-          <a href="tel:+48515433488" className="flex items-center gap-2 text-black hover:text-red-500 transition">
-            <Phone className="w-5 h-5" /> Zadzwoń
+        <div className="absolute top-full left-0 w-full bg-black px-4 py-4 flex flex-col gap-3 font-medium text-white shadow-md md:hidden">
+          <a
+            href="#menu"
+            className="hover:text-yellow-400 transition"
+            onClick={() => setIsOpen(false)}
+          >
+            Menu
           </a>
-          <button className="flex items-center gap-2 text-black hover:text-red-500 transition">
-            <ShoppingCart className="w-5 h-5" /> Koszyk
-          </button>
+          <a
+            href="#polityka"
+            className="hover:text-yellow-400 transition"
+            onClick={() => setIsOpen(false)}
+          >
+            Polityka Prywatności
+          </a>
+          <a
+            href="#regulamin"
+            className="hover:text-yellow-400 transition"
+            onClick={() => setIsOpen(false)}
+          >
+            Regulamin
+          </a>
+
+          {/* Numer telefonu (białe tło, żółty tekst) w mobile */}
+          <a
+            href="tel:+48515433488"
+            className="w-fit px-2 py-1 bg-white text-yellow-400 font-bold rounded hover:scale-105 transition"
+            onClick={() => setIsOpen(false)}
+          >
+            515 433 488
+          </a>
         </div>
       )}
     </header>
   );
 }
-
-
