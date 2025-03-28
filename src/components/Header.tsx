@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Menu, X } from "lucide-react";
 import Image from "next/image";
+import { Phone } from 'lucide-react';
 
 export default function Header() {
   const [isOpen, setIsOpen] = useState(false);
@@ -17,7 +18,7 @@ export default function Header() {
         </div>
 
         {/* Desktop Nav */}
-        <nav className="hidden md:flex gap-4 items-center text-sm text-white px-6 py-1">
+        <nav className="hidden md:flex gap-4 items-center text-sm text-black px-6 py-1">
           <a href="#menu" className="hover:text-yellow-400 transition">
             Menu
           </a>
@@ -28,13 +29,14 @@ export default function Header() {
             Regulamin
           </a>
 
-          {/* Numer telefonu (białe tło, żółty tekst) */}
-          <a
-            href="tel:+48515433488"
-            className="px-2 py-1 bg-white text-yellow-400 font-bold rounded hover:scale-100 transition"
-          >
-            515 433 488
-          </a>
+          {/* Numer telefonu (czarne tło, żółty tekst) */}
+<a
+  href="tel:+48515433488"
+  className="flex items-center px-2 py-2 bg-black text-yellow-400 font-bold rounded hover:scale-100 transition"
+>
+  <Phone className="w-5 h-5 mr-2" />
+  515 433 488
+</a>
         </nav>
 
         {/* Mobile Menu Icon */}

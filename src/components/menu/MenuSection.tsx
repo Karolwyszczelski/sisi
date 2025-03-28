@@ -8,7 +8,7 @@ import menu from '../../data/product.json';
 
 export default function MenuSection() {
   const [selectedCategory, setSelectedCategory] = useState('Burger');
-  const [selectedSubcategory, setSelectedSubcategory] = useState<string | null>(null);
+  const [selectedSubcategory, setSelectedSubcategory] = useState("100% Wołowina");
 
   const categoryData = menu.find((cat) => cat.category === selectedCategory);
   const subcategories = categoryData?.subcategories

@@ -1,6 +1,7 @@
 "use client";
 
 import { Facebook, Instagram } from "lucide-react";
+import { Gochi_Hand } from 'next/font/google';
 
 export default function Hero() {
   return (
@@ -8,18 +9,17 @@ export default function Hero() {
       className="relative w-full h-screen overflow-hidden bg-no-repeat"
       style={{
         backgroundImage: "url('/tloburger.png')",
-        backgroundSize: "100%",
+        backgroundSize: "120%",
         backgroundPosition: "right -100px",
+        animation: "gentleShake 5s ease-in-out infinite",
       }}
     >
+      {/* Główna treść hero */}
       <div className="max-w-4xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4 md:gap-6 relative z-20 h-full pt-20 px-4">
-        {/* Lewa część pusta, by przesunąć tekst na prawo */}
         <div className="w-full md:w-1/2" />
-
-        {/* Tekst po prawej */}
         <div className="w-full md:w-1/2 flex flex-col items-center text-center">
-          <h1 className="text-[250px] leading-[0.8] font-covered tracking-black uppercase mb-1 drop-shadow-2xl">
-            sisi
+          <h1 className="text-[250px] leading-[0.8] font-covered tracking-extrabold uppercase mb-1 drop-shadow-2xl">
+            SISI
           </h1>
           <h2 className="text-2xl md:text-3xl font-black mb-2 drop-shadow-md">
             BURGER &amp; PANCAKE

@@ -53,28 +53,45 @@ body {
     }
   }
 
-  .animate-slide-in-right {
-    animation: slideInRight 1s ease-out forwards;
+  @keyframes gentleShake {
+    0% {
+      background-position: right -100px top -100px;
+    }
+    25% {
+      background-position: right -102px top -98px; /* minimalne przesunięcie */
+    }
+    50% {
+      background-position: right -98px top -102px; /* minimalne przesunięcie */
+    }
+    75% {
+      background-position: right -101px top -99px; /* minimalne przesunięcie */
+    }
+    100% {
+      background-position: right -100px top -100px;
+    }
   }
 
-  .animate-fade-down {
-    animation: fadeDown 0.8s ease-out forwards;
+  @keyframes gentleShake2 {
+    0% {
+      background-position: right -100px top -700px;   /* -100 -> -150 */
+    }
+    25% {
+      background-position: right -102px top -700px;   /* -98  -> -148 */
+    }
+    50% {
+      background-position: right -98px top -700px;    /* -102 -> -152 */
+    }
+    75% {
+      background-position: right -101px top -700px;   /* -99  -> -149 */
+    }
+    100% {
+      background-position: right -100px top -700px;   /* -100 -> -150 */
+    }
   }
+  
+  
 
-  .animate-delay-1 {
-    animation-delay: 0.2s;
-  }
-  .animate-delay-2 {
-    animation-delay: 0.4s;
-  }
-  .animate-delay-3 {
-    animation-delay: 0.6s;
-  }
-  .animate-delay-4 {
-    animation-delay: 0.8s;
-  }
-
-  .animate-fadeIn {
-    animation: fadeIn 0.5s ease-in-out;
+  .gochi-hand {
+    font-family: 'Gochi Hand', cursive;
   }
 }
