@@ -1,9 +1,12 @@
-import { supabase } from '@/lib/supabase';
-import AdminClient from './AdminClient';
+import { supabaseServer } from '@/lib/supabaseServer';
 import AdminLogin from './AdminLogin';
+import AdminClient from './AdminClient';
+import EmployeeClient from './EmployeeClient';
 
 export default async function AdminPage() {
-  // 1. Pobierz informacje o zalogowanym userze
+  const supabase = supabaseServer();
+
+  // Pobieramy dane o zalogowanym użytkowniku
   const {
     data: { user },
     error,
@@ -13,11 +16,27 @@ export default async function AdminPage() {
     console.error('Błąd pobierania usera:', error);
   }
 
-  // 2. Jeśli user jest zalogowany -> pokaż panel
-  //    Jeśli nie -> pokaż formularz logowania
-  if (user) {
-    return <AdminClient />;
-  } else {
+  // Jeśli nie ma zalogowanego użytkownika, wyświetlamy formularz logowania
+  if (!user) {
     return <AdminLogin />;
   }
+
+  // Pobieramy profil użytkownika (jego rolę) z tabeli 'profiles'
+  const { data: profile, error: profileError } = await supabase
+    .from('profiles')
+    .select('role')
+    .eq('id', user.id)
+    .single();
+
+  if (profileError) {
+    console.error('Błąd pobierania profilu:', profileError);
+    // W przypadku błędu traktujemy użytkownika jako pracownika
+    return <EmployeeClient />;
+  }
+
+  const role = profile?.role || 'employee';
+
+  // Jeśli użytkownik ma rolę 'manager', wyświetlamy panel administratora,
+  // w przeciwnym razie (employee) wyświetlamy panel pracownika.
+  return role === 'manager' ? <AdminClient /> : <EmployeeClient />;
 }

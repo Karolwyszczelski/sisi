@@ -1,13 +1,18 @@
+// app/api/orders/[id]/route.ts
 import { NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
+import { supabaseServer } from '@/lib/supabaseServer';
 
-export async function PATCH(request: Request, { params }: { params: { id: string } }) {
+export async function PATCH(
+  request: Request,
+  { params }: { params: { id: string } }
+) {
   try {
     const { id } = params;
-    const body = await request.json(); // oczekujemy np. { status: "accepted", deliveryTime: "30 min" }
+    const body = await request.json();
     const { status, deliveryTime } = body;
 
-    const { data, error } = await supabase
+    // Aktualizujemy zamówienie w tabeli "orders"
+    const { data, error } = await supabaseServer()
       .from('orders')
       .update({ status, delivery_time: deliveryTime })
       .eq('id', id)
@@ -16,7 +21,8 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
-    return NextResponse.json({ data });
+
+    return NextResponse.json({ data }, { status: 200 });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }

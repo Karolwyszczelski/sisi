@@ -1,18 +1,22 @@
-'use client';
+"use client";
 
+import { usePathname } from 'next/navigation';
 import CartButton from './CartButton';
 import CartPopup from './menu/CartPopup';
 import CheckoutModal from './menu/CheckoutModal';
 import Header from './Header';
 
 export default function ClientWrapper({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  const isAdminRoute = pathname.startsWith('/admin');
+
   return (
     <>
-      <Header />
+      {!isAdminRoute && <Header />}
       {children}
-      <CartButton />
-      <CartPopup />
-      <CheckoutModal />
+      {!isAdminRoute && <CartButton />}
+      {!isAdminRoute && <CartPopup />}
+      {!isAdminRoute && <CheckoutModal />}
     </>
   );
 }
