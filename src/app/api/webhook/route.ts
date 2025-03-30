@@ -1,4 +1,3 @@
-
 import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 
@@ -13,15 +12,30 @@ export async function POST(req: Request) {
     console.log('[Webhook] Odebrano dane od Przelewy24:', data);
 
     const orderId = data.orderId || data.sessionId || data.id;
-    const status = data.status || 'paid';
+    // Ustawiamy domyślny status na "new" jeśli nie jest przesłany
+    const status = data.status || 'new';
+
+    // Nowe pola - upewnij się, że istnieją w tabeli:
+    //   address, phone, products, total_price
+    const address = data.address || "";
+    const phone = data.phone || "";
+    const products = data.products || "";
+    const total_price = data.total_price || 0;
 
     if (!orderId) {
       return NextResponse.json({ error: 'Brak orderId' }, { status: 400 });
     }
 
+    // Aktualizujemy rekord zamówienia, ustawiając dodatkowe kolumny
     const { error } = await supabase
       .from('orders')
-      .update({ status: status })
+      .update({
+        status,
+        address,
+        phone,
+        products,
+        total_price
+      })
       .eq('id', orderId);
 
     if (error) {

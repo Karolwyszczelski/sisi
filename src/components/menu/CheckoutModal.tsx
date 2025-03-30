@@ -87,6 +87,21 @@ export default function CheckoutModal() {
 
   // *** Obsługa zamówienia ***
   const handleSubmitOrder = async () => {
+    const baseTotal = items.reduce((acc, item) => {
+      const quantity = item.quantity || 1;
+      const addonsCost = (item.addons?.length || 0) * 3;
+      const extraMeatCost = (item.extraMeatCount || 0) * 10;
+      return acc + (item.price + addonsCost + extraMeatCost) * quantity;
+    }, 0);
+  
+    const packagingCost =
+      selectedOption === "takeaway" || selectedOption === "delivery" ? 2 : 0;
+    const totalWithPackaging = baseTotal + packagingCost;
+  
+    console.log("Base Total:", baseTotal);
+    console.log("Packaging Cost:", packagingCost);
+    console.log("Total with Packaging:", totalWithPackaging);
+  
     const orderData = {
       items: items.map((item, i) => ({
         ...item,
@@ -103,20 +118,28 @@ export default function CheckoutModal() {
       postal_code: selectedOption === "delivery" ? postalCode : null,
       city: selectedOption === "delivery" ? city : null,
       flat_number: selectedOption === "delivery" ? flatNumber : null,
+      total_price: totalWithPackaging,
+      products: items.map((item) => item.name).join(", "),
+      address:
+        selectedOption === "delivery"
+          ? `${street}, ${city}, ${postalCode}${flatNumber ? `, ${flatNumber}` : ""}`
+          : null,
       created_at: new Date().toISOString(),
       status: paymentMethod === "Online" ? "pending" : "placed",
     };
-
+  
+    console.log("Order Data przed wysłaniem:", orderData);
+  
     const { error } = await supabase.from("orders").insert([orderData]);
     if (error) {
       console.error("Błąd przy zapisie zamówienia:", error.message);
       return;
     }
-
-    // Po udanym zamówieniu
+  
     clearCart();
     setOrderSent(true);
   };
+  
 
   const handleOnlinePayment = () => {
     // Przekierowanie na zewnętrzną bramkę płatności
