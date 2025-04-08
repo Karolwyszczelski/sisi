@@ -8,8 +8,8 @@ import { createClient } from "@supabase/supabase-js";
 import QRCode from "react-qr-code";
 import Script from "next/script";
 import AddressAutocomplete from "@/components/menu/AddressAutocomplete";
+import { useSession } from "@supabase/auth-helpers-react";
 
-// Inicjalizacja Supabase (upewnij się, że masz skonfigurowane zmienne środowiskowe)
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -17,6 +17,10 @@ const supabase = createClient(
 
 export default function CheckoutModal() {
   const isClient = useIsClient();
+  // Pobieramy bezpośrednio obiekt sesji
+  const session = useSession();
+  const isLoggedIn = !!session?.user;
+
   const {
     isCheckoutOpen,
     closeCheckoutModal: originalCloseCheckoutModal,
@@ -35,73 +39,90 @@ export default function CheckoutModal() {
     swapIngredient,
   } = useCartStore();
 
-  // *** Lokalny stan ***
-  const [selectedOption, setSelectedOption] = useState<
-    "local" | "takeaway" | "delivery" | null
-  >(null);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  // Stan dla notatek przy produktach
+  const [notes, setNotes] = useState<{ [key: number]: string }>({});
+
+  // Pola logowania (dla niezalogowanych)
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+
+  // Pola danych osobowych (dla niezalogowanych)
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
+  const [contactEmail, setContactEmail] = useState("");
+
+  // Pola adresowe
   const [street, setStreet] = useState("");
   const [postalCode, setPostalCode] = useState("");
   const [city, setCity] = useState("");
   const [flatNumber, setFlatNumber] = useState("");
-  const [contactEmail, setContactEmail] = useState("");
+
+  // Dla opcji "local" lub "takeaway" – opcjonalny adres
+  const [optionalAddress, setOptionalAddress] = useState("");
+
+  // Pozostałe stany
   const [paymentMethod, setPaymentMethod] = useState("");
   const [orderSent, setOrderSent] = useState(false);
   const [showConfirmation, setShowConfirmation] = useState(false);
-  const [notes, setNotes] = useState<{ [key: number]: string }>({});
+  const [selectedOption, setSelectedOption] = useState<"local" | "takeaway" | "delivery" | null>(null);
 
-  // *** Dodajemy stan do przełączania animacji / napisu ***
   const [showBurger, setShowBurger] = useState(true);
-
   useEffect(() => {
-    // Przełącz co 2 sekundy
-    const interval = setInterval(() => {
-      setShowBurger((prev) => !prev);
-    }, 2000);
-
+    const interval = setInterval(() => setShowBurger(prev => !prev), 2000);
     return () => clearInterval(interval);
   }, []);
 
-  // *** Własna wersja closeCheckoutModal z resetem stanu ***
+  // Jeśli użytkownik jest zalogowany – prefillujemy dane z profilu
+  useEffect(() => {
+    if (isLoggedIn && session) {
+      setName(session.user.user_metadata?.full_name || "");
+      setPhone(session.user.user_metadata?.phone || "");
+      setContactEmail(session.user.email || "");
+      setStreet(session.user.user_metadata?.street || "");
+      setPostalCode(session.user.user_metadata?.postal_code || "");
+      setCity(session.user.user_metadata?.city || "");
+      setFlatNumber(session.user.user_metadata?.flat_number || "");
+    }
+  }, [isLoggedIn, session]);
+
   const closeCheckoutModal = () => {
-    originalCloseCheckoutModal(); // wywołaj oryginalną logikę (setIsCheckoutOpen(false) w store)
+    originalCloseCheckoutModal();
     setOrderSent(false);
     goToStep(1);
   };
 
-  // *** Obliczenia cen ***
+  // Obliczenie cen
   const baseTotal = items.reduce((acc, item) => {
     const quantity = item.quantity || 1;
     const addonsCost = (item.addons?.length || 0) * 3;
     const extraMeatCost = (item.extraMeatCount || 0) * 10;
     return acc + (item.price + addonsCost + extraMeatCost) * quantity;
   }, 0);
-
+  
   const packagingCost =
     selectedOption === "takeaway" || selectedOption === "delivery" ? 2 : 0;
   const totalWithPackaging = baseTotal + packagingCost;
 
-  // *** Obsługa zamówienia ***
   const handleSubmitOrder = async () => {
-    const baseTotal = items.reduce((acc, item) => {
-      const quantity = item.quantity || 1;
-      const addonsCost = (item.addons?.length || 0) * 3;
-      const extraMeatCost = (item.extraMeatCount || 0) * 10;
-      return acc + (item.price + addonsCost + extraMeatCost) * quantity;
-    }, 0);
-  
-    const packagingCost =
-      selectedOption === "takeaway" || selectedOption === "delivery" ? 2 : 0;
-    const totalWithPackaging = baseTotal + packagingCost;
-  
-    console.log("Base Total:", baseTotal);
-    console.log("Packaging Cost:", packagingCost);
-    console.log("Total with Packaging:", totalWithPackaging);
-  
+    if (isLoggedIn) {
+      // Dla opcji delivery używamy dedykowanych pól adresowych; dla pozostałych pobieramy opcjonalny adres
+      const addressValue = selectedOption === "delivery" ? street : (optionalAddress || null);
+
+      const { error: updateError } = await supabase
+        .from("profiles")
+        .update({
+          full_name: name,
+          phone: phone,
+          address: addressValue,
+          postal_code: selectedOption === "delivery" ? postalCode : null,
+          city: selectedOption === "delivery" ? city : null,
+        })
+        .eq("id", session.user.id);
+      if (updateError) {
+        console.error("Błąd aktualizacji danych profilu:", updateError.message);
+      }
+    }
+
     const orderData = {
       items: items.map((item, i) => ({
         ...item,
@@ -110,64 +131,53 @@ export default function CheckoutModal() {
       })),
       selected_option: selectedOption,
       payment_method: paymentMethod,
-      user: isLoggedIn ? "janek_burger" : null,
-      name: !isLoggedIn ? name : null,
-      phone: !isLoggedIn ? phone : null,
-      contact_email: !isLoggedIn ? contactEmail : null,
-      street: selectedOption === "delivery" ? street : null,
+      user: isLoggedIn ? session.user.id : null,
+      // Teraz przekazujemy name, phone oraz contactEmail niezależnie od statusu logowania
+      name: name,
+      phone: phone,
+      contact_email: contactEmail,
+      street: selectedOption === "delivery" ? street : (optionalAddress || null),
       postal_code: selectedOption === "delivery" ? postalCode : null,
       city: selectedOption === "delivery" ? city : null,
       flat_number: selectedOption === "delivery" ? flatNumber : null,
       total_price: totalWithPackaging,
-      products: items.map((item) => item.name).join(", "),
+      items: JSON.stringify(items),
       address:
         selectedOption === "delivery"
           ? `${street}, ${city}, ${postalCode}${flatNumber ? `, ${flatNumber}` : ""}`
-          : null,
+          : optionalAddress || null,
       created_at: new Date().toISOString(),
       status: paymentMethod === "Online" ? "pending" : "placed",
     };
-  
-    console.log("Order Data przed wysłaniem:", orderData);
-  
-    const { error } = await supabase.from("orders").insert([orderData]);
+
+    console.log("Order Data przed wysłaniem do Supabase:", orderData);
+
+    const { error, data } = await supabase.from("orders").insert([orderData]).select();
+
     if (error) {
-      console.error("Błąd przy zapisie zamówienia:", error.message);
+      console.error("❌ Błąd przy zapisie zamówienia:", error.message);
       return;
     }
-  
+
+    console.log("✅ Supabase zwrócił dane:", data);
     clearCart();
     setOrderSent(true);
   };
-  
 
   const handleOnlinePayment = () => {
-    // Przekierowanie na zewnętrzną bramkę płatności
     window.location.href = "https://secure.przelewy24.pl/";
   };
 
-  // Funkcje usuwania z koszyka
-  const handleRemoveOneItem = (index: number) => removeItem(items[index].name);
-  const handleRemoveWholeItem = (index: number) =>
-    removeWholeItem(items[index].name);
-
-  // Zabezpieczenie przed SSR i gdy modal zamknięty
   if (!isClient || !isCheckoutOpen) return null;
 
   return (
     <>
-      {/* Załadowanie Google Maps API do AddressAutocomplete */}
       <Script
         src={`https://maps.googleapis.com/maps/api/js?key=${process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}&libraries=places`}
         strategy="beforeInteractive"
       />
-
-      {/* Główny kontener cieniujący tło */}
       <div className="fixed inset-0 z-50 bg-black bg-opacity-80 flex items-center justify-center p-4">
-        
-        {/* Wnętrze modala */}
         <div className="relative w-full max-w-md max-h-[80vh] overflow-y-auto bg-white p-6 rounded-md">
-          {/* Przycisk X – pojawia się tylko, gdy zamówienie jeszcze nie jest wysłane */}
           {!orderSent && (
             <button
               onClick={closeCheckoutModal}
@@ -176,38 +186,28 @@ export default function CheckoutModal() {
               <X />
             </button>
           )}
-
-          {/* Jeśli orderSent = true => ekran podziękowania */}
           {orderSent ? (
             <div className="text-center space-y-4">
               <h2 className="text-2xl font-bold">Dziękujemy za zamówienie!</h2>
-
-              {/* Animacja przełączana z napisem */}
               <div>
-              {showBurger ? (
-  <img
-    src="/animations/Animationburger.gif"
-    alt="Animacja burgera"
-    className="mx-auto w-40 h-40 object-contain"
-  />
-) : (
-  <p className="text-xl font-semibold text-yellow-600">
-    Twoje Zamówienie właśnie ląduje w kuchni...
+                {showBurger ? (
+                  <img
+                    src="/animations/Animationburger.gif"
+                    alt="Animacja burgera"
+                    className="mx-auto w-40 h-40 object-contain"
+                  />
+                ) : (
+                  <p className="text-xl font-semibold text-yellow-600">
+                    Twoje Zamówienie właśnie ląduje w kuchni...
                   </p>
                 )}
               </div>
-
-              {/* Kod QR wyśrodkowany */}
               <div className="flex justify-center">
                 <QRCode value="https://g.co/kgs/47NSDMH" size={140} />
               </div>
-
-              {/* Dwa przyciski na dole */}
               <div className="flex gap-4 justify-center mt-4">
                 <button
-                  onClick={() =>
-                    window.open("https://g.co/kgs/47NSDMH", "_blank")
-                  }
+                  onClick={() => window.open("https://g.co/kgs/47NSDMH", "_blank")}
                   className="py-2 px-4 bg-blue-500 text-white font-bold rounded-md"
                 >
                   Zostaw opinię
@@ -222,13 +222,9 @@ export default function CheckoutModal() {
             </div>
           ) : (
             <>
-
-              {/* KROK 1 – Sposób odbioru, logowanie */}
               {checkoutStep === 1 && (
                 <div>
-                  <h2 className="text-xl font-bold mb-4 text-center">
-                    Wybierz sposób odbioru
-                  </h2>
+                  <h2 className="text-xl font-bold mb-4 text-center">Wybierz sposób odbioru</h2>
                   <div className="grid grid-cols-3 gap-4 mb-6">
                     {["local", "takeaway", "delivery"].map((option) => {
                       const Icon =
@@ -238,19 +234,13 @@ export default function CheckoutModal() {
                           ? ShoppingBag
                           : Truck;
                       const label =
-                        option === "local"
-                          ? "Na miejscu"
-                          : option === "takeaway"
-                          ? "Na wynos"
-                          : "Dostawa";
+                        option === "local" ? "Na miejscu" : option === "takeaway" ? "Na wynos" : "Dostawa";
                       return (
                         <button
                           key={option}
                           onClick={() => setSelectedOption(option as any)}
                           className={`flex flex-col items-center justify-center p-4 rounded-lg border ${
-                            selectedOption === option
-                              ? "bg-yellow-400 text-black"
-                              : "bg-gray-100 text-gray-700"
+                            selectedOption === option ? "bg-yellow-400 text-black" : "bg-gray-100 text-gray-700"
                           }`}
                         >
                           <Icon size={24} />
@@ -259,7 +249,6 @@ export default function CheckoutModal() {
                       );
                     })}
                   </div>
-
                   <div className="flex flex-col gap-2">
                     {!isLoggedIn ? (
                       <>
@@ -278,7 +267,12 @@ export default function CheckoutModal() {
                           onChange={(e) => setPassword(e.target.value)}
                         />
                         <button
-                          onClick={() => setIsLoggedIn(true)}
+                          onClick={async () => {
+                            const { error } = await supabase.auth.signInWithPassword({ email, password });
+                            if (!error) {
+                              nextStep();
+                            }
+                          }}
                           className="w-full bg-yellow-400 py-2 rounded-md font-bold disabled:opacity-50"
                           disabled={!email || !password || !selectedOption}
                         >
@@ -293,24 +287,16 @@ export default function CheckoutModal() {
                         </button>
                       </>
                     ) : (
-                      <button
-                        onClick={nextStep}
-                        className="w-full bg-black text-white py-2 rounded-md"
-                      >
+                      <button onClick={nextStep} className="w-full bg-black text-white py-2 rounded-md">
                         Kontynuuj
                       </button>
                     )}
                   </div>
                 </div>
               )}
-
-              {/* KROK 2 – Dane kontaktowe (i ewentualny adres przy "delivery") */}
               {checkoutStep === 2 && (
                 <div>
-                  <h2 className="text-xl font-bold mb-4 text-center">
-                    Dane kontaktowe
-                  </h2>
-
+                  <h2 className="text-xl font-bold mb-4 text-center">Dane kontaktowe</h2>
                   {selectedOption === "delivery" && (
                     <>
                       <AddressAutocomplete
@@ -322,7 +308,6 @@ export default function CheckoutModal() {
                       <p className="text-xs text-gray-500 mt-1">
                         Wybierz adres z listy, aby uzupełnić dane
                       </p>
-
                       <div className="grid grid-cols-1 gap-2 mt-4">
                         <input
                           type="text"
@@ -355,8 +340,6 @@ export default function CheckoutModal() {
                       </div>
                     </>
                   )}
-
-                  {/* Pola wspólne */}
                   <input
                     type="text"
                     placeholder="Imię"
@@ -371,10 +354,16 @@ export default function CheckoutModal() {
                     value={phone}
                     onChange={(e) => setPhone(e.target.value)}
                   />
-
-                  {/* Email opcjonalnie przy local/takeaway */}
-                  {(selectedOption === "local" ||
-                    selectedOption === "takeaway") && (
+                  {(selectedOption === "local" || selectedOption === "takeaway") && (
+                    <input
+                      type="text"
+                      placeholder="Adres (opcjonalnie)"
+                      className="w-full mt-2 px-3 py-2 border rounded-md"
+                      value={optionalAddress}
+                      onChange={(e) => setOptionalAddress(e.target.value)}
+                    />
+                  )}
+                  {(selectedOption === "local" || selectedOption === "takeaway") && (
                     <input
                       type="email"
                       placeholder="Email"
@@ -383,7 +372,6 @@ export default function CheckoutModal() {
                       onChange={(e) => setContactEmail(e.target.value)}
                     />
                   )}
-
                   <div className="flex justify-between pt-4">
                     <button
                       onClick={() => goToStep(1)}
@@ -406,19 +394,12 @@ export default function CheckoutModal() {
                   </div>
                 </div>
               )}
-
-              {/* KROK 3 – Podsumowanie zamówienia, wybór płatności */}
               {checkoutStep === 3 && (
                 <div>
-                  <h2 className="text-xl font-bold mb-4 text-center">
-                    Podsumowanie zamówienia
-                  </h2>
+                  <h2 className="text-xl font-bold mb-4 text-center">Podsumowanie zamówienia</h2>
                   <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2 text-sm">
                     {items.map((item, index) => (
-                      <div
-                        key={index}
-                        className="border p-3 rounded-md bg-gray-50 relative"
-                      >
+                      <div key={index} className="border p-3 rounded-md bg-gray-50 relative">
                         <div className="flex justify-between items-center font-semibold mb-2">
                           <span>
                             {item.name} x{item.quantity || 1}
@@ -434,36 +415,25 @@ export default function CheckoutModal() {
                           </span>
                         </div>
                         <div className="text-xs text-gray-700 space-y-2">
-                          {/* Mięso */}
                           <div className="font-semibold">Mięso:</div>
                           <div className="flex gap-2">
                             <button
                               className={`px-2 py-1 rounded-md text-xs ${
-                                item.meatType === "wołowina"
-                                  ? "bg-yellow-300"
-                                  : "bg-gray-200"
+                                item.meatType === "wołowina" ? "bg-yellow-300" : "bg-gray-200"
                               }`}
-                              onClick={() =>
-                                changeMeatType(item.name, "wołowina")
-                              }
+                              onClick={() => changeMeatType(item.name, "wołowina")}
                             >
                               Wołowina
                             </button>
                             <button
                               className={`px-2 py-1 rounded-md text-xs ${
-                                item.meatType === "kurczak"
-                                  ? "bg-yellow-300"
-                                  : "bg-gray-200"
+                                item.meatType === "kurczak" ? "bg-yellow-300" : "bg-gray-200"
                               }`}
-                              onClick={() =>
-                                changeMeatType(item.name, "kurczak")
-                              }
+                              onClick={() => changeMeatType(item.name, "kurczak")}
                             >
                               Kurczak
                             </button>
                           </div>
-
-                          {/* Dodatki */}
                           <div className="font-semibold mt-2">Dodatki:</div>
                           <div className="flex flex-wrap gap-2">
                             {[
@@ -493,17 +463,11 @@ export default function CheckoutModal() {
                                     : "bg-white text-black"
                                 }`}
                               >
-                                {item.addons?.includes(addon)
-                                  ? `✓ ${addon}`
-                                  : `+ ${addon}`}
+                                {item.addons?.includes(addon) ? `✓ ${addon}` : `+ ${addon}`}
                               </button>
                             ))}
                           </div>
-
-                          {/* Dodatkowe mięso */}
-                          <div className="font-semibold mt-2">
-                            Dodatkowe mięso:
-                          </div>
+                          <div className="font-semibold mt-2">Dodatkowe mięso:</div>
                           <div className="flex items-center gap-2">
                             <button
                               onClick={() => addExtraMeat(item.name)}
@@ -523,17 +487,10 @@ export default function CheckoutModal() {
                               Ilość: {item.extraMeatCount || 0}
                             </span>
                           </div>
-
-                          {/* Wymiana składników */}
-                          <div className="font-semibold mt-2">
-                            Wymiana składnika:
-                          </div>
+                          <div className="font-semibold mt-2">Wymiana składnika:</div>
                           <div className="flex flex-wrap gap-2">
                             {item.swaps?.map((sw, i) => (
-                              <div
-                                key={i}
-                                className="bg-gray-200 text-xs px-2 py-1 rounded-md"
-                              >
+                              <div key={i} className="bg-gray-200 text-xs px-2 py-1 rounded-md">
                                 {sw.from} → {sw.to}
                               </div>
                             ))}
@@ -541,11 +498,7 @@ export default function CheckoutModal() {
                               <button
                                 key={i}
                                 onClick={() =>
-                                  swapIngredient(
-                                    item.name,
-                                    swapOption.from,
-                                    swapOption.to
-                                  )
+                                  swapIngredient(item.name, swapOption.from, swapOption.to)
                                 }
                                 className="bg-white border px-2 py-1 text-xs rounded-md hover:bg-gray-100"
                               >
@@ -553,8 +506,6 @@ export default function CheckoutModal() {
                               </button>
                             ))}
                           </div>
-
-                          {/* Notatka */}
                           <textarea
                             className="w-full text-xs border rounded-md px-2 py-1 mt-2"
                             placeholder="Notatka do produktu"
@@ -564,34 +515,23 @@ export default function CheckoutModal() {
                             }
                           />
                         </div>
-
-                        {/* Usuń */}
                         <div className="flex justify-end items-center mt-2 gap-2">
-                          <button
-                            onClick={() => handleRemoveOneItem(index)}
-                            className="text-xs text-red-600 underline"
-                          >
+                          <button onClick={() => removeItem(index)} className="text-xs text-red-600 underline">
                             Usuń 1 szt.
                           </button>
-                          <button
-                            onClick={() => handleRemoveWholeItem(index)}
-                            className="text-xs text-red-600 underline"
-                          >
+                          <button onClick={() => removeWholeItem(index)} className="text-xs text-red-600 underline">
                             Usuń produkt
                           </button>
                         </div>
                       </div>
                     ))}
                   </div>
-
-                  {/* Podsumowanie cenowe */}
                   <div className="mt-4 text-sm space-y-1">
                     <div className="flex justify-between">
                       <span>Suma produktów:</span>
                       <span>{baseTotal.toFixed(2)} zł</span>
                     </div>
-                    {(selectedOption === "takeaway" ||
-                      selectedOption === "delivery") && (
+                    {(selectedOption === "takeaway" || selectedOption === "delivery") && (
                       <div className="flex justify-between">
                         <span>Opakowanie:</span>
                         <span>2.00 zł</span>
@@ -602,11 +542,7 @@ export default function CheckoutModal() {
                       <span>{totalWithPackaging.toFixed(2)} zł</span>
                     </div>
                   </div>
-
-                  {/* Wybór metody płatności */}
-                  <h3 className="text-md font-semibold mt-4">
-                    Metoda płatności:
-                  </h3>
+                  <h3 className="text-md font-semibold mt-4">Metoda płatności:</h3>
                   <div className="flex gap-2 mt-2">
                     {["Gotówka", "Terminal", "Online"].map((method) => {
                       const isSelected = paymentMethod === method;
@@ -628,32 +564,24 @@ export default function CheckoutModal() {
                       );
                     })}
                   </div>
-
-                  {/* Potwierdzenie płatności */}
                   {paymentMethod &&
                     (!showConfirmation ? (
                       <button
                         onClick={() => setShowConfirmation(true)}
                         className="w-full mt-4 bg-yellow-400 text-black py-2 rounded-md font-semibold"
                       >
-                        Potwierdź{" "}
-                        {paymentMethod === "Online"
-                          ? "płatność online"
-                          : "metodę płatności"}
+                        Potwierdź {paymentMethod === "Online" ? "płatność online" : "metodę płatności"}
                       </button>
                     ) : (
                       <button
                         onClick={
-                          paymentMethod === "Online"
-                            ? handleOnlinePayment
-                            : handleSubmitOrder
+                          paymentMethod === "Online" ? handleOnlinePayment : handleSubmitOrder
                         }
                         className="w-full mt-4 bg-green-600 text-white py-2 rounded-md font-semibold hover:bg-green-700"
                       >
                         ✅ Zamawiam i płacę ({paymentMethod})
                       </button>
                     ))}
-
                   <button
                     onClick={() => goToStep(2)}
                     className="mt-3 text-xs text-gray-500 underline hover:text-black"
