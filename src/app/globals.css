@@ -73,19 +73,19 @@ body {
 
   @keyframes gentleShake2 {
     0% {
-      background-position: right -100px top -700px;   /* -100 -> -150 */
+      background-position: right -100px top -750px;   /* -100 -> -150 */
     }
     25% {
-      background-position: right -102px top -700px;   /* -98  -> -148 */
+      background-position: right -102px top -750px;   /* -98  -> -148 */
     }
     50% {
-      background-position: right -98px top -700px;    /* -102 -> -152 */
+      background-position: right -98px top -750px;    /* -102 -> -152 */
     }
     75% {
-      background-position: right -101px top -700px;   /* -99  -> -149 */
+      background-position: right -101px top -750px;   /* -99  -> -149 */
     }
     100% {
-      background-position: right -100px top -700px;   /* -100 -> -150 */
+      background-position: right -100px top -750px;   /* -100 -> -150 */
     }
   }
   

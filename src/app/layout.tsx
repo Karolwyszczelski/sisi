@@ -1,43 +1,52 @@
-import './globals.css';
-import type { Metadata } from 'next';
-import { Montserrat, Covered_By_Your_Grace, Smooch, Anton } from 'next/font/google';
-import ClientWrapper from '@/components/ClientWrapper';
-import Image from 'next/image';
-import CheckoutModalDynamic from '@/components/CheckoutModalDynamic';
+import "./globals.css";
+import type { Metadata } from "next";
+import {
+  Montserrat,
+  Covered_By_Your_Grace,
+  Smooch,
+  Anton,
+} from "next/font/google";
+import Image from "next/image";
+import CheckoutModalDynamic from "@/components/CheckoutModalDynamic";
+import ClientWrapper from "@/components/ClientWrapper";
+import ClientProvider from "@/components/ClientProvider";
+import FloatingAuthButtons from "@/components/FloatingLoginButton";
+
 
 export const metadata: Metadata = {
-  title: 'SISI Ordering',
-  description: 'Zamów najlepsze burgery i pancakes w Ciechanowie!',
+  title: "SISI Ordering",
+  description: "Zamów najlepsze burgery i pancakes w Ciechanowie!",
 };
 
 // Czcionki
 const montserrat = Montserrat({
-  subsets: ['latin'],
-  weight: ['400', '500', '700', '800','900'],
-  display: 'swap',
+  subsets: ["latin"],
+  weight: ["400", "500", "700", "800", "900"],
+  display: "swap",
 });
-
 const covered = Covered_By_Your_Grace({
-  subsets: ['latin'],
-  weight: '400',
-  variable: '--font-covered',
+  subsets: ["latin"],
+  weight: "400",
+  variable: "--font-covered",
 });
-
 const smooch = Smooch({
-  subsets: ['latin'],
-  weight: ['400'],
-  variable: '--font-smooch',
-  display: 'swap',
+  subsets: ["latin"],
+  weight: ["400"],
+  variable: "--font-smooch",
+  display: "swap",
 });
-
 const anton = Anton({
-  subsets: ['latin'],
-  weight: ['400'],
-  variable: '--font-anton',
-  display: 'swap',
+  subsets: ["latin"],
+  weight: ["400"],
+  variable: "--font-anton",
+  display: "swap",
 });
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <html lang="pl">
       <body
@@ -52,8 +61,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           overflow-x-hidden
         `}
       >
-
-        {/* 🎨 Graffiti */}
+        {/* Tło z grafiką */}
         <Image
           src="/grafittiburger2.jpg"
           alt=""
@@ -61,12 +69,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           className="object-cover opacity-20 pointer-events-none select-none -z-10"
         />
 
-        {/* 🔝 Wszystkie komponenty klientowe */}
-        <ClientWrapper>
-          {children}
-          {/* Modal wczytywany dynamicznie (bez SSR) */}
-          <CheckoutModalDynamic />
-        </ClientWrapper>
+        {/* Owiń aplikację w kontekst sesji */}
+        <ClientProvider>
+          <ClientWrapper>
+            {children}
+            <CheckoutModalDynamic />
+            <FloatingAuthButtons/>
+          </ClientWrapper>
+        </ClientProvider>
       </body>
     </html>
   );

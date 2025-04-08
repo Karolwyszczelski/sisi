@@ -1,10 +1,10 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react"
 import AcceptButton from "./AcceptButton";
-import EditOrderButton from "./EditOrderButton";
-import CancelButton from "./CancelButton";
-import CountdownTimer from "./CountdownTimer";
+import EditOrderButton from "@/components/EditOrderButton";
+import CancelButton from "@/components/CancelButton";
+import CountdownTimer from "@/components/CountdownTimer";
 import productsData from "@/data/product.json";
 
 /** Typ zamówienia */
