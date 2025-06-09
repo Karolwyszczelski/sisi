@@ -1,8 +1,10 @@
+// src/components/BurgerMiesiaca.tsx
 "use client";
 
 import Image from "next/image";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import useCartStore from "@/store/cartStore";
+import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 
 // Ikona plus (SVG)
 const PlusSVG = (
@@ -40,21 +42,55 @@ const CheckSVG = (
 
 export default function BurgerMiesiaca() {
   const { addItem } = useCartStore();
+  const supabase = createClientComponentClient();
+
+  // stan danych z Supabase
+  const [burgerName, setBurgerName] = useState<string>("");
+  const [burgerDesc, setBurgerDesc] = useState<string>("");
+  const [loading, setLoading] = useState<boolean>(true);
+
+  // stan przycisku
   const [added, setAdded] = useState(false);
 
+  // fetch z tabeli burger_of_month → pola name i description
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from("burger_of_month")
+        .select("name, description")
+        .eq("id", "current")
+        .single();
+
+      if (error) {
+        console.error("❌ Błąd pobierania burgera miesiąca:", error.message);
+      } else if (data) {
+        setBurgerName(data.name);
+        setBurgerDesc(data.description);
+      }
+      setLoading(false);
+    })();
+  }, [supabase]);
+
+  // Dodawanie do koszyka
   const handleAddToCart = () => {
     addItem({
-      name: "Burger Miesiąca – Azjatycki Twist",
-      price: 29,
+      name: `Burger Miesiąca – ${burgerName}`,
+      price: 29, // możesz tu też pobierać cenę z bazy, jeśli dodasz kolumnę price
       quantity: 1,
     });
     setAdded(true);
     setTimeout(() => setAdded(false), 2000);
   };
 
+  // polska nazwa miesiąca
+  const monthPl = new Date().toLocaleDateString("pl-PL", { month: "long" });
+  const monthLabel =
+    monthPl.charAt(0).toUpperCase() + monthPl.slice(1);
+
   return (
     <section
-      className="relative w-full text-white py-20 px-0 overflow-hidden max-h-[600px]"
+      className="relative w-full text-white py-20 px-0 overflow-hidden max-h-[500px]"
       style={{
         backgroundImage: "url('/graffitiburger2.png')",
         backgroundPosition: "center top",
@@ -63,90 +99,81 @@ export default function BurgerMiesiaca() {
         backgroundAttachment: "fixed",
       }}
     >
-      {/* Przejście – fala z obrazkiem z poprzedniej sekcji (Hero) */}
-      <div
-        className="absolute top-0 left-0 w-full h-[150px] z-10"
-        style={{
-          backgroundImage: "url('/tloburger.png')", // ten sam obrazek co w Hero
-          backgroundSize: "120%",
-          backgroundPosition: "right- 700 px",
-          backgroundRepeat: "no-repeat",
-          animation: "gentleShake2 5s ease-in-out infinite",
-          // Przykładowy kształt fali – możesz wygenerować własny np. na getwaves.io
-          clipPath: "path('M1440,0 L0,0 C300,100,1140,100,1440,0 Z')",
-        }}
-      ></div>
-
-      {/* Przyciemnione tło sekcji Burger Miesiąca */}
+      {/* Przyciemnione tło sekcji */}
       <div className="absolute inset-0 bg-black opacity-80 z-0"></div>
 
-      {/* Treść sekcji – przesunięta w dół, aby efekt fali był widoczny */}
-      <div className="max-w-6xl mx-auto flex flex-col md:flex-row items-center justify-between gap-0 relative z-20 mt-[-110px]">
+      <div className="max-w-6xl mx-auto flex flex-col md:flex-row items-center justify-between relative z-20 mt-[-110px]">
+        {/* Lewa kolumna z opisem */}
         <div className="w-full md:w-[30%] flex flex-col items-start text-left ml-auto">
-          <h3 className="text-x1 text-[34px] font-bold -mb-2 font-montserrat">
+          <h3 className="text-xl text-[34px] font-bold -mb-2 font-montserrat">
             BURGER MIESIĄCA
           </h3>
+
+          {/* miesiąc */}
           <h2 className="text-[80px] leading-none text-yellow-400 font-montserrat font-extrabold tracking-tighter mb-[-20px]">
-            MARZEC
+            {loading ? "..." : monthLabel.toUpperCase()}
           </h2>
+
+          {/* nazwa burgera */}
           <p className="italic text-[59px] font-covered mb-0">
-            Azjatycki Twist
-          </p>
-          <p className="text-sm text-[10px] text-yellow-300 leading-snug max-w-md font-montserrat">
-            bułka, majonez, rukola, piklowane warzywa, wołowina <br />
-            lub kurczak, sos Teriyaki, marynowany imbir, kolendra.
+            {loading ? "Ładowanie..." : burgerName}
           </p>
 
-          {/* PRZYCISK */}
-          <button
-            onClick={handleAddToCart}
-            className={`
-              relative
-              overflow-hidden
-              flex items-center justify-center
-              h-10
-              rounded-full
-              bg-white
-              text-black
-              shadow-lg
-              transition-all
-              duration-300
-              ease-in-out
-              mt-6
-              ${added ? "w-52" : "w-10"}
-            `}
-          >
-            <div className="flex items-center justify-center px-2 space-x-2">
-              <div
-                className="
-                  w-8 h-8
-                  flex items-center justify-center
-                  bg-white 
-                  text-black
-                  rounded-full 
-                  shadow-inner
-                "
-              >
+          {/* opis */}
+          <p className="text-sm text-[10px] text-yellow-300 leading-snug max-w-md font-montserrat">
+            {loading
+              ? ""
+              : burgerDesc.split("\n").map((line, i) => (
+                  <span key={i}>
+                    {line}
+                    <br />
+                  </span>
+                ))}
+          </p>
+        </div>
+
+        {/* Prawa kolumna z burgerem i przyciskiem */}
+        <div className="w-full md:w-[55%] flex justify-end mt-10 md:mt-0 relative z-30">
+          {/* dekoracyjny glow */}
+          <div className="absolute right-0 top-[10%] w-[350px] h-[350px] bg-yellow-400 opacity-30 blur-3xl rounded-full z-0" />
+
+          {/* Kontener obrazka */}
+          <div className="relative">
+            <Image
+              src="/burgermiesiaca.png"
+              alt="Burger miesiąca"
+              width={700}
+              height={600}
+              className="object-contain -mr-20 md:-mr-32 animate-slide-in-right z-10"
+            />
+
+            {/* Przycisk: absolutnie */}
+            <button
+              onClick={handleAddToCart}
+              className={`
+                absolute
+                bottom-[170px] left-[50px]
+                transform translate-x-2 translate-y-2
+                flex items-center justify-center
+                overflow-hidden
+                rounded-full
+                bg-white text-black
+                shadow-lg
+                transition-all duration-300 ease-in-out
+                ${added ? "w-40" : "w-10"} h-10
+                z-20
+              `}
+            >
+              <div className="w-8 h-8 flex items-center justify-center rounded-full shadow-inner">
                 {added ? CheckSVG : PlusSVG}
               </div>
               {added && (
-                <span className="text-sm font-semibold whitespace-nowrap leading-none">
-                  Dodano do koszyka
+                <span className="ml-2 text-sm font-semibold whitespace-nowrap leading-none">
+                  Dodano
                 </span>
               )}
-            </div>
-          </button>
-        </div>
-
-        <div className="w-full md:w-[55%] flex justify-end mt-10 md:mt-0 relative z-30">
-          <div className="absolute right-[00px] top-[10%] w-[350px] h-[350px] bg-yellow-400 opacity-30 blur-3xl rounded-full z-0" />
-          <Image
-            src="/burgermiesiaca.png"
-            alt="Burger miesiąca"
-            width={700}
-            height={600}
-            className="object-contain -mr-20 md:-mr-32 animate-slide-in-right z-10"
-          />
+            </button>
+          </div>
         </div>
       </div>
     </section>

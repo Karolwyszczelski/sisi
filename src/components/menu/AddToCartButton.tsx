@@ -24,3 +24,4 @@ export default function AddToCartButton({ onClick }: AddToCartButtonProps) {
     </div>
   );
 }
+

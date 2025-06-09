@@ -1,24 +1,33 @@
-// app/admin/page.tsx
+// src/app/admin/page.tsx
 import { supabaseServer } from "@/lib/supabaseServer";
-import AdminPanel from "./AdminPanel/page";
-import EmployeePanel from "./EmployeePanel/page";
+import { redirect } from "next/navigation";
 import AdminLogin from "./login/page";
 
-export default async function AdminPage() {
+export default async function AdminEntry() {
   const supabase = supabaseServer();
   const { data: { user }, error } = await supabase.auth.getUser();
+
+  // 1. Jeśli niezalogowany → pokazujemy ekran logowania
   if (error || !user) {
     return <AdminLogin />;
   }
 
-  // Pobieramy profil, który zawiera rolę
-  const { data: profile, error: profileError } = await supabase
+  // 2. Pobieramy profil (rolę)
+  const { data: profile } = await supabase
     .from("profiles")
     .select("role")
     .eq("id", user.id)
-    .maybeSingle();
+    .single();
+  const role = profile?.role;
 
-  const role = profile?.role || "employee";
+  // 3. Przekierowujemy wg roli:
+  if (role === "admin") {
+    redirect("/admin/AdminPanel");
+  }
+  if (role === "employee") {
+    redirect("/admin/EmployeePanel");
+  }
 
-  return role === "admin" ? <AdminPanel /> : <EmployeePanel />;
+  // 4. Na wszelki wypadek zablokuj klienta
+  redirect("/");
 }
