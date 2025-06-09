@@ -5,12 +5,16 @@ import {
   Covered_By_Your_Grace,
   Smooch,
   Anton,
+  Pinyon_Script,
 } from "next/font/google";
 import Image from "next/image";
 import CheckoutModalDynamic from "@/components/CheckoutModalDynamic";
 import ClientWrapper from "@/components/ClientWrapper";
 import ClientProvider from "@/components/ClientProvider";
 import FloatingAuthButtons from "@/components/FloatingLoginButton";
+import Footer from "@/components/Footer";
+import ReservationFloatingButton from "@/components/ReservationFloatingButton";
+
 
 
 export const metadata: Metadata = {
@@ -75,8 +79,10 @@ export default function RootLayout({
             {children}
             <CheckoutModalDynamic />
             <FloatingAuthButtons/>
+            <ReservationFloatingButton />
           </ClientWrapper>
         </ClientProvider>
+         <Footer />
       </body>
     </html>
   );

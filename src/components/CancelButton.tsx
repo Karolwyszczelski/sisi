@@ -1,55 +1,60 @@
-// components/CancelButton.tsx
+// src/components/CancelButton.tsx
 "use client";
 
-import { useState } from "react";
+import React, { useState } from "react";
 
 interface CancelButtonProps {
   orderId: string;
-  onOrderUpdated?: (orderId: string) => void;
+  // teraz przyjmujemy też opcjonalne updatedData
+  onOrderUpdated: (orderId: string, updatedData?: { status: string }) => void;
 }
 
-export default function CancelButton({ orderId, onOrderUpdated }: CancelButtonProps) {
+export default function CancelButton({
+  orderId,
+  onOrderUpdated,
+}: CancelButtonProps) {
   const [loading, setLoading] = useState(false);
 
   const handleCancel = async () => {
+    if (!confirm("Na pewno anulować to zamówienie?")) return;
     setLoading(true);
+
     try {
-      const res = await fetch("/api/orders/cancel", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Accept": "application/json",
-        },
-        body: JSON.stringify({ orderId }),
+      const res = await fetch(`/api/orders/${orderId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "cancelled" }),
       });
 
-      const responseText = await res.text();
-      let result = {};
-      if (responseText) {
-        try {
-          result = JSON.parse(responseText);
-        } catch (err) {
-          console.error("Błąd parsowania JSON:", responseText);
-          throw new Error("Niepoprawny format JSON w odpowiedzi");
-        }
-      }
+      const payload = await res.json();
 
       if (!res.ok) {
-        console.error("Błąd anulowania zamówienia:", result["error"] || result);
+        console.error("Błąd anulowania zamówienia:", payload.error ?? payload);
+        alert("Coś poszło nie tak przy anulowaniu: " + (payload.error ?? ""));
         return;
       }
 
-      onOrderUpdated && onOrderUpdated(orderId);
-    } catch (error) {
-      console.error("Fetch error:", error);
+      // powiadamiamy rodzica o zmianie statusu
+      onOrderUpdated(orderId, { status: "cancelled" });
+    } catch (err) {
+      console.error("Błąd anulowania zamówienia:", err);
+      alert("Błąd sieci podczas anulowania zamówienia.");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <button onClick={handleCancel} disabled={loading} className="px-4 py-2 bg-red-500 text-white rounded">
-      Anuluj
+    <button
+      onClick={handleCancel}
+      disabled={loading}
+      className={`px-4 py-2 rounded-full font-semibold text-sm ${
+        loading
+          ? "bg-gray-300 text-gray-600"
+          : "bg-red-600 hover:bg-red-500 text-white"
+      }`}
+    >
+      {loading ? "Anulowanie..." : "Anuluj"}
     </button>
   );
 }

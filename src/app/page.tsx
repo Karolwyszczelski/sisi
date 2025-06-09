@@ -4,6 +4,7 @@ import Hero from '@/components/Hero';
 import BurgerMiesiaca from '@/components/BurgerMiesiaca';
 import MenuSection from '@/components/menu/MenuSection';
 import OnasSection from '@/components/OnasSection';
+import ContactSection from "@/components/ContactSection";
 
 export default function Home() {
   return (
@@ -12,6 +13,7 @@ export default function Home() {
       <BurgerMiesiaca />
       <MenuSection />
       <OnasSection />
+      <ContactSection />
     </main>
   );
 }

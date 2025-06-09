@@ -18,7 +18,7 @@ export default function Header() {
         </div>
 
         {/* Desktop Nav */}
-        <nav className="hidden md:flex gap-4 items-center text-sm text-black px-6 py-1">
+        <nav className="hidden md:flex gap-4 items-center text-sm text-white px-6 py-1">
           <a href="#menu" className="hover:text-yellow-400 transition">
             Menu
           </a>

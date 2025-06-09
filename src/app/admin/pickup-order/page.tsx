@@ -15,6 +15,12 @@ interface Order {
   created_at: string;
   status: "new" | "placed" | "accepted" | "cancelled" | "completed";
   deliveryTime?: string;
+  client_delivery_time?: string;
+  delivery_cost: o.delivery_cost,
+  street: o.street,
+  flat_number: o.flat_number,
+  city: o.city,
+  postal_code: o.postal_code,
   address: string;
   phone: string;
   items: any; // Zawiera pełny JSON produktów
@@ -196,16 +202,30 @@ function renderOrderDetailsInner(
   return (
     <div className="text-sm mt-2">
       <p>
-        <strong>Kwota:</strong> {order.total_price} zł
+        <strong>Kwota:</strong> {" "}
+        {order.total_price} zł
       </p>
       <p>
-        <strong>Adres:</strong> {order.address}
+        <strong>Adres:</strong>{" "}
+        {order.street}
+        {order.flat_number ? `, nr. ${order.flat_number}` : ""}
+        {order.city ? `, ${order.city}` : ""}
       </p>
       <p>
         <strong>Telefon:</strong> {order.phone}
       </p>
       <div className="mt-2">
-        <strong>Produkty:</strong>
+         <strong>Produkty:</strong> {order.total_price.toFixed(2)} zł
+      
+      {order.delivery_cost !== undefined && (
+        <p>
+          <strong>Dostawa:</strong> {order.delivery_cost.toFixed(2)} zł
+        </p>
+      )}
+      <p>
+        <strong>Razem:</strong>{" "}
+        {(order.total_price + (order.delivery_cost || 0)).toFixed(2)} zł
+      </p>
         {parsedProducts.length === 0 ? (
           <span> brak</span>
         ) : (
@@ -388,7 +408,16 @@ export default function EmployeeClient() {
   function renderOrderTop(order: Order): JSX.Element {
     return (
       <div className="flex items-center justify-between mb-4 border-b pb-2">
-        <div className="flex flex-col space-y-1">
+        {/* wyświetlamy preferowany czas klienta dla dostawy */}
+        {order.selected_option === "delivery" && order.client_delivery_time && (
+          <div className="flex items-center space-x-2">
+            <label className="text-sm font-semibold">Preferowany czas klienta:</label>
+            <span className="text-sm px-2 py-1 border border-gray-300 rounded bg-gray-100">
+             {order.client_delivery_time}
+            </span>
+          </div>
+        )}
+        <div className="flex flex-col">
           <span className="text-xl font-bold">{getOptionLabel(order.selected_option)}</span>
           <span className="text-sm font-semibold">
             Status:{" "}

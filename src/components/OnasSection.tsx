@@ -6,7 +6,7 @@ export default function OnasSection() {
   return (
     <section
       id="onas"
-      className="relative w-full bg-yellow-400 text-black pt-16 pb-20 overflow-hidden"
+      className="relative w-full bg-yellow-400 text-black pt-16 pb-10 overflow-hidden"
     >
       <div className="max-w-6xl mx-auto px-8 md:px-16 relative z-10">
         {/* Tytuł sekcji – powiększony */}
@@ -167,74 +167,6 @@ export default function OnasSection() {
               osobiście. Czekamy na Ciebie z uśmiechem i pysznym jedzeniem!
             </p>
           </div>
-        </div>
-      </div>
-
-      {/* Sekcja kontaktu/mapki na dole */}
-      <div className="mt-16 bg-black text-white py-10 px-8 md:px-16 w-full relative">
-        <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-8">
-          {/* Lewa kolumna – Kontakt + „Oceń nas” + QR */}
-          <div className="flex flex-col gap-6">
-            {/* Kontakt */}
-            <div>
-              <h3 className="text-xl font-bold mb-2">Gdzie nas znajdziesz?</h3>
-              <p className="text-sm mb-4">ul.Spółdzielcza 7, Ciechanów 06-400</p>
-              <p className="text-sm mb-4">
-                <strong>Godziny otwarcia:</strong>
-                <br />
-                Pon - Pt: 10:00 - 20:00
-                <br />
-                Sob - Nd: 11:00 - 22:00
-              </p>
-              <p className="text-sm mb-4">
-                <strong>Telefon:</strong>{" "}
-                <a href="tel:123456789" className="underline">
-                  123 456 789
-                </a>
-                <br />
-                <strong>Email:</strong>{" "}
-                <a href="mailto:kontakt@sisiburger.pl" className="underline">
-                  kontakt@sisiburger.pl
-                </a>
-              </p>
-            </div>
-
-            {/* „Oceń nas” z tekstem i kodem QR pod spodem */}
-            <div>
-              <h4 className="text-lg font-bold mb-2">Oceń nas!</h4>
-              <p className="text-sm">
-                Zostaw opinię w Google, abyśmy mogli stale ulepszać nasze smaki.
-              </p>
-              <div className="mt-4">
-                {/* Zastąp /qr.png swoim plikiem QR */}
-                <img
-                  src="/qr.png"
-                  alt="Kod QR do opinii Google"
-                  className="object-contain w-20 h-20"
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Prawa kolumna – Mapa */}
-          <div className="flex flex-col items-start md:items-end">
-            <iframe
-              title="Mapa"
-              src="https://www.google.com/maps/place/Spółdzielcza+7,+Ciechanów+06-400/@52.8833012,20.5997877,17z/"
-              width="100%"
-              height="400"
-              className="border-0 rounded-md"
-              allowFullScreen
-              loading="lazy"
-            ></iframe>
-          </div>
-        </div>
-
-        {/* Napis na dole, całkowicie z lewej, mniejsza czcionka */}
-        <div className="absolute left-0 bottom-0 ml-2 md:ml-4 mb-4">
-          <p className="text-[10px] text-white">
-            Stronę oraz system zamówień wykonał: Karol Wyszczelski
-          </p>
         </div>
       </div>
     </section>

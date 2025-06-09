@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import { useState, useEffect, useRef } from 'react';
-import { useLoadScript } from '@react-google-maps/api';
+import { useState, useEffect, useRef } from "react";
+import { useLoadScript } from "@react-google-maps/api";
 
 declare global {
   interface Window {
@@ -9,23 +9,22 @@ declare global {
   }
 }
 
-const libraries = ['places'];
+const libraries = ["places"];
 
 type AddressAutocompleteProps = {
-  setStreet: (value: string) => void;
+  onAddressSelect: (address: string, lat: number, lng: number) => void;
   setCity: (value: string) => void;
   setPostalCode: (value: string) => void;
   setFlatNumber?: (value: string) => void;
 };
 
 export default function AddressAutocomplete({
-  setStreet,
+  onAddressSelect,
   setCity,
   setPostalCode,
   setFlatNumber,
 }: AddressAutocompleteProps) {
-  const [address, setAddress] = useState('');
-  const [isAutocompleteLoaded, setIsAutocompleteLoaded] = useState(false);
+  const [address, setAddress] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
   const { isLoaded: mapsIsLoaded } = useLoadScript({
@@ -34,60 +33,63 @@ export default function AddressAutocomplete({
   });
 
   useEffect(() => {
-    if (mapsIsLoaded && inputRef.current) {
-      const autocomplete = new window.google.maps.places.Autocomplete(inputRef.current, {
-        types: ['address'],
-        componentRestrictions: { country: 'pl' },
-      });
+    if (!mapsIsLoaded || !inputRef.current) return;
 
-      autocomplete.addListener('place_changed', () => {
-        const place = autocomplete.getPlace();
+    const autocomplete = new window.google.maps.places.Autocomplete(
+      inputRef.current,
+      {
+        types: ["address"],
+        componentRestrictions: { country: "pl" },
+      }
+    );
 
-        if (!place || !place.address_components) return;
+    autocomplete.addListener("place_changed", () => {
+      const place = autocomplete.getPlace();
+      if (!place || !place.address_components) return;
 
-        const subpremise = place.address_components.find((c: any) =>
-          c.types.includes('subpremise')
-        )?.long_name;
-        const route = place.address_components.find((c: any) =>
-          c.types.includes('route')
-        )?.long_name;
-        const streetNumber = place.address_components.find((c: any) =>
-          c.types.includes('street_number')
-        )?.long_name;
-        const postalCodeComp = place.address_components.find((c: any) =>
-          c.types.includes('postal_code')
-        )?.long_name;
-        const cityComp = place.address_components.find((c: any) =>
-          c.types.includes('locality') || c.types.includes('postal_town')
-        )?.long_name;
+      // wydobywamy poszczególne składowe
+      const subpremise = place.address_components.find((c: any) =>
+        c.types.includes("subpremise")
+      )?.long_name;
+      const route = place.address_components.find((c: any) =>
+        c.types.includes("route")
+      )?.long_name;
+      const streetNumber = place.address_components.find((c: any) =>
+        c.types.includes("street_number")
+      )?.long_name;
+      const postalCodeComp = place.address_components.find((c: any) =>
+        c.types.includes("postal_code")
+      )?.long_name;
+      const cityComp = place.address_components.find((c: any) =>
+        c.types.includes("locality") || c.types.includes("postal_town")
+      )?.long_name;
 
-        const formattedAddress = place.formatted_address || '';
+      // kompletujemy tekst ulicy
+      let finalStreet = "";
+      if (route && streetNumber) {
+        finalStreet = `${route} ${streetNumber}`;
+      } else if (route) {
+        finalStreet = route;
+      } else {
+        finalStreet = place.formatted_address || "";
+      }
 
-        let finalStreet = '';
-        if (route && streetNumber) {
-          finalStreet = `${route} ${streetNumber}`;
-        } else if (route) {
-          finalStreet = route;
-        } else {
-          finalStreet = formattedAddress;
-        }
+      // wywołujemy callback z CheckoutModal
+      const lat = place.geometry?.location.lat();
+      const lng = place.geometry?.location.lng();
+      if (typeof lat === "number" && typeof lng === "number") {
+        onAddressSelect(finalStreet, lat, lng);
+      }
 
-        setStreet(finalStreet);
-        setPostalCode(postalCodeComp || '');
-        setCity(cityComp || '');
-        if (setFlatNumber && subpremise) {
-          setFlatNumber(subpremise);
-        }
-        setAddress(formattedAddress);
-      });
+      // uzupełniamy City / PostalCode / FlatNumber
+      if (postalCodeComp) setPostalCode(postalCodeComp);
+      if (cityComp) setCity(cityComp);
+      if (setFlatNumber && subpremise) setFlatNumber(subpremise);
 
-      setIsAutocompleteLoaded(true);
-    }
+      // aktualizujemy lokalny stan inputa
+      setAddress(place.formatted_address || finalStreet);
+    });
   }, [mapsIsLoaded]);
-
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setAddress(e.target.value);
-  };
 
   return (
     <div>
@@ -95,11 +97,11 @@ export default function AddressAutocomplete({
         ref={inputRef}
         type="text"
         value={address}
-        onChange={handleInputChange}
+        onChange={(e) => setAddress(e.target.value)}
         placeholder="Wpisz swój adres"
         className="w-full px-3 py-2 border rounded-md"
       />
-      {isAutocompleteLoaded && (
+      {mapsIsLoaded && (
         <div className="text-sm text-gray-500 mt-2">
           Wybierz adres z listy
         </div>

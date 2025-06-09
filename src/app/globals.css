@@ -1,3 +1,12 @@
+/* 1. @font-face musi być przed @tailwind base */
+@font-face {
+  font-family: 'MrBedfort';
+  src: url('/fonts/mr-bedfort-regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -55,43 +64,25 @@ body {
 
   @keyframes gentleShake {
     0% {
-      background-position: right -100px top -100px;
+      background-position: right 0 top -290px;
     }
     25% {
-      background-position: right -102px top -98px; /* minimalne przesunięcie */
+      background-position: right 0 top -288px; /* minimalne przesunięcie */
     }
     50% {
-      background-position: right -98px top -102px; /* minimalne przesunięcie */
+      background-position: right 0 top -292px; /* minimalne przesunięcie */
     }
     75% {
-      background-position: right -101px top -99px; /* minimalne przesunięcie */
+      background-position: right 0 top -289px; /* minimalne przesunięcie */
     }
     100% {
-      background-position: right -100px top -100px;
+      background-position: right 0 top -290px;
     }
   }
-
-  @keyframes gentleShake2 {
-    0% {
-      background-position: right -100px top -750px;   /* -100 -> -150 */
-    }
-    25% {
-      background-position: right -102px top -750px;   /* -98  -> -148 */
-    }
-    50% {
-      background-position: right -98px top -750px;    /* -102 -> -152 */
-    }
-    75% {
-      background-position: right -101px top -750px;   /* -99  -> -149 */
-    }
-    100% {
-      background-position: right -100px top -750px;   /* -100 -> -150 */
-    }
-  }
-  
-  
 
   .gochi-hand {
     font-family: 'Gochi Hand', cursive;
   }
 }
+
+

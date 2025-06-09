@@ -1,68 +1,82 @@
+// src/components/AcceptButton.tsx
 "use client";
 
 import { useState } from "react";
 
 interface AcceptButtonProps {
   orderId: string;
-  onOrderUpdated?: (data: Partial<any>) => void;
+  selectedOption: "local" | "takeaway" | "delivery" | undefined;
+  onOrderUpdated?: (orderId: string, updatedData: { status: string; deliveryTime: string }) => void;
 }
 
-export default function AcceptButton({ orderId, onOrderUpdated }: AcceptButtonProps) {
+export default function AcceptButton({
+  orderId,
+  selectedOption,
+  onOrderUpdated,
+}: AcceptButtonProps) {
   const [loading, setLoading] = useState(false);
 
-  const minutesMap: Record<string, number> = {
-    "30 min": 30,
-    "1h": 60,
-    "1.5h": 90,
-    "2h": 120,
-  };
+  // Definicja zestawów przycisków w zależności od trybu odbioru
+  const timeOptions: { label: string; minutes: number }[] =
+    selectedOption === "takeaway"
+      ? [
+          { label: "15 min", minutes: 15 },
+          { label: "25 min", minutes: 25 },
+          { label: "30 min", minutes: 30 },
+          { label: "45 min", minutes: 45 },
+          { label: "1 h", minutes: 60 },
+        ]
+      : [
+          { label: "30 min", minutes: 30 },
+          { label: "1 h", minutes: 60 },
+          { label: "1.5 h", minutes: 90 },
+          { label: "2 h", minutes: 120 },
+        ];
 
-  const handleAccept = async (timeLabel: string) => {
+  const handleAccept = async (minutes: number) => {
     setLoading(true);
     try {
-      const minutes = minutesMap[timeLabel] || 30;
-      const targetTimestamp = new Date(new Date().getTime() + minutes * 60000).toISOString();
+      const deliveryTime = new Date(Date.now() + minutes * 60000).toISOString();
 
       const res = await fetch(`/api/orders/${orderId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           status: "accepted",
-          deliveryTime: targetTimestamp,
+          deliveryTime,
         }),
       });
 
+      const payload = await res.json();
       if (!res.ok) {
-        const result = await res.json();
-        console.error("Błąd aktualizacji zamówienia:", result.error);
+        console.error("Błąd aktualizacji zamówienia:", payload.error ?? payload);
       } else {
-        const result = await res.json();
-        // Jeśli result.data to tablica, wyciągamy pierwszy element
-        if (result.data && Array.isArray(result.data) && result.data.length > 0) {
-          onOrderUpdated && onOrderUpdated(result.data[0]);
-        }
+        // przekazujemy rodzicowi id i nowe dane
+        onOrderUpdated?.(orderId, { status: "accepted", deliveryTime });
       }
-    } catch (error) {
-      console.error("Fetch error:", error);
+    } catch (err) {
+      console.error("Fetch error:", err);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="flex gap-2">
-      <button onClick={() => handleAccept("30 min")} disabled={loading} className="px-3 py-1 bg-green-500 text-white rounded">
-        30 min
-      </button>
-      <button onClick={() => handleAccept("1h")} disabled={loading} className="px-3 py-1 bg-green-500 text-white rounded">
-        1h
-      </button>
-      <button onClick={() => handleAccept("1.5h")} disabled={loading} className="px-3 py-1 bg-green-500 text-white rounded">
-        1.5h
-      </button>
-      <button onClick={() => handleAccept("2h")} disabled={loading} className="px-3 py-1 bg-green-500 text-white rounded">
-        2h
-      </button>
+    <div className="flex flex-wrap gap-2">
+      {timeOptions.map(({ label, minutes }) => (
+        <button
+          key={label}
+          onClick={() => handleAccept(minutes)}
+          disabled={loading}
+          className={`px-4 py-2 rounded-full font-semibold text-sm ${
+            loading
+              ? "bg-gray-300 text-gray-600"
+              : "bg-green-600 hover:bg-green-500 text-white"
+          }`}
+        >
+          {label}
+        </button>
+      ))}
     </div>
   );
 }
