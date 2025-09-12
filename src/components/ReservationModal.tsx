@@ -15,11 +15,11 @@ const supabase = createClient(
 );
 
 interface Props {
+  isOpen: boolean;
   onClose(): void;
 }
 
-export default function ReservationCalendarModal({ onClose }: Props) {
-  // ustawienia slotów
+export default function ReservationCalendarModal({ isOpen, onClose }: Props) {
   const SLOT_DURATION_MIN = 90;
   const START_HOUR = 11;
   const START_MIN = 30;
@@ -28,7 +28,6 @@ export default function ReservationCalendarModal({ onClose }: Props) {
     Math.floor(((END_HOUR * 60) - (START_HOUR * 60 + START_MIN)) / SLOT_DURATION_MIN) + 1;
   const MAX_PER_SLOT = 5;
 
-  // stany
   const [currentMonth, setCurrentMonth] = useState<Date>(new Date());
   const [countsPerDay, setCountsPerDay] = useState<Record<string, number>>({});
   const [selectedDate, setSelectedDate] = useState<Date>();
@@ -39,8 +38,8 @@ export default function ReservationCalendarModal({ onClose }: Props) {
   const [customerPhone, setCustomerPhone] = useState<string>("");
   const [notes, setNotes] = useState<string>("");
 
-  // 1) fetch rezerwacji miesiąca → kolorowanie dni
   useEffect(() => {
+    if (!currentMonth) return;
     (async () => {
       const from = startOfMonth(currentMonth).toISOString();
       const to = endOfMonth(currentMonth).toISOString();
@@ -49,16 +48,16 @@ export default function ReservationCalendarModal({ onClose }: Props) {
         .select("reservation_date")
         .gte("reservation_date", from)
         .lte("reservation_date", to);
+
       const perDay: Record<string, number> = {};
       data?.forEach((r: any) => {
-        const d = r.reservation_date; // "YYYY-MM-DD"
+        const d = r.reservation_date;
         perDay[d] = (perDay[d] || 0) + 1;
       });
       setCountsPerDay(perDay);
     })();
   }, [currentMonth]);
 
-  // 2) fetch sloty dnia
   useEffect(() => {
     if (!selectedDate) {
       setCountsPerSlot({});
@@ -70,13 +69,12 @@ export default function ReservationCalendarModal({ onClose }: Props) {
         .from("reservations")
         .select("reservation_time")
         .eq("reservation_date", day);
+
       const perSlot: Record<string, number> = {};
       data?.forEach((r: any) => {
-        const t = r.reservation_time; // "HH:MM"
-        perSlot[t] = (perSlot[t] || 0) + 1;
+        perSlot[r.reservation_time] = (perSlot[r.reservation_time] || 0) + 1;
       });
       setCountsPerSlot(perSlot);
-      // reset wyborów
       setSelectedTime("");
       setGuestCount(1);
       setCustomerName("");
@@ -85,7 +83,6 @@ export default function ReservationCalendarModal({ onClose }: Props) {
     })();
   }, [selectedDate]);
 
-  // 3) generuj listę slotów
   const generateSlots = () => {
     if (!selectedDate) return [];
     const arr: string[] = [];
@@ -98,158 +95,172 @@ export default function ReservationCalendarModal({ onClose }: Props) {
     return arr;
   };
 
-  // 4) kolorowanie dni + wyszarzanie przeszłych
   const modifiers = {
-    past:    (day: Date) => day < new Date(),
-    free:    (day: Date) => !(countsPerDay[format(day, "yyyy-MM-dd")] > 0),
+    past: (day: Date) => day < new Date(),
+    free: (day: Date) => {
+      const key = format(day, "yyyy-MM-dd");
+      const c = countsPerDay[key] || 0;
+      return c < SLOT_COUNT * MAX_PER_SLOT;
+    },
     partial: (day: Date) => {
-      const c = countsPerDay[format(day, "yyyy-MM-dd")] || 0;
+      const key = format(day, "yyyy-MM-dd");
+      const c = countsPerDay[key] || 0;
       return c > 0 && c < SLOT_COUNT * MAX_PER_SLOT;
     },
-    full:    (day: Date) => (countsPerDay[format(day, "yyyy-MM-dd")] || 0) >= SLOT_COUNT * MAX_PER_SLOT
+    full: (day: Date) => {
+      const key = format(day, "yyyy-MM-dd");
+      return countsPerDay[key] >= SLOT_COUNT * MAX_PER_SLOT;
+    },
+    selected: (day: Date) =>
+      selectedDate ? format(day, "yyyy-MM-dd") === format(selectedDate, "yyyy-MM-dd") : false,
   };
   const modifiersClassNames = {
-    past:    "bg-gray-100 text-gray-400 cursor-not-allowed",
-    free:    "bg-green-200",
-    partial: "bg-yellow-200",
-    full:    "bg-red-200 text-red-700 cursor-not-allowed"
+    past: "text-gray-300",
+    free: "bg-green-200 hover:bg-green-300",
+    partial: "bg-yellow-200 hover:bg-yellow-300",
+    full: "bg-red-200 text-red-700 cursor-not-allowed",
+    selected: "bg-black text-white",
   };
 
-  // 5) zapis rezerwacji
   const handleConfirm = async () => {
-    if (
-      !selectedDate ||
-      !selectedTime ||
-      !customerName.trim() ||
-      !customerPhone.trim()
-    ) return;
+    if (!selectedDate || !selectedTime || !customerName.trim() || !customerPhone.trim()) return;
     const day = format(selectedDate, "yyyy-MM-dd");
-    const payload = {
-      reservation_date:    day,
-      reservation_time:    selectedTime,
-      number_of_guests:    guestCount,
-      customer_name:       customerName,
-      customer_phone:      customerPhone,
+    const payload: any = {
+      reservation_date: day,
+      reservation_time: selectedTime,
+      number_of_guests: guestCount,
+      customer_name: customerName,
+      customer_phone: customerPhone,
       notes,
-      status:              "pending"
+      status: "pending",
     };
     const { error } = await supabase.from("reservations").insert([payload]);
-    if (error) {
-      console.error("Błąd rezerwacji:", error.message);
-    } else {
+    if (error) console.error("Błąd rezerwacji:", error.message);
+    else {
       alert("Rezerwacja zapisana!");
       onClose();
     }
   };
 
+  if (!isOpen) return null;
   return (
-    <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-60 z-50 p-4">
-      <div className="bg-white w-full max-w-lg max-h-[90vh] rounded-lg overflow-y-auto shadow-lg">
-        {/* header */}
-        <div className="flex justify-between items-center p-4 border-b sticky top-0 bg-white z-10">
-          <h2 className="text-lg font-bold">Zarezerwuj stolik</h2>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-800">
-            <X size={20} />
-          </button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60 p-4">
+      <div className="relative bg-white w-full max-w-md max-h-[90vh] rounded-2xl overflow-y-auto shadow-2xl">
+        <button
+          onClick={onClose}
+          className="absolute top-2 right-4 z-20 text-gray-500 hover:text-gray-800"
+        >
+          <X size={24} />
+        </button>
+
+        <div className="p-4 border-b">
+          <h2 className="text-lg font-semibold">Rezerwacja stolika</h2>
         </div>
+
         <div className="p-6 space-y-4">
-          {/* Kalendarz */}
           <DayPicker
             mode="single"
+            className="rounded-lg shadow-inner bg-gray-50"
+            captionLayout="dropdown"
+            navbarClassName="flex justify-between px-2 py-1 bg-white"
+            navbarPrev="<"
+            navbarNext=">"
+            // Uwaga: interfejs Caption zależy od wersji react-day-picker
+            components={{
+              Caption: ({ date, localeUtils }: any) => (
+                <div className="text-center font-semibold">
+                  {localeUtils?.formatMonthTitle
+                    ? localeUtils.formatMonthTitle(date)
+                    : format(date, "LLLL yyyy", { locale: pl })}
+                </div>
+              ),
+            }}
             month={currentMonth}
             onMonthChange={setCurrentMonth}
             selected={selectedDate}
             onSelect={setSelectedDate}
             locale={pl}
-            firstDayOfWeek={1}
-            disabled={{ before: new Date() }}
-            modifiers={modifiers}
-            modifiersClassNames={modifiersClassNames}
             fromDate={new Date()}
+            modifiers={modifiers as any}
+            modifiersClassNames={modifiersClassNames as any}
           />
 
-          {/* Godzina */}
           {selectedDate && (
             <>
-              <label className="block font-medium">Godzina:</label>
+              <label className="block font-medium">Godzina</label>
               <select
-                className="w-full border rounded px-3 py-2"
+                className="w-full border rounded py-2 px-3"
                 value={selectedTime}
-                onChange={e => setSelectedTime(e.target.value)}
+                onChange={(e) => setSelectedTime(e.target.value)}
               >
-                <option value="">— wybierz —</option>
-                {generateSlots().map(slot => {
-                  const count = countsPerSlot[slot] || 0;
-                  const disabled = count >= MAX_PER_SLOT;
-                  return (
-                    <option key={slot} value={slot} disabled={disabled}>
-                      {slot} {disabled ? "(pełny)" : `(${count}/${MAX_PER_SLOT})`}
-                    </option>
-                  );
-                })}
+                <option value="">— wybierz godzinę —</option>
+                {generateSlots().map((slot) => (
+                  <option
+                    key={slot}
+                    value={slot}
+                    disabled={(countsPerSlot[slot] || 0) >= MAX_PER_SLOT}
+                  >
+                    {slot}{" "}
+                    {(countsPerSlot[slot] || 0) >= MAX_PER_SLOT
+                      ? "(pełny)"
+                      : `(${countsPerSlot[slot] || 0}/${MAX_PER_SLOT})`}
+                  </option>
+                ))}
               </select>
             </>
           )}
 
-          {/* Liczba gości */}
           {selectedTime && (
             <>
-              <label className="block font-medium">Liczba gości:</label>
+              <label className="block font-medium">Liczba gości</label>
               <input
                 type="number"
                 min={1}
                 max={10}
                 value={guestCount}
-                onChange={e => setGuestCount(Number(e.target.value))}
-                className="w-24 border rounded px-2 py-1"
+                onChange={(e) => setGuestCount(Number(e.target.value))}
+                className="border rounded w-20 py-1 px-2"
               />
             </>
           )}
 
-          {/* Dane klienta */}
           {selectedTime && (
             <>
-              <label className="block font-medium">Imię i nazwisko:</label>
+              <label className="block font-medium">Twoje dane</label>
               <input
                 type="text"
+                placeholder="Imię i nazwisko"
                 value={customerName}
-                onChange={e => setCustomerName(e.target.value)}
-                className="w-full border rounded px-3 py-2"
+                onChange={(e) => setCustomerName(e.target.value)}
+                className="w-full border rounded py-2 px-3 mb-2"
               />
-              <label className="block font-medium mt-2">Telefon:</label>
               <input
                 type="tel"
+                placeholder="Telefon"
                 value={customerPhone}
-                onChange={e => setCustomerPhone(e.target.value)}
-                className="w-full border rounded px-3 py-2"
+                onChange={(e) => setCustomerPhone(e.target.value)}
+                className="w-full border rounded py-2 px-3"
               />
             </>
           )}
 
-          {/* Uwagi */}
           {selectedTime && (
             <>
-              <label className="block font-medium">Uwagi:</label>
+              <label className="block font-medium">Uwagi</label>
               <textarea
                 rows={3}
                 value={notes}
-                onChange={e => setNotes(e.target.value)}
-                className="w-full border rounded px-3 py-2"
+                onChange={(e) => setNotes(e.target.value)}
+                className="w-full border rounded py-2 px-3"
                 placeholder="Dodatkowe informacje..."
               />
             </>
           )}
 
-          {/* Potwierdzenie */}
           <button
             onClick={handleConfirm}
-            disabled={
-              !selectedDate ||
-              !selectedTime ||
-              !customerName.trim() ||
-              !customerPhone.trim()
-            }
-            className="w-full bg-yellow-400 text-black py-2 rounded disabled:opacity-50 hover:bg-yellow-300 transition"
+            disabled={!selectedDate || !selectedTime || !customerName.trim() || !customerPhone.trim() }
+            className="w-full bg-yellow-500 text-white py-2 rounded disabled:opacity-50 hover:bg-yellow-600 transition"
           >
             Zarezerwuj
           </button>

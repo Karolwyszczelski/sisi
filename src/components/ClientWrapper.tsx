@@ -15,7 +15,6 @@ export default function ClientWrapper({ children }: { children: React.ReactNode 
     <>
       {!isAdminRoute && <Header />}
       {children}
-      <FloatingLoginButton />
       {!isAdminRoute && <CartButton />}
       {!isAdminRoute && <CartPopup />}
       {!isAdminRoute && <CheckoutModal />}

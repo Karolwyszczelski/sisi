@@ -3,7 +3,8 @@
 
 import { Calendar } from "lucide-react";
 import { useState } from "react";
-import ReservationCalendarModal from "./ReservationModal";
+// Sprawdź, czy plik nazywa się dokładnie ReservationModal.tsx
+import ReservationModal from "./ReservationModal";
 
 export default function ReservationFloatingButton() {
   const [open, setOpen] = useState(false);
@@ -22,7 +23,12 @@ export default function ReservationFloatingButton() {
       >
         <Calendar className="w-6 h-6" />
       </button>
-      {open && <ReservationCalendarModal onClose={() => setOpen(false)} />}
+
+      {/* Przekazujemy isOpen, aby sam modal wiedział, kiedy ma się pokazać */}
+      <ReservationModal
+        isOpen={open}
+        onClose={() => setOpen(false)}
+      />
     </>
   );
 }

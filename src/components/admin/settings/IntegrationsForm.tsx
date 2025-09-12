@@ -68,7 +68,7 @@ export default function IntegrationsForm() {
     const state        = Math.random().toString(36).slice(2); // prosty CSRF token
 
     return (
-      `https://admin.dotykacka.cz/client/connect` +
+      `https://admin.dotykacka.pl/client/connect` +
       `?client_id=${encodeURIComponent(clientId!)}` +
       `&client_secret=${encodeURIComponent(clientSecret!)}` +
       `&scope=*` +

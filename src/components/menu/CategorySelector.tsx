@@ -18,26 +18,30 @@ export default function CategorySelector({
   const categories = ['Burger', 'Pancake', 'Kids', 'Frytki', 'Napoje'];
 
   return (
-    <div className="flex flex-wrap gap-3">
-      {categories.map((cat) => (
-        <button
-          key={cat}
-          onClick={() => {
-            setSelectedCategory(cat);
-            setSelectedSubcategory(null);
-          }}
-          className={`px-4 py-2 rounded-full border font-semibold ${
-            selectedCategory === cat
-              ? 'bg-black text-white'
-              : 'bg-white text-black border-black'
-          }`}
-        >
-          {cat}
-        </button>
-      ))}
+    <div className="w-full max-w-5xl mx-auto">
+      {/* kategorie główne */}
+      <div className="flex flex-wrap items-center justify-center gap-3 text-center">
+        {categories.map((cat) => (
+          <button
+            key={cat}
+            onClick={() => {
+              setSelectedCategory(cat);
+              setSelectedSubcategory(null);
+            }}
+            className={`px-4 py-2 rounded-full border font-semibold ${
+              selectedCategory === cat
+                ? 'bg-black text-white'
+                : 'bg-white text-black border-black'
+            }`}
+          >
+            {cat}
+          </button>
+        ))}
+      </div>
 
+      {/* subkategorie */}
       {selectedCategory === 'Burger' && (
-        <div className="flex flex-wrap gap-2 mt-4 w-full">
+        <div className="flex flex-wrap items-center justify-center gap-2 mt-4 w-full text-center">
           {subcategories.map((sub) => (
             <button
               key={sub}
