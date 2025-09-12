@@ -1,3 +1,4 @@
+// src/app/layout.tsx
 import "./globals.css";
 import type { Metadata } from "next";
 import {
@@ -8,21 +9,15 @@ import {
   Pinyon_Script,
 } from "next/font/google";
 import Image from "next/image";
-import CheckoutModalDynamic from "@/components/CheckoutModalDynamic";
 import ClientWrapper from "@/components/ClientWrapper";
 import ClientProvider from "@/components/ClientProvider";
-import FloatingAuthButtons from "@/components/FloatingLoginButton";
 import Footer from "@/components/Footer";
-import ReservationFloatingButton from "@/components/ReservationFloatingButton";
-
-
 
 export const metadata: Metadata = {
   title: "SISI Ordering",
   description: "Zamów najlepsze burgery i pancakes w Ciechanowie!",
 };
 
-// Czcionki
 const montserrat = Montserrat({
   subsets: ["latin"],
   weight: ["400", "500", "700", "800", "900"],
@@ -46,11 +41,7 @@ const anton = Anton({
   display: "swap",
 });
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="pl">
       <body
@@ -65,24 +56,24 @@ export default function RootLayout({
           overflow-x-hidden
         `}
       >
-        {/* Tło z grafiką */}
+        {/* Tło tylko na mobile */}
+        <div
+          className="md:hidden fixed inset-0 -z-10 bg-[url('/backgroundsisi.jpg')] bg-center bg-cover"
+          aria-hidden="true"
+        />
+
+        {/* Tło desktop jak było */}
         <Image
           src="/grafittiburger2.jpg"
           alt=""
           fill
-          className="object-cover opacity-20 pointer-events-none select-none -z-10"
+          className="hidden md:block object-cover opacity-20 pointer-events-none select-none -z-10"
         />
 
-        {/* Owiń aplikację w kontekst sesji */}
         <ClientProvider>
-          <ClientWrapper>
-            {children}
-            <CheckoutModalDynamic />
-            <FloatingAuthButtons/>
-            <ReservationFloatingButton />
-          </ClientWrapper>
+          <ClientWrapper>{children}</ClientWrapper>
         </ClientProvider>
-         <Footer />
+        <Footer />
       </body>
     </html>
   );

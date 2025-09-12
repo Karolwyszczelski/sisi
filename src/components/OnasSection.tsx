@@ -1,174 +1,150 @@
+// src/components/OnasSection.tsx
 "use client";
 
+import { useState } from "react";
+import Link from "next/link";
 import Image from "next/image";
+import ReservationModal from "../components/ReservationModal";
 
 export default function OnasSection() {
-  return (
-    <section
-      id="onas"
-      className="relative w-full bg-yellow-400 text-black pt-16 pb-10 overflow-hidden"
+  const [isResOpen, setResOpen] = useState(false);
+
+  const ReserveButton = ({
+    className = "",
+    label = "Zarezerwuj stolik",
+  }: { className?: string; label?: string }) => (
+    <Link
+      href="#"
+      onClick={(e) => {
+        e.preventDefault();
+        setResOpen(true);
+      }}
+      className={`inline-flex items-center justify-center rounded-full px-6 py-3 text-sm md:text-base font-semibold text-black bg-white hover:bg-neutral-200 transition ${className}`}
+      aria-label="Otwórz okno rezerwacji stolika"
     >
-      <div className="max-w-6xl mx-auto px-8 md:px-16 relative z-10">
-        {/* Tytuł sekcji – powiększony */}
-        <h2 className="text-5xl md:text-6xl font-extrabold font-montserrat uppercase mb-6">
-          O nas
-        </h2>
+      {label}
+    </Link>
+  );
 
-        {/* Podtytuł / nazwa (wyśrodkowany) */}
-        <h3 className="text-center text-xl md:text-2xl font-montserrat font-semibold mb-4">
-          SISI Burger &amp; Pancake
-        </h3>
+  const FeatureCard = ({
+    icon,
+    title,
+    desc,
+    alt,
+  }: { icon: string; title: string; desc: string; alt: string }) => (
+    <div className="rounded-2xl bg-neutral-900 border border-neutral-800 p-6 md:p-7 text-white">
+      <div className="flex flex-col items-center text-center gap-3">
+        <div className="rounded-xl bg-neutral-800 p-4 ring-1 ring-neutral-700/60">
+          <Image src={icon} alt={alt} width={56} height={56} />
+        </div>
+        <h4 className="text-base md:text-lg font-semibold">{title}</h4>
+        <p className="text-sm md:text-base text-neutral-300 leading-relaxed">{desc}</p>
+      </div>
+    </div>
+  );
 
-        {/* Opis główny (wyśrodkowany) */}
-        <p className="text-center font-montserrat text-sm md:text-base leading-relaxed max-w-3xl mx-auto mb-6">
-          Naszą misją jest łączenie pysznych smaków burgerów i pancake’ów w jednym miejscu!
-          Staramy się zaskoczyć Was chrupiącym bekonem, aromatycznymi sosami, a także słodkimi
-          placuszkami z owocami i czekoladą. Nasza oferta jest ciągle poszerzana o nowe smaki,
-          aby każdy mógł znaleźć coś dla siebie.
-        </p>
+  return (
+    <>
+      <section
+        id="onas"
+        className="
+          relative w-full text-white overflow-hidden
+          bg-transparent
+          md:bg-[url('/backgroundsisi.jpg')] md:bg-cover md:bg-center md:bg-no-repeat
+        "
+        aria-labelledby="onas-heading"
+      >
+        {/* overlay: tylko desktop, by nie zasłaniać mobilnego stałego tła z layoutu */}
+        <div className="absolute inset-0 bg-black/50 hidden md:block" aria-hidden="true" />
 
-        {/* Sekcja atutów */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mt-10">
-          {/* Atut 1 */}
+        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-10 py-14 md:py-20">
+          {/* Nagłówek + opis */}
           <div className="flex flex-col items-center text-center">
-            <Image
-              src="/icon-1.png"
-              alt="Ikona jakości"
-              width={60}
-              height={60}
-              className="mb-4"
-            />
-            <h4 className="text-lg font-bold mb-2">Świeże składniki</h4>
-            <p className="text-sm leading-snug">
-              Codziennie dbamy o jakość produktów, by każdy kęs był wyjątkowy.
+            <span className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-black/40 px-3 py-1 text-[11px] font-medium text-neutral-200 tracking-wide">
+              <span className="h-1.5 w-1.5 rounded-full bg-yellow-400" />
+              Lokal w centrum Ciechanowa
+            </span>
+
+            <h2 id="onas-heading" className="mt-4 text-4xl md:text-6xl font-extrabold tracking-tight">
+              O nas
+            </h2>
+
+            <p className="mt-4 max-w-2xl text-sm md:text-base text-neutral-200 leading-relaxed">
+              <strong className="text-white">SISI Burger &amp; Pancake</strong> — chrupiące burgery i puszyste
+              pancake w jednym menu, z sezonowych, lokalnych składników.
             </p>
+
+            {/* CTA */}
+            <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+              <ReserveButton />
+              <Link
+                href="#menu"
+                className="inline-flex items-center justify-center rounded-full px-6 py-3 text-sm md:text-base font-semibold text-white border border-white hover:bg-white/10 transition"
+              >
+                Zobacz menu
+              </Link>
+            </div>
+
+            {/* Statystyki */}
+            <div className="mt-6 grid grid-cols-3 gap-3 max-w-xl w-full justify-items-center">
+              <div className="rounded-xl border border-white/20 bg-neutral-900/70 px-4 py-3 text-center">
+                <div className="text-lg md:text-2xl font-extrabold">100%</div>
+                <div className="text-[11px] md:text-xs text-neutral-200">Świeże składniki</div>
+              </div>
+              <div className="rounded-xl border border-white/20 bg-neutral-900/70 px-4 py-3 text-center">
+                <div className="text-lg md:text-2xl font-extrabold">#1</div>
+                <div className="text-[11px] md:text-xs text-neutral-200">Smak w okolicy</div>
+              </div>
+              <div className="rounded-xl border border-white/20 bg-neutral-900/70 px-4 py-3 text-center">
+                <div className="text-lg md:text-2xl font-extrabold">24/7</div>
+                <div className="text-[11px] md:text-xs text-neutral-200">Rezerwacje online</div>
+              </div>
+            </div>
           </div>
 
-          {/* Atut 2 */}
-          <div className="flex flex-col items-center text-center">
-            <Image
-              src="/icon-2.png"
+          {/* Atuty */}
+          <div className="mt-12 md:mt-16 max-w-5xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-5 md:gap-7 place-items-center">
+            <FeatureCard
+              icon="/icons/meat.png"
+              alt="Ikona mięsa"
+              title="Najlepsze mięso"
+              desc="Wołowina siekana na miejscu, bez konserwantów — od sprawdzonych dostawców."
+            />
+            <FeatureCard
+              icon="/icons/vegetable.png"
+              alt="Ikona warzyw"
+              title="Świeże składniki"
+              desc="Codziennie współpracujemy z lokalnymi dostawcami, by zapewnić najwyższą jakość."
+            />
+            <FeatureCard
+              icon="/icons/reservation.png"
               alt="Ikona rezerwacji"
-              width={60}
-              height={60}
-              className="mb-4"
+              title="Rezerwacja online"
+              desc="Kilka kliknięć i stolik gotowy. Szybko i wygodnie."
             />
-            <h4 className="text-lg font-bold mb-2">Rezerwacja online</h4>
-            <p className="text-sm leading-snug">
-              Zamówienie i rezerwacja w kilku klikach. Ciesz się szybką obsługą!
-            </p>
           </div>
 
-          {/* Atut 3 */}
-          <div className="flex flex-col items-center text-center">
+          {/* Obraz pod tekstem */}
+          <div className="mt-12 md:mt-16 flex justify-center">
             <Image
-              src="/icon-3.png"
-              alt="Ikona dostawy"
-              width={60}
-              height={60}
-              className="mb-4"
+              src="/onas-main.jpg"
+              alt="SISI Burger & Pancake — wnętrze lokalu"
+              width={1200}
+              height={700}
+              className="w-full max-w-5xl h-auto rounded-2xl object-cover"
             />
-            <h4 className="text-lg font-bold mb-2">Dostawa lub odbiór</h4>
-            <p className="text-sm leading-snug">
-              Sam zdecyduj, czy wolisz odwiedzić nas na miejscu, czy zamówić do domu.
-            </p>
           </div>
 
-          {/* Atut 4 */}
-          <div className="flex flex-col items-center text-center">
-            <Image
-              src="/icon-4.png"
-              alt="Ikona Mięsa"
-              width={60}
-              height={60}
-              className="mb-4"
-            />
-            <h4 className="text-lg font-bold mb-2">Ręcznie robione Mięso</h4>
-            <p className="text-sm leading-snug">
-              Wybieramy wołowinę najwyższej jakości i sami formujemy kotlety,
-              by dostarczyć wam niesamowity smak mięsa.
-            </p>
+          {/* CTA mobile pełna szerokość */}
+          <div className="mt-10 text-center md:hidden">
+            <ReserveButton className="w-full" />
           </div>
         </div>
-      </div>
 
-      {/* Kontener na historię (lewa kolumna) i opis (prawa kolumna) */}
-      <div className="max-w-6xl mx-auto px-8 md:px-16 mt-16">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-          {/* Lewa kolumna – „mapa”/timeline powstania */}
-          <div className="flex flex-col justify-center">
-            <h3 className="text-xl md:text-2xl font-bold mb-6">
-              Historia Sisi Ciechanów
-            </h3>
-
-            {/* Blok 1 */}
-            <div className="flex items-center gap-4 mb-6">
-              <Image
-                src="/foodtruck.png"
-                alt="Foodtruck Sisi"
-                width={50}
-                height={50}
-                className="object-contain"
-              />
-              <div>
-                <h4 className="font-bold text-sm">Foodtruck Sisi</h4>
-                <p className="text-xs">31 kwietnia 2021r</p>
-              </div>
-            </div>
-
-            {/* Blok 2 */}
-            <div className="flex items-center gap-4 mb-6">
-              <Image
-                src="/lokal-centrum.png"
-                alt="Mały lokal w centrum"
-                width={50}
-                height={50}
-                className="object-contain"
-              />
-              <div>
-                <h4 className="font-bold text-sm">Mały lokal w centrum</h4>
-                <p className="text-xs">2 stycznia 2022r</p>
-              </div>
-            </div>
-
-            {/* Blok 3 */}
-            <div className="flex items-center gap-4">
-              <Image
-                src="/lokal-obrzeza.png"
-                alt="Większy lokal"
-                width={50}
-                height={50}
-                className="object-contain"
-              />
-              <div>
-                <h4 className="font-bold text-sm">Większy lokal na obrzeżach miasta</h4>
-                <p className="text-xs">26 października 2023r</p>
-              </div>
-            </div>
-          </div>
-
-          {/* Prawa kolumna – tekst */}
-          <div className="leading-relaxed text-sm md:text-base">
-            <p className="mb-4">
-              <strong>Zapraszamy do restauracji Sisi Burger &amp; Pancake</strong>, jedynego miejsca w Ciechanowie, 
-              gdzie skosztujesz soczystych burgerów i puszystych, amerykańskich pancake! Znajdujemy się na osiedlu Bloki, 
-              co sprawia, że łatwo do nas trafić zarówno mieszkańcom, jak i odwiedzającym miasto.
-            </p>
-            <p className="mb-4">
-              Jeśli szukasz pysznego jedzenia w Ciechanowie, jesteśmy odpowiedzią na Twoje potrzeby. 
-              Nasze menu łączy klasykę amerykańskiej kuchni z lokalnymi smakami, a wszystkie dania 
-              przygotowujemy z najwyższej jakości składników. Sisi Burger &amp; Pancake to idealne 
-              miejsce na rodzinny obiad, spotkanie z przyjaciółmi czy szybki lunch.
-            </p>
-            <p className="mb-4">
-              Odwiedź nas i poczuj wyjątkowy klimat naszej restauracji. Sprawdź, dlaczego nasze burgery 
-              i pancake podbijają serca smakoszy z Ciechanowa i okolic. Wpisz w wyszukiwarkę 
-              <em> "restauracja Ciechanów", "jedzenie Ciechanów"</em> lub po prostu zajrzyj do nas 
-              osobiście. Czekamy na Ciebie z uśmiechem i pysznym jedzeniem!
-            </p>
-          </div>
-        </div>
-      </div>
-    </section>
+        {isResOpen && (
+          <ReservationModal isOpen={isResOpen} onClose={() => setResOpen(false)} />
+        )}
+      </section>
+    </>
   );
 }
