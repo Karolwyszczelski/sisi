@@ -14,8 +14,12 @@ import ClientProvider from "@/components/ClientProvider";
 import Footer from "@/components/Footer";
 
 export const metadata: Metadata = {
-  title: "SISI Ordering",
+  title: "SISI Burger & Pancakes",
   description: "Zamów najlepsze burgery i pancakes w Ciechanowie!",
+  icons: {
+    icon: "/favicon.ico",
+    apple: "/hamburger.png",
+  },
 };
 
 const montserrat = Montserrat({
