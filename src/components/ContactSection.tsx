@@ -18,14 +18,14 @@ export default function ContactSection() {
             <p className="text-sm mb-4">
               <strong>Godziny otwarcia:</strong>
               <br />
-              Pon - Pt: 10:00 - 20:00
+              Pon - Pt: 11:00 - 22:00
               <br />
-              Sob - Nd: 11:00 - 22:00
+              Sob - Nd: 11:00 - 24:00
             </p>
             <p className="text-sm mb-4">
               <strong>Telefon:</strong>{" "}
-              <a href="tel:123456789" className="underline hover:text-primary">
-                123 456 789
+              <a href="tel:+48515433488" className="underline hover:text-primary">
+                +48 515 433 488
               </a>
               <br />
               <strong>Email:</strong>{" "}

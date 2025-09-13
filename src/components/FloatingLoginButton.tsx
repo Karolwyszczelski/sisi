@@ -10,7 +10,6 @@ import { useRouter } from "next/navigation";
 import QRCode from "react-qr-code";
 import AddressAutocomplete from "@/components/menu/AddressAutocomplete";
 
-
 // --- Modale / Podkomponenty ---
 
 const RegistrationModal = memo(({
@@ -52,7 +51,7 @@ const RegistrationModal = memo(({
         <input
           type="tel"
           placeholder="Telefon (9 cyfr)"
-          pattern="^\d{9}$"
+          pattern="^\\d{9}$"
           className="w-full border rounded-lg px-3 py-2"
           value={phone}
           onChange={e => setPhone(e.target.value)}
@@ -220,39 +219,56 @@ const OrdersHistory: React.FC<{ supabaseClient: ReturnType<typeof createClientCo
   const session = useSession();
   const userId = session?.user?.id;
   const [orders, setOrders] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (!userId) return;
+    setLoading(true);
     supabaseClient
       .from("orders")
-      .select("*")
-      .eq("user_id", userId)
-      .eq("status", "completed")
+      .select("id, created_at, status, total_price, selected_option, items")
+      .eq("user", userId) // <-- kluczowa poprawka
       .order("created_at", { ascending: false })
+      .limit(15)
       .then(({ data, error }) => {
         if (!error && data) setOrders(data);
-      });
+      })
+      .finally(() => setLoading(false));
   }, [userId, supabaseClient]);
 
-  if (orders.length === 0) {
-    return <p className="text-center">Brak ukończonych zamówień.</p>;
-  }
+  if (!userId) return <p className="text-center">Zaloguj się, aby zobaczyć historię.</p>;
+  if (loading) return <p className="text-center">Ładowanie…</p>;
+  if (!orders.length) return <p className="text-center">Brak zamówień.</p>;
+
+  const label = (s?: string) =>
+    s === "placed" ? "Złożone"
+    : s === "preparing" ? "W przygotowaniu"
+    : s === "ready" ? "Gotowe do odbioru"
+    : s === "delivered" ? "Dostarczone"
+    : s === "completed" ? "Zakończone"
+    : s === "cancelled" ? "Anulowane"
+    : (s ?? "—");
 
   return (
     <div className="space-y-3">
       {orders.map(o => (
         <div key={o.id} className="border p-3 rounded-lg flex justify-between items-center">
           <div>
-            <p className="font-semibold">#{o.id}</p>
-            <p>{new Date(o.created_at).toLocaleString()}</p>
+            <p className="font-semibold">#{o.id} • {label(o.status)}</p>
+            <p className="text-sm text-gray-600">
+              {new Date(o.created_at).toLocaleString()} • {o.selected_option === "delivery" ? "Dostawa" : o.selected_option === "takeaway" ? "Na wynos" : "Na miejscu"}
+            </p>
           </div>
-          <button
-            type="button"
-            onClick={() => onRepeat(o)}
-            className="py-1 px-3 bg-black text-white rounded hover:bg-gray-800"
-          >
-            Zamów ponownie
-          </button>
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-semibold">{Number(o.total_price ?? 0).toFixed(2)} zł</span>
+            <button
+              type="button"
+              onClick={() => onRepeat(o)}
+              className="py-1 px-3 bg-black text-white rounded hover:bg-gray-800"
+            >
+              Zamów ponownie
+            </button>
+          </div>
         </div>
       ))}
     </div>
@@ -388,19 +404,16 @@ export default function FloatingAuthButtons() {
     }
   }, [supabase, router]);
 
+  // prosty „Zamów ponownie”: odkładamy pozycje do localStorage i przenosimy do menu
   const repeatOrder = useCallback(
-    async (o: any) => {
-      if (!session?.user?.id) return;
-      await supabase.from("orders").insert([
-        {
-          user_id: session.user.id,
-          order_items: o.order_items,
-          status: "pending",
-        },
-      ]);
-      alert("Zamówienie ponowione!");
+    (o: any) => {
+      try {
+        const items = typeof o.items === "string" ? JSON.parse(o.items) : (o.items || []);
+        localStorage.setItem("reorder_items", JSON.stringify(items));
+      } catch {}
+      router.push("/#menu");
     },
-    [supabase, session]
+    [router]
   );
 
   return (

@@ -125,10 +125,10 @@ export default function Hero() {
 
         {/* 3. Ikony social (desktop) */}
         <div className="hidden md:flex flex-col gap-6 text-white absolute right-4 sm:right-6 top-1/2 -translate-y-1/2 z-20">
-          <a href="https://facebook.com" target="_blank" rel="noopener noreferrer" className="hover:scale-110 transition drop-shadow">
+          <a href="https://facebook.com/sisiciechanow" target="_blank" rel="noopener noreferrer" className="hover:scale-110 transition drop-shadow">
             <Facebook className="w-5 h-5" />
           </a>
-          <a href="https://instagram.com" target="_blank" rel="noopener noreferrer" className="hover:scale-110 transition drop-shadow">
+          <a href="https://instagram.com/sisiciechanow" target="_blank" rel="noopener noreferrer" className="hover:scale-110 transition drop-shadow">
             <Instagram className="w-5 h-5" />
           </a>
         </div>
@@ -228,10 +228,10 @@ export default function Hero() {
 
   {/* social na mobile */}
   <div className="mt-6 flex items-center justify-center gap-6">
-    <a href="https://facebook.com" target="_blank" rel="noopener noreferrer" className="hover:opacity-80">
+    <a href="https://facebook.com/sisiciechanow" target="_blank" rel="noopener noreferrer" className="hover:opacity-80">
       <Facebook className="w-5 h-5" />
     </a>
-    <a href="https://instagram.com" target="_blank" rel="noopener noreferrer" className="hover:opacity-80">
+    <a href="https://instagram.com/sisiciechanow" target="_blank" rel="noopener noreferrer" className="hover:opacity-80">
       <Instagram className="w-5 h-5" />
     </a>
   </div>
