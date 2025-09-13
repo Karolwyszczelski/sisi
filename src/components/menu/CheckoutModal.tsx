@@ -277,6 +277,12 @@ export default function CheckoutModal() {
   const [restLoc, setRestLoc] = useState<{ lat: number; lng: number } | null>(null);
   const [deliveryInfo, setDeliveryInfo] = useState<{ cost: number; eta: string } | null>(null);
 
+  // EMAIL: sesja + walidacja (+ fallback do wpisanego)
+  const sessionEmail = session?.user?.email || "";
+  const effectiveEmail = (contactEmail || sessionEmail).trim();
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const validEmail = emailRegex.test(effectiveEmail);
+
   useEffect(() => {
     const id = setInterval(() => setShowBurger((b) => !b), 2000);
     return () => clearInterval(id);
@@ -390,7 +396,7 @@ export default function CheckoutModal() {
       user: isLoggedIn ? session!.user.id : null,
       name,
       phone,
-      contact_email: contactEmail || null,
+      contact_email: effectiveEmail, // zawsze przekazujemy działający e-mail
       delivery_cost: deliveryInfo?.cost || 0,
       total_price: totalWithDelivery,
       status: isOnline ? "pending" : paymentMethod === "Online" ? "pending" : "placed",
@@ -410,7 +416,7 @@ export default function CheckoutModal() {
       const product = products.find((p) => (p as any).name === item.name);
       return {
         product_id: product?.id,
-        name: item.name, 
+        name: item.name,
         quantity: item.quantity || 1,
         unit_price: item.price,
         options: {
@@ -433,11 +439,20 @@ export default function CheckoutModal() {
     return beforeOpen || afterClose;
   };
 
+  const guardEmail = () => {
+    if (!validEmail) {
+      setErrorMessage("Podaj poprawny adres e-mail – wyślemy potwierdzenie i link śledzenia.");
+      return false;
+    }
+    return true;
+  };
+
   const handleSubmitOrder = async () => {
     setErrorMessage(null);
     if (!selectedOption) return setErrorMessage("Wybierz sposób odbioru.");
     if (!paymentMethod) return setErrorMessage("Wybierz metodę płatności.");
     if (hoursGuardFail()) return setErrorMessage("Zamówienia przyjmujemy tylko w godz. 11:30–21:45.");
+    if (!guardEmail()) return;
 
     try {
       const orderPayload = buildOrderPayload(false);
@@ -461,6 +476,7 @@ export default function CheckoutModal() {
     if (!selectedOption) return setErrorMessage("Wybierz sposób odbioru.");
     if (!paymentMethod) return setErrorMessage("Wybierz metodę płatności.");
     if (hoursGuardFail()) return setErrorMessage("Zamówienia przyjmujemy tylko w godz. 11:30–21:45.");
+    if (!guardEmail()) return;
 
     try {
       const orderPayload = buildOrderPayload(true);
@@ -479,7 +495,7 @@ export default function CheckoutModal() {
         body: JSON.stringify({
           orderId: newOrderId,
           amount: totalWithDelivery,
-          email: contactEmail,
+          email: effectiveEmail, // ważne dla P24
           customerName: name,
         }),
       });
@@ -713,23 +729,26 @@ export default function CheckoutModal() {
                       value={phone}
                       onChange={(e) => setPhone(e.target.value)}
                     />
+                    {/* opcjonalny adres dla local/takeaway */}
                     {(selectedOption === "local" || selectedOption === "takeaway") && (
-                      <>
-                        <input
-                          type="text"
-                          placeholder="Adres (opcjonalnie)"
-                          className="w-full px-3 py-2 border rounded"
-                          value={optionalAddress}
-                          onChange={(e) => setOptionalAddress(e.target.value)}
-                        />
-                        <input
-                          type="email"
-                          placeholder="Email"
-                          className="w-full px-3 py-2 border rounded"
-                          value={contactEmail}
-                          onChange={(e) => setContactEmail(e.target.value)}
-                        />
-                      </>
+                      <input
+                        type="text"
+                        placeholder="Adres (opcjonalnie)"
+                        className="w-full px-3 py-2 border rounded"
+                        value={optionalAddress}
+                        onChange={(e) => setOptionalAddress(e.target.value)}
+                      />
+                    )}
+                    {/* e-mail ZAWSZE wymagany */}
+                    <input
+                      type="email"
+                      placeholder="Email (wymagany do potwierdzenia)"
+                      className="w-full px-3 py-2 border rounded"
+                      value={contactEmail}
+                      onChange={(e) => setContactEmail(e.target.value)}
+                    />
+                    {!validEmail && (
+                      <p className="text-xs text-red-600">Podaj poprawny adres e-mail.</p>
                     )}
                   </div>
                   <div className="flex justify-between mt-2">
@@ -738,7 +757,12 @@ export default function CheckoutModal() {
                     </button>
                     <button
                       onClick={nextStep}
-                      disabled={!name || !phone || (selectedOption === "delivery" && (!street || !postalCode || !city))}
+                      disabled={
+                        !name ||
+                        !phone ||
+                        !validEmail ||
+                        (selectedOption === "delivery" && (!street || !postalCode || !city))
+                      }
                       className="px-4 py-2 bg-yellow-400 rounded font-semibold disabled:opacity-50"
                     >
                       Dalej →
@@ -769,7 +793,7 @@ export default function CheckoutModal() {
                       {items.length === 0 && <p className="text-center text-gray-500">Brak produktów w koszyku.</p>}
                     </div>
 
-                    {/* PODSUMOWANIE + PŁATNOŚĆ — tylko MOBILE (na desktopie panel boczny) */}
+                    {/* PODSUMOWANIE + PŁATNOŚĆ — tylko MOBILE */}
                     <div className="w-full lg:hidden flex-shrink-0">
                       <div className="border rounded p-4 bg-gray-50 space-y-3">
                         <h3 className="text-lg font-semibold">Podsumowanie</h3>
