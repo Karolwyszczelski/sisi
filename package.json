@@ -8,7 +8,9 @@
     "start": "next start -p ${PORT:-3000} -H 0.0.0.0",
     "lint": "next lint"
   },
-  "engines": { "node": ">=18 <=22" },
+  "engines": {
+    "node": ">=18 <=22"
+  },
   "dependencies": {
     "@headlessui/react": "^2.2.2",
     "@heroicons/react": "^2.2.0",
@@ -29,6 +31,7 @@
     "lottie-react": "^2.4.1",
     "lucide-react": "^0.483.0",
     "next": "15.2.3",
+    "nodemailer": "^7.0.6",
     "react": "^19.0.0",
     "react-apexcharts": "^1.7.0",
     "react-calendar": "^5.1.0",
