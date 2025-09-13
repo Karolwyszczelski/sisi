@@ -4,6 +4,10 @@ import { createClient } from "@supabase/supabase-js";
 import { toZonedTime } from "date-fns-tz";
 import Twilio from "twilio";
 
+/* === email + link śledzenia === */
+import { trackingUrl } from "@/lib/orderLink";
+import { getTransport } from "@/lib/mailer";
+
 /* ============== Supabase admin ============== */
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -105,7 +109,7 @@ async function fetchProductsByIds(idsMixed: (string | number)[]) {
       .in("id", ids);
     if (!error && data && data.length) {
       const map = new Map<string, ProductRow>();
-      data.forEach((r: any) => map.set(String(r.id), r as ProductRow));
+      (data as any[]).forEach((r) => map.set(String(r.id), r as ProductRow));
       return map;
     }
   }
@@ -330,6 +334,43 @@ export async function POST(req: Request) {
       } catch (e: any) {
         console.warn("[orders.create] order_items insert not executed:", e?.message);
       }
+    }
+
+    // 6.1) E-mail do klienta z linkiem śledzenia
+    try {
+      if (n.contact_email) {
+        const origin = req.headers.get("origin") ?? process.env.APP_BASE_URL!;
+        const url = trackingUrl(origin, String(newOrderId));
+        const tr = getTransport();
+
+        const total =
+          typeof orderRow.total_price === "number"
+            ? orderRow.total_price.toFixed(2).replace(".", ",")
+            : String(orderRow.total_price ?? "0");
+
+        const html = `
+          <div style="font-family:Inter,Arial,sans-serif;line-height:1.5;color:#111">
+            <h2 style="margin:0 0 8px">Potwierdzenie zamówienia #${newOrderId}</h2>
+            <p style="margin:0 0 16px">Dziękujemy za zamówienie w SISI.</p>
+            <p style="margin:16px 0">
+              <a href="${url}" style="display:inline-block;padding:12px 18px;background:#111;color:#fff;border-radius:8px;text-decoration:none">
+                Sprawdź status i czas dostawy
+              </a>
+            </p>
+            <p style="margin:8px 0">Kwota: <strong>${total} zł</strong></p>
+            <p style="margin:8px 0">Opcja: <strong>${optLabel(orderRow.selected_option)}</strong></p>
+          </div>
+        `;
+
+        await tr.sendMail({
+          from: process.env.EMAIL_FROM!,
+          to: n.contact_email,
+          subject: `SISI • Potwierdzenie zamówienia #${newOrderId}`,
+          html,
+        });
+      }
+    } catch (mailErr) {
+      console.error("[orders.create] email to client error:", mailErr);
     }
 
     // 7) SMS do personelu (tylko tekst, poprawne E.164)
