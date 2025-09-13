@@ -396,7 +396,7 @@ export default function CheckoutModal() {
       user: isLoggedIn ? session!.user.id : null,
       name,
       phone,
-      contact_email: effectiveEmail, // zawsze przekazujemy działający e-mail
+      contact_email: effectiveEmail,
       delivery_cost: deliveryInfo?.cost || 0,
       total_price: totalWithDelivery,
       status: isOnline ? "pending" : paymentMethod === "Online" ? "pending" : "placed",
@@ -407,6 +407,8 @@ export default function CheckoutModal() {
       payload.city = city || null;
       payload.flat_number = flatNumber || null;
       payload.client_delivery_time = client_delivery_time;
+    } else if (optionalAddress.trim()) {
+      payload.address = optionalAddress.trim(); // zapisz opcjonalny adres dla local/takeaway
     }
     return payload;
   };
@@ -495,7 +497,7 @@ export default function CheckoutModal() {
         body: JSON.stringify({
           orderId: newOrderId,
           amount: totalWithDelivery,
-          email: effectiveEmail, // ważne dla P24
+          email: effectiveEmail,
           customerName: name,
         }),
       });
@@ -729,7 +731,6 @@ export default function CheckoutModal() {
                       value={phone}
                       onChange={(e) => setPhone(e.target.value)}
                     />
-                    {/* opcjonalny adres dla local/takeaway */}
                     {(selectedOption === "local" || selectedOption === "takeaway") && (
                       <input
                         type="text"
@@ -739,7 +740,6 @@ export default function CheckoutModal() {
                         onChange={(e) => setOptionalAddress(e.target.value)}
                       />
                     )}
-                    {/* e-mail ZAWSZE wymagany */}
                     <input
                       type="email"
                       placeholder="Email (wymagany do potwierdzenia)"
@@ -747,7 +747,7 @@ export default function CheckoutModal() {
                       value={contactEmail}
                       onChange={(e) => setContactEmail(e.target.value)}
                     />
-                    {!validEmail && (
+                    {contactEmail !== "" && !validEmail && (
                       <p className="text-xs text-red-600">Podaj poprawny adres e-mail.</p>
                     )}
                   </div>
