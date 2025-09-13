@@ -6,7 +6,7 @@ import Twilio from "twilio";
 
 /* === email + link śledzenia === */
 import { trackingUrl } from "@/lib/orderLink";
-import { getTransport } from "@/lib/mailer";
+import { sendEmail } from "@/lib/mailer";
 
 /* ============== Supabase admin ============== */
 const supabaseAdmin = createClient(
@@ -336,12 +336,12 @@ export async function POST(req: Request) {
       }
     }
 
-    // 6.1) E-mail do klienta z linkiem śledzenia
+    // 6.1) E-mail do klienta z linkiem śledzenia (Resend / fallback)
     try {
       if (n.contact_email) {
-        const origin = req.headers.get("origin") ?? process.env.APP_BASE_URL!;
+        const origin =
+          process.env.APP_BASE_URL || new URL(req.url).origin;
         const url = trackingUrl(origin, String(newOrderId));
-        const tr = getTransport();
 
         const total =
           typeof orderRow.total_price === "number"
@@ -362,8 +362,7 @@ export async function POST(req: Request) {
           </div>
         `;
 
-        await tr.sendMail({
-          from: process.env.EMAIL_FROM!,
+        await sendEmail({
           to: n.contact_email,
           subject: `SISI • Potwierdzenie zamówienia #${newOrderId}`,
           html,
@@ -373,7 +372,7 @@ export async function POST(req: Request) {
       console.error("[orders.create] email to client error:", mailErr);
     }
 
-    // 7) SMS do personelu (tylko tekst, poprawne E.164)
+    // 7) SMS do personelu
     try {
       if (TWILIO_FROM_NUMBER && STAFF_PHONE_NUMBER) {
         const to = normalizePhone(STAFF_PHONE_NUMBER);
