@@ -1,79 +1,82 @@
 // src/app/api/payments/create-transaction/route.ts
 import { NextResponse } from "next/server";
-import crypto from 'crypto';
+import crypto from "crypto";
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
-    const { orderId, amount, email, customerName } = body;
+    const { orderId, amount, email, customerName } = await request.json();
 
-    // Pobierz swoje dane z Przelewy24 (MUSISZ JE DODAĆ DO .env.local)
     const P24_MERCHANT_ID = process.env.P24_MERCHANT_ID!;
-    const P24_POS_ID = process.env.P24_POS_ID!; // Zazwyczaj to to samo co merchant_id
-    const P24_CRC_KEY = process.env.P24_CRC_KEY!;
-    const P24_API_KEY = process.env.P24_API_KEY!; // Klucz do API
-    
-    // Sprawdź, czy wszystkie zmienne środowiskowe są ustawione
-    if (!P24_MERCHANT_ID || !P24_POS_ID || !P24_CRC_KEY || !P24_API_KEY) {
-      throw new Error("Brak konfiguracji Przelewy24 w zmiennych środowiskowych.");
+    const P24_POS_ID      = process.env.P24_POS_ID!;
+    const P24_CRC_KEY     = process.env.P24_CRC_KEY!;
+    const P24_ENV         = (process.env.P24_ENV || "sandbox").toLowerCase();
+
+    if (!P24_MERCHANT_ID || !P24_POS_ID || !P24_CRC_KEY) {
+      throw new Error("Brak P24_MERCHANT_ID / P24_POS_ID / P24_CRC_KEY.");
     }
 
-    // Unikalny identyfikator sesji dla tej transakcji
-    const sessionId = `${orderId}-${new Date().getTime()}`;
+    const host =
+      P24_ENV === "prod" ? "secure.przelewy24.pl" : "sandbox.przelewy24.pl";
 
-    // Dane transakcji
-    const transactionData = {
-      merchantId: parseInt(P24_MERCHANT_ID),
-      posId: parseInt(P24_POS_ID),
-      sessionId: sessionId,
-      amount: Math.round(amount * 100), // Kwota w groszach
-      currency: "PLN",
-      description: `Zamówienie #${orderId}`,
-      email: email,
-      client: customerName,
-      country: "PL",
-      language: "pl",
-      urlReturn: `${process.env.NEXT_PUBLIC_BASE_URL}/order/success?orderId=${orderId}`, // URL powrotu po udanej płatności
-      urlStatus: `${process.env.NEXT_PUBLIC_BASE_URL}/api/payments/webhook`, // URL na który P24 wyśle powiadomienie (webhook)
-      sign: "", // Podpis wygenerujemy poniżej
-    };
+    const sessionId = `${orderId}-${Date.now()}`.slice(0, 100);
+    const amountInGrosz = Math.max(1, Math.round(Number(amount) * 100));
 
-    // Generowanie podpisu (sign) - kluczowy element bezpieczeństwa
-    const jsonToSign = JSON.stringify({
-      sessionId: transactionData.sessionId,
-      merchantId: transactionData.merchantId,
-      amount: transactionData.amount,
-      currency: transactionData.currency,
-      crc: P24_CRC_KEY,
+    const baseUrl =
+      process.env.APP_BASE_URL ||
+      process.env.NEXT_PUBLIC_BASE_URL ||
+      "https://www.sisiciechanow.pl";
+
+    // klasyczny sign: md5(sessionId|merchantId|amount|currency|crc)
+    const p24_sign = crypto
+      .createHash("md5")
+      .update(
+        `${sessionId}|${P24_MERCHANT_ID}|${amountInGrosz}|PLN|${P24_CRC_KEY}`
+      )
+      .digest("hex");
+
+    const payload = new URLSearchParams({
+      p24_merchant_id: String(P24_MERCHANT_ID),
+      p24_pos_id: String(P24_POS_ID),
+      p24_session_id: sessionId,
+      p24_amount: String(amountInGrosz),
+      p24_currency: "PLN",
+      p24_description: `Zamówienie #${orderId}`,
+      p24_email: email || "",
+      p24_client: customerName || "",
+      p24_country: "PL",
+      p24_language: "pl",
+      p24_url_return: `${baseUrl}/order/success?orderId=${orderId}`,
+      p24_url_status: `${baseUrl}/api/payments/webhook`,
+      p24_api_version: "3.2",
+      p24_sign,
     });
 
-    transactionData.sign = crypto.createHmac('sha384', P24_API_KEY).update(jsonToSign).digest('hex');
-
-    // Rejestracja transakcji w Przelewy24
-    const p24Response = await fetch("https://sandbox.przelewy24.pl/api/v1/transaction/register", {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            // W nowym API autoryzacja jest przez Basic Auth
-            'Authorization': 'Basic ' + Buffer.from(`${P24_POS_ID}:${P24_API_KEY}`).toString('base64')
-        },
-        body: JSON.stringify(transactionData)
+    const res = await fetch(`https://${host}/trnRegister`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: payload.toString(),
     });
 
-    const p24Result = await p24Response.json();
-
-    if (p24Response.status !== 200 || !p24Result.data?.token) {
-        console.error("Błąd odpowiedzi z Przelewy24:", p24Result);
-        throw new Error(p24Result.error || "Nie udało się zarejestrować transakcji w Przelewy24.");
+    const text = await res.text();
+    // Spróbuj JSON, w razie czego querystring
+    let token = "";
+    try {
+      const j = JSON.parse(text);
+      token = j?.data?.token || j?.token || "";
+    } catch {
+      const qs = new URLSearchParams(text);
+      token = qs.get("token") || "";
     }
-    
-    // Generujemy link do płatności
-    const paymentUrl = `https://sandbox.przelewy24.pl/trnRequest/${p24Result.data.token}`;
 
+    if (!res.ok || !token) {
+      console.error("P24 trnRegister error:", text);
+      throw new Error("Rejestracja transakcji nie powiodła się.");
+    }
+
+    const paymentUrl = `https://${host}/trnRequest/${token}`;
     return NextResponse.json({ paymentUrl });
-
-  } catch (error: any) {
-    console.error("[P24_CREATE_TRANSACTION_ERROR]", error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch (e: any) {
+    console.error("[P24_CREATE_TRANSACTION_CLASSIC_ERROR]", e);
+    return NextResponse.json({ error: e.message }, { status: 500 });
   }
 }

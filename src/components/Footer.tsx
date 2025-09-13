@@ -47,17 +47,17 @@ export default function Footer() {
             <Link href="/order" className="group relative inline-flex items-center justify-center w-10 h-10 bg-primary rounded-full hover:bg-primary-light transition">
               <ShoppingCart className="w-5 h-5 text-black group-hover:scale-110 transition-transform" />
             </Link>
-            <a href="tel:+48500100200" className="group relative inline-flex items-center justify-center w-10 h-10 bg-primary rounded-full hover:bg-primary-light transition">
+            <a href="tel:+48515433488" className="group relative inline-flex items-center justify-center w-10 h-10 bg-primary rounded-full hover:bg-primary-light transition">
               <Phone className="w-5 h-5 text-black group-hover:scale-110 transition-transform" />
             </a>
           </div>
 
           <h4 className="font-bold text-lg mb-4">Znajdź nas</h4>
           <div className="flex items-center justify-center md:justify-start space-x-4">
-            <a href="https://facebook.com" target="_blank" rel="noopener noreferrer" className="group w-8 h-8 flex items-center justify-center bg-white rounded-full hover:bg-gray-600 transition">
+            <a href="https://facebook.com/sisiciechanow" target="_blank" rel="noopener noreferrer" className="group w-8 h-8 flex items-center justify-center bg-white rounded-full hover:bg-gray-600 transition">
               <Facebook className="w-4 h-4 text-black group-hover:scale-110 transition-transform" />
             </a>
-            <a href="https://instagram.com" target="_blank" rel="noopener noreferrer" className="group w-8 h-8 flex items-center justify-center bg-white rounded-full hover:bg-gray-600 transition">
+            <a href="https://instagram.com/sisiciechanow" target="_blank" rel="noopener noreferrer" className="group w-8 h-8 flex items-center justify-center bg-white rounded-full hover:bg-gray-600 transition">
               <Instagram className="w-4 h-4 text-black group-hover:scale-110 transition-transform" />
             </a>
           </div>

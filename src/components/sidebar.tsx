@@ -44,26 +44,42 @@ const MENU: MenuItem[] = [
   { label: "Bieżące zamówienia", href: "/admin/current-orders", Icon: Clock, roles: ["admin", "employee"] },
   { label: "Historia", href: "/admin/history", Icon: List, roles: ["admin", "employee"] },
   { label: "Rezerwacje", href: "/admin/reservations", Icon: Calendar, roles: ["admin", "employee"] },
-  { label: "Menu", href: "/admin/menu", Icon: Utensils, roles: ["admin", "employee"] }, // talerz z widelcem
-  { label: "Burger miesiąca", href: "/admin/burger-miesiaca", Icon: BurgerIcon, roles: ["admin"] }, // burger
+  { label: "Menu", href: "/admin/menu", Icon: Utensils, roles: ["admin", "employee"] },
+  { label: "Burger miesiąca", href: "/admin/burger-miesiaca", Icon: BurgerIcon, roles: ["admin"] },
   { label: "Ustawienia", href: "/admin/settings", Icon: Settings, roles: ["admin"] },
 ];
 
 const STORAGE_KEY = "admin_sidebar_collapsed";
+// „Mobile”/tablet: zwijamy domyślnie poniżej 1024px (md/lg breakpoint).
+const MOBILE_QUERY = "(max-width: 1023px)";
 
 export default function Sidebar() {
   const [role, setRole] = useState<Role>(null);
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState<boolean>(() => {
+    // Inicjalny stan: z localStorage, a jeśli brak — z media query (mobile = zwinięty).
+    if (typeof window === "undefined") return true;
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved != null) return saved === "true";
+    return window.matchMedia(MOBILE_QUERY).matches;
+  });
+
   const pathname = usePathname() || "";
   const router = useRouter();
   const supabase = createClientComponentClient();
 
   useEffect(() => {
-    const v = typeof window !== "undefined" ? localStorage.getItem(STORAGE_KEY) : null;
-    if (v != null) setCollapsed(v === "true");
+    // Jeśli nie było wpisu w localStorage, zapisz aktualny stan (m.in. z media query).
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved == null) localStorage.setItem(STORAGE_KEY, collapsed ? "true" : "false");
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
   useEffect(() => {
-    try { localStorage.setItem(STORAGE_KEY, collapsed ? "true" : "false"); } catch {}
+    try {
+      localStorage.setItem(STORAGE_KEY, collapsed ? "true" : "false");
+    } catch {}
   }, [collapsed]);
 
   useEffect(() => {
@@ -73,7 +89,9 @@ export default function Sidebar() {
         if (!session) { setRole(null); return; }
         const { data } = await supabase.from("profiles").select("role").eq("id", session.user.id).single();
         setRole((data?.role as Role) ?? null);
-      } catch { setRole(null); }
+      } catch {
+        setRole(null);
+      }
     })();
   }, [supabase]);
 
@@ -140,7 +158,7 @@ export default function Sidebar() {
         </ul>
       </nav>
 
-      {/* Footer: zawsze na tej samej wysokości */}
+      {/* Footer */}
       <div className="sticky bottom-0 bg-black/95 border-t border-gray-800 px-2 py-3">
         <button
           onClick={handleLogout}
