@@ -1,7 +1,7 @@
 // src/components/menu/CheckoutModal.tsx
 "use client";
 
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef, useDeferredValue, useCallback } from "react";
 import Script from "next/script";
 import { X, MapPin, ShoppingBag, Truck } from "lucide-react";
 import useIsClient from "@/lib/useIsClient";
@@ -304,8 +304,7 @@ export default function CheckoutModal() {
   // LEGAL CHECKBOX (wymagany)
   const [legalAccepted, setLegalAccepted] = useState(false);
 
-  // PROMO CODE
-  const [promoInput, setPromoInput] = useState("");
+  // PROMO
   const [promo, setPromo] = useState<{ code: string; type: "percent" | "amount"; value: number } | null>(null);
   const [promoError, setPromoError] = useState<string | null>(null);
 
@@ -321,10 +320,18 @@ export default function CheckoutModal() {
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   const validEmail = emailRegex.test(effectiveEmail);
 
+  // ESC + blokada scrolla
   useEffect(() => {
-    const id = setInterval(() => setShowBurger((b) => !b), 2000);
-    return () => clearInterval(id);
-  }, []);
+    if (!isCheckoutOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") closeCheckoutModal(); };
+    window.addEventListener("keydown", onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [isCheckoutOpen]);
 
   useEffect(() => {
     if (isLoggedIn && session) {
@@ -397,7 +404,6 @@ export default function CheckoutModal() {
   useEffect(() => {
     if (!isClient || !TURNSTILE_SITE_KEY) return;
     if (checkoutStep === 3 && isCheckoutOpen) {
-      // Spróbuj w obu miejscach – zrenderuje się tylko widoczny
       renderTurnstile(tsMobileRef.current);
       renderTurnstile(tsDesktopRef.current);
     } else {
@@ -470,7 +476,6 @@ export default function CheckoutModal() {
     setErrorMessage(null);
     setShowConfirmation(false);
     setPromo(null);
-    setPromoInput("");
     setPromoError(null);
     setLegalAccepted(false);
     removeTurnstile();
@@ -557,9 +562,9 @@ export default function CheckoutModal() {
   };
 
   // PROMO — walidacja
-  const applyPromo = async () => {
+  const applyPromo = async (codeRaw: string) => {
     setPromoError(null);
-    const code = promoInput.trim();
+    const code = codeRaw.trim();
     if (!code) return;
 
     const currentBase = subtotal + (deliveryInfo?.cost || 0);
@@ -600,11 +605,7 @@ export default function CheckoutModal() {
     }
   };
 
-  const clearPromo = () => {
-    setPromo(null);
-    setPromoInput("");
-    setPromoError(null);
-  };
+  const clearPromo = () => { setPromo(null); setPromoError(null); };
 
   const requireLegalBeforeConfirm = () => {
     if (!legalAccepted) {
@@ -615,7 +616,7 @@ export default function CheckoutModal() {
   };
 
   const requireCaptchaBeforeConfirm = () => {
-    if (!TURNSTILE_SITE_KEY) return true; // jeśli nie skonfigurowano – nie blokuj
+    if (!TURNSTILE_SITE_KEY) return true;
     if (!turnstileToken) {
       setErrorMessage("Potwierdź, że nie jesteś robotem.");
       return false;
@@ -693,35 +694,44 @@ export default function CheckoutModal() {
   if (!isClient || !isCheckoutOpen) return null;
 
   // Sekcja promocji
-  const PromoSection = () => (
-    <div className="mt-2">
-      <h4 className="font-semibold mb-1">Kod promocyjny</h4>
-      <div className="flex gap-2">
-        <input
-          type="text"
-          value={promoInput}
-          onChange={(e) => setPromoInput(e.target.value)}
-          placeholder="Wpisz kod"
-          className="flex-1 border rounded px-3 py-2 text-sm"
-        />
-        {!promo ? (
-          <button onClick={applyPromo} className="px-3 py-2 bg-gray-900 text-white rounded text-sm">
-            Zastosuj
-          </button>
-        ) : (
-          <button onClick={clearPromo} className="px-3 py-2 bg-gray-200 rounded text-sm">
-            Usuń kod
-          </button>
+  const PromoSection: React.FC = () => {
+    const [localCode, setLocalCode] = useState("");
+    const deferred = useDeferredValue(localCode);
+    const onApply = useCallback(() => { applyPromo(deferred); }, [deferred]);
+
+    return (
+      <div className="mt-2">
+        <h4 className="font-semibold mb-1">Kod promocyjny</h4>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            inputMode="text"
+            autoComplete="off"
+            spellCheck={false}
+            value={localCode}
+            onChange={(e) => setLocalCode(e.target.value)}
+            placeholder="Wpisz kod"
+            className="flex-1 border rounded px-3 py-2 text-sm"
+          />
+          {!promo ? (
+            <button onClick={onApply} className="px-3 py-2 bg-gray-900 text-white rounded text-sm">
+              Zastosuj
+            </button>
+          ) : (
+            <button onClick={clearPromo} className="px-3 py-2 bg-gray-200 rounded text-sm">
+              Usuń kod
+            </button>
+          )}
+        </div>
+        {promoError && <p className="text-xs text-red-600 mt-1">{promoError}</p>}
+        {promo && (
+          <p className="text-xs text-green-700 mt-1">
+            Zastosowano kod <b>{promo.code}</b> — {promo.type === "percent" ? `${promo.value}%` : `${promo.value.toFixed(2)} zł`} zniżki.
+          </p>
         )}
       </div>
-      {promoError && <p className="text-xs text-red-600 mt-1">{promoError}</p>}
-      {promo && (
-        <p className="text-xs text-green-700 mt-1">
-          Zastosowano kod <b>{promo.code}</b> — {promo.type === "percent" ? `${promo.value}%` : `${promo.value.toFixed(2)} zł`} zniżki.
-        </p>
-      )}
-    </div>
-  );
+    );
+  };
 
   // Zgody
   const LegalConsent = () => (
@@ -767,8 +777,16 @@ export default function CheckoutModal() {
         />
       )}
 
-      <div className="fixed inset-0 z-50 bg-black/60 flex items-start justify-center p-4 overflow-auto">
-        <div className="relative flex flex-col lg:flex-row w-full max-w-4xl gap-6">
+      <div
+        className="fixed inset-0 z-50 bg-black/60 flex items-start justify-center p-4 overflow-auto"
+        role="dialog"
+        aria-modal="true"
+        onMouseDown={(e) => { if (e.target === e.currentTarget) closeCheckoutModal(); }}
+      >
+        <div
+          className="relative flex flex-col lg:flex-row w-full max-w-4xl gap-6"
+          onMouseDown={(e) => e.stopPropagation()}
+        >
           {/* MAIN CARD */}
           <div className="flex-1 bg-white rounded-md shadow-lg p-6 overflow-auto max-h-[90vh]">
             {!orderSent && (
