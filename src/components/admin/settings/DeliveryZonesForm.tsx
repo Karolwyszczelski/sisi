@@ -1,11 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { produce } from "immer";
-import { v4 as uuidv4 } from "uuid";
+import { useEffect, useMemo, useState } from "react";
 
-interface Zone {
-  id?: string;
+type Zone = {
+  id: string;
   min_distance_km: number;
   max_distance_km: number;
   min_order_value: number;
@@ -13,164 +11,204 @@ interface Zone {
   free_over: number | null;
   eta_min_minutes: number;
   eta_max_minutes: number;
-}
+  cost_fixed: number;
+  cost_per_km: number;
+};
+
+const emptyZone: Omit<Zone, "id"> = {
+  min_distance_km: 0,
+  max_distance_km: 3,
+  min_order_value: 0,
+  cost: 0,
+  free_over: null,
+  eta_min_minutes: 30,
+  eta_max_minutes: 60,
+  cost_fixed: 0,
+  cost_per_km: 0,
+};
 
 export default function DeliveryZonesForm() {
   const [zones, setZones] = useState<Zone[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [draft, setDraft] = useState(emptyZone);
+  const [error, setError] = useState<string | null>(null);
+
+  const sorted = useMemo(
+    () =>
+      [...zones].sort(
+        (a, b) => a.min_distance_km - b.min_distance_km || a.max_distance_km - b.max_distance_km
+      ),
+    [zones]
+  );
+
+  async function load() {
+    setLoading(true);
+    setError(null);
+    const r = await fetch("/api/admin/delivery-zones", { cache: "no-store" });
+    if (!r.ok) {
+      setError("Nie udało się pobrać stref.");
+      setLoading(false);
+      return;
+    }
+    const j = await r.json();
+    setZones(j.zones || []);
+    setLoading(false);
+  }
 
   useEffect(() => {
-    fetch("/api/settings/deliveryZones")
-      .then(res => res.json())
-      .then(setZones)
-      .catch(console.error);
+    load();
   }, []);
 
-  const addZone = () => {
-    setZones(zs =>
-      zs.concat({
-        id: uuidv4(),
-        min_distance_km: 0,
-        max_distance_km: 0,
-        min_order_value: 0,
-        cost: 0,
-        free_over: null,
-        eta_min_minutes: 0,
-        eta_max_minutes: 0,
-      })
-    );
-  };
-
-  const update = (idx: number, key: keyof Zone, val: any) => {
-    setZones(zs =>
-      produce(zs, draft => {
-        // @ts-ignore
-        draft[idx][key] = val;
-      })
-    );
-  };
-
-  const save = async () => {
-    const res = await fetch("/api/settings/deliveryZones", {
+  async function create() {
+    setCreating(true);
+    setError(null);
+    const r = await fetch("/api/admin/delivery-zones", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(zones),
+      body: JSON.stringify(draft),
     });
-    if (!res.ok) {
-      const { error } = await res.json();
-      return alert("Błąd: " + error);
+    setCreating(false);
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      setError(j?.error || "Błąd zapisu.");
+      return;
     }
-    alert("Strefy zapisane!");
-  };
+    setDraft(emptyZone);
+    await load();
+  }
+
+  async function save(z: Zone) {
+    setSavingId(z.id);
+    setError(null);
+    const { id, ...payload } = z;
+    const r = await fetch(`/api/admin/delivery-zones/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    setSavingId(null);
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      setError(j?.error || "Błąd zapisu.");
+      return;
+    }
+    await load();
+  }
+
+  async function remove(id: string) {
+    if (!confirm("Usunąć tę strefę?")) return;
+    const r = await fetch(`/api/admin/delivery-zones/${id}`, { method: "DELETE" });
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      setError(j?.error || "Błąd usuwania.");
+      return;
+    }
+    setZones((prev) => prev.filter((x) => x.id !== id));
+  }
+
+  function editLocal(id: string, key: keyof Zone, val: any) {
+    setZones((prev) => prev.map((z) => (z.id === id ? { ...z, [key]: val } : z)));
+  }
 
   return (
     <div className="space-y-4">
-      <h2 className="text-xl font-bold">Strefy dostawy</h2>
-      <button
-        onClick={addZone}
-        className="px-3 py-1 bg-green-600 text-white rounded"
-      >
-        + Nowa strefa
-      </button>
+      {error && <div className="rounded-md border border-rose-200 bg-rose-50 p-3 text-rose-700">{error}</div>}
 
-      <div className="space-y-3">
-        {zones.map((z, i) => (
-          <div
-            key={z.id || i}
-            className="grid grid-cols-8 gap-2 items-end border p-3 rounded"
-          >
-            <div>
-              <label>min km</label>
-              <input
-                type="number"
-                className="w-full border rounded px-1"
-                value={z.min_distance_km}
-                onChange={e =>
-                  update(i, "min_distance_km", +e.target.value)
-                }
-              />
-            </div>
-            <div>
-              <label>max km</label>
-              <input
-                type="number"
-                className="w-full border rounded px-1"
-                value={z.max_distance_km}
-                onChange={e =>
-                  update(i, "max_distance_km", +e.target.value)
-                }
-              />
-            </div>
-            <div>
-              <label>min zamówienie</label>
-              <input
-                type="number"
-                className="w-full border rounded px-1"
-                value={z.min_order_value}
-                onChange={e =>
-                  update(i, "min_order_value", +e.target.value)
-                }
-              />
-            </div>
-            <div>
-              <label>koszt</label>
-              <input
-                type="number"
-                className="w-full border rounded px-1"
-                value={z.cost}
-                onChange={e => update(i, "cost", +e.target.value)}
-              />
-            </div>
-            <div>
-              <label>darmowa powyżej</label>
-              <input
-                type="number"
-                className="w-full border rounded px-1"
-                value={z.free_over ?? ""}
-                onChange={e =>
-                  update(i, "free_over", e.target.value ? +e.target.value : null)
-                }
-              />
-            </div>
-            <div>
-              <label>ETA min (min)</label>
-              <input
-                type="number"
-                className="w-full border rounded px-1"
-                value={z.eta_min_minutes}
-                onChange={e =>
-                  update(i, "eta_min_minutes", +e.target.value)
-                }
-              />
-            </div>
-            <div>
-              <label>ETA max (min)</label>
-              <input
-                type="number"
-                className="w-full border rounded px-1"
-                value={z.eta_max_minutes}
-                onChange={e =>
-                  update(i, "eta_max_minutes", +e.target.value)
-                }
-              />
-            </div>
-            <button
-              onClick={() =>
-                setZones(zs => zs.filter((_, idx) => idx !== i))
-              }
-              className="col-span-1 bg-red-600 text-white px-2 py-1 rounded"
-            >
-              Usuń
-            </button>
-          </div>
-        ))}
+      {/* Lista stref */}
+      <div className="rounded-md border bg-white">
+        <div className="border-b p-3 font-semibold">Strefy dostawy</div>
+        <div className="divide-y">
+          {loading ? (
+            <div className="p-4 text-sm text-slate-600">Ładowanie…</div>
+          ) : sorted.length === 0 ? (
+            <div className="p-4 text-sm text-slate-600">Brak stref.</div>
+          ) : (
+            sorted.map((z) => (
+              <div key={z.id} className="grid grid-cols-1 gap-3 p-3 md:grid-cols-12 md:items-center">
+                <Num label="Min km" value={z.min_distance_km} onChange={(v) => editLocal(z.id, "min_distance_km", v)} />
+                <Num label="Max km" value={z.max_distance_km} onChange={(v) => editLocal(z.id, "max_distance_km", v)} />
+                <Num label="Min zam. (zł)" value={z.min_order_value} onChange={(v) => editLocal(z.id, "min_order_value", v)} />
+                <Num label="Koszt (zł)" value={z.cost} onChange={(v) => editLocal(z.id, "cost", v)} />
+                <Num label="Free od (zł)" value={z.free_over ?? 0} nullable onChange={(v) => editLocal(z.id, "free_over", v)} />
+                <Num label="ETA min" value={z.eta_min_minutes} onChange={(v) => editLocal(z.id, "eta_min_minutes", v)} />
+                <Num label="ETA max" value={z.eta_max_minutes} onChange={(v) => editLocal(z.id, "eta_max_minutes", v)} />
+                <Num label="Stała (zł)" value={z.cost_fixed} onChange={(v) => editLocal(z.id, "cost_fixed", v)} />
+                <Num label="zł/km" value={z.cost_per_km} onChange={(v) => editLocal(z.id, "cost_per_km", v)} />
+                <div className="md:col-span-2 flex gap-2">
+                  <button
+                    onClick={() => save(z)}
+                    className="h-9 rounded-md bg-emerald-600 px-3 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
+                    disabled={savingId === z.id}
+                  >
+                    Zapisz
+                  </button>
+                  <button
+                    onClick={() => remove(z.id)}
+                    className="h-9 rounded-md bg-rose-600 px-3 text-sm font-semibold text-white hover:bg-rose-500"
+                  >
+                    Usuń
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
       </div>
 
-      <button
-        onClick={save}
-        className="mt-4 px-4 py-2 bg-blue-600 text-white rounded"
-      >
-        Zapisz strefy
-      </button>
+      {/* Dodawanie */}
+      <div className="rounded-md border bg-white">
+        <div className="border-b p-3 font-semibold">Dodaj strefę</div>
+        <div className="grid grid-cols-1 gap-3 p-3 md:grid-cols-12 md:items-center">
+          <Num label="Min km" value={draft.min_distance_km} onChange={(v) => setDraft({ ...draft, min_distance_km: v })} />
+          <Num label="Max km" value={draft.max_distance_km} onChange={(v) => setDraft({ ...draft, max_distance_km: v })} />
+          <Num label="Min zam. (zł)" value={draft.min_order_value} onChange={(v) => setDraft({ ...draft, min_order_value: v })} />
+          <Num label="Koszt (zł)" value={draft.cost} onChange={(v) => setDraft({ ...draft, cost: v })} />
+          <Num label="Free od (zł)" value={draft.free_over ?? 0} nullable onChange={(v) => setDraft({ ...draft, free_over: v })} />
+          <Num label="ETA min" value={draft.eta_min_minutes} onChange={(v) => setDraft({ ...draft, eta_min_minutes: v })} />
+          <Num label="ETA max" value={draft.eta_max_minutes} onChange={(v) => setDraft({ ...draft, eta_max_minutes: v })} />
+          <Num label="Stała (zł)" value={draft.cost_fixed} onChange={(v) => setDraft({ ...draft, cost_fixed: v })} />
+          <Num label="zł/km" value={draft.cost_per_km} onChange={(v) => setDraft({ ...draft, cost_per_km: v })} />
+          <div className="md:col-span-2">
+            <button
+              onClick={create}
+              className="h-9 rounded-md bg-indigo-600 px-3 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-50"
+              disabled={creating}
+            >
+              Dodaj
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
+  );
+}
+
+function Num({
+  label,
+  value,
+  onChange,
+  nullable = false,
+}: {
+  label: string;
+  value: number | null;
+  onChange: (v: number | null) => void;
+  nullable?: boolean;
+}) {
+  return (
+    <label className="flex flex-col gap-1 md:col-span-1">
+      <span className="text-[12px] text-slate-600">{label}</span>
+      <input
+        type="number"
+        className="h-9 rounded-md border px-2"
+        value={value ?? ""}
+        onChange={(e) => {
+          const v = e.target.value;
+          if (nullable && v === "") onChange(null);
+          else onChange(Number(v));
+        }}
+      />
+    </label>
   );
 }
