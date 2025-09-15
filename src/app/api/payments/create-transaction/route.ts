@@ -1,8 +1,12 @@
 export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
-import crypto from "crypto";
 import { createClient } from "@supabase/supabase-js";
+import {
+  amountToGrosze,
+  hostFromEnv,
+  p24SignRegisterMD5,
+} from "@/lib/p24";
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -15,49 +19,55 @@ export async function POST(request: Request) {
     const { orderId, email, customerName } = await request.json();
     if (!orderId) throw new Error("Brak orderId.");
 
-    // Kwotę bierzemy z DB (nie z klienta)
+    // Kwota tylko z DB
     const { data: order, error: ordErr } = await supabaseAdmin
       .from("orders")
       .select("id,total_price")
       .eq("id", orderId)
       .single();
     if (ordErr || !order) throw new Error("Nie znaleziono zamówienia.");
-    const amountInGrosz = Math.max(1, Math.round(Number(order.total_price || 0) * 100));
+
+    const amountGr = amountToGrosze(order.total_price || 0);
 
     const P24_MERCHANT_ID = process.env.P24_MERCHANT_ID!;
-    const P24_POS_ID      = process.env.P24_POS_ID!;
-    const P24_CRC_KEY     = process.env.P24_CRC_KEY!;
-    const P24_ENV         = (process.env.P24_ENV || "sandbox").toLowerCase();
+    const P24_POS_ID = process.env.P24_POS_ID!;
+    const P24_CRC_KEY = process.env.P24_CRC_KEY!;
     if (!P24_MERCHANT_ID || !P24_POS_ID || !P24_CRC_KEY) {
       throw new Error("Brak P24_MERCHANT_ID / P24_POS_ID / P24_CRC_KEY.");
     }
 
-    const host = P24_ENV === "prod" ? "secure.przelewy24.pl" : "sandbox.przelewy24.pl";
-    const sessionId = `${orderId}-${Date.now()}`.slice(0, 100);
+    const host = hostFromEnv();
+    // stały, deterministyczny sessionId dla zamówienia
+    const sessionId = `sisi-${orderId}`;
 
     const baseUrl =
       process.env.APP_BASE_URL ||
       process.env.NEXT_PUBLIC_BASE_URL ||
       "https://www.sisiciechanow.pl";
 
-    // md5(sessionId|merchantId|amount|currency|crc)
-    const p24_sign = crypto
-      .createHash("md5")
-      .update(`${sessionId}|${P24_MERCHANT_ID}|${amountInGrosz}|PLN|${P24_CRC_KEY}`)
-      .digest("hex");
+    // UWAGA: masz stronę /orders/success
+    const p24_url_return = `${baseUrl}/orders/success?orderId=${orderId}`;
+
+    const p24_sign = p24SignRegisterMD5(
+      sessionId,
+      P24_MERCHANT_ID,
+      amountGr,
+      "PLN",
+      P24_CRC_KEY
+    );
 
     const payload = new URLSearchParams({
       p24_merchant_id: String(P24_MERCHANT_ID),
       p24_pos_id: String(P24_POS_ID),
       p24_session_id: sessionId,
-      p24_amount: String(amountInGrosz),
+      p24_amount: String(amountGr),
       p24_currency: "PLN",
       p24_description: `Zamówienie #${orderId}`,
       p24_email: email || "",
       p24_client: customerName || "",
       p24_country: "PL",
       p24_language: "pl",
-      p24_url_return: `${baseUrl}/order/success?orderId=${orderId}`,
+      p24_url_return,
       p24_url_status: `${baseUrl}/api/payments/webhook`,
       p24_api_version: "3.2",
       p24_sign,
@@ -86,6 +96,7 @@ export async function POST(request: Request) {
     await supabaseAdmin
       .from("orders")
       .update({
+        status: "pending",
         payment_status: "pending",
         payment_method: "Online",
         p24_session_id: sessionId,

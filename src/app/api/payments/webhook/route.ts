@@ -1,8 +1,8 @@
 export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
-import crypto from "crypto";
 import { createClient } from "@supabase/supabase-js";
+import { amountToGrosze, hostFromEnv, p24SignVerifyMD5 } from "@/lib/p24";
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -10,93 +10,95 @@ const supabaseAdmin = createClient(
   { auth: { persistSession: false } }
 );
 
-export async function POST(request: Request) {
+// P24 wysyła application/x-www-form-urlencoded
+async function readFormOrJson(req: Request) {
+  const ctype = req.headers.get("content-type") || "";
+  if (ctype.includes("application/x-www-form-urlencoded")) {
+    const text = await req.text();
+    const qs = new URLSearchParams(text);
+    const obj: Record<string, string> = {};
+    qs.forEach((v, k) => (obj[k] = v));
+    return obj;
+  }
   try {
-    const { orderId, email, customerName } = await request.json();
-    if (!orderId) throw new Error("Brak orderId.");
+    return await req.json();
+  } catch {
+    return {};
+  }
+}
 
-    // Kwotę bierzemy z DB (nie z klienta)
-    const { data: order, error: ordErr } = await supabaseAdmin
-      .from("orders")
-      .select("id,total_price")
-      .eq("id", orderId)
-      .single();
-    if (ordErr || !order) throw new Error("Nie znaleziono zamówienia.");
-    const amountInGrosz = Math.max(1, Math.round(Number(order.total_price || 0) * 100));
+export async function POST(req: Request) {
+  try {
+    const b: any = await readFormOrJson(req);
 
     const P24_MERCHANT_ID = process.env.P24_MERCHANT_ID!;
-    const P24_POS_ID      = process.env.P24_POS_ID!;
-    const P24_CRC_KEY     = process.env.P24_CRC_KEY!;
-    const P24_ENV         = (process.env.P24_ENV || "sandbox").toLowerCase();
+    const P24_POS_ID = process.env.P24_POS_ID!;
+    const P24_CRC_KEY = process.env.P24_CRC_KEY!;
     if (!P24_MERCHANT_ID || !P24_POS_ID || !P24_CRC_KEY) {
-      throw new Error("Brak P24_MERCHANT_ID / P24_POS_ID / P24_CRC_KEY.");
+      throw new Error("Brak konfiguracji P24");
     }
 
-    const host = P24_ENV === "prod" ? "secure.przelewy24.pl" : "sandbox.przelewy24.pl";
-    const sessionId = `${orderId}-${Date.now()}`.slice(0, 100);
+    // nazewnictwo wg v3.2
+    const sessionId = b.p24_session_id || b.sessionId;
+    const orderId = b.p24_order_id || b.orderId;
+    const amount = Number(b.p24_amount ?? b.amount);
+    const currency = b.p24_currency || b.currency || "PLN";
+    const sign = b.p24_sign || b.sign;
 
-    const baseUrl =
-      process.env.APP_BASE_URL ||
-      process.env.NEXT_PUBLIC_BASE_URL ||
-      "https://www.sisiciechanow.pl";
+    if (!sessionId || !orderId || !amount || !sign) {
+      return NextResponse.json({ error: "Bad payload" }, { status: 400 });
+    }
 
-    // md5(sessionId|merchantId|amount|currency|crc)
-    const p24_sign = crypto
-      .createHash("md5")
-      .update(`${sessionId}|${P24_MERCHANT_ID}|${amountInGrosz}|PLN|${P24_CRC_KEY}`)
-      .digest("hex");
+    // weryfikacja podpisu z notyfikacji
+    const expected = p24SignVerifyMD5(sessionId, orderId, Number(amount), currency, P24_CRC_KEY);
+    if (expected !== String(sign)) {
+      console.error("P24 webhook: sign mismatch");
+      return NextResponse.json({ error: "Invalid sign" }, { status: 400 });
+    }
 
-    const payload = new URLSearchParams({
+    // verify call
+    const host = hostFromEnv();
+    const verifyPayload = new URLSearchParams({
       p24_merchant_id: String(P24_MERCHANT_ID),
       p24_pos_id: String(P24_POS_ID),
-      p24_session_id: sessionId,
-      p24_amount: String(amountInGrosz),
-      p24_currency: "PLN",
-      p24_description: `Zamówienie #${orderId}`,
-      p24_email: email || "",
-      p24_client: customerName || "",
-      p24_country: "PL",
-      p24_language: "pl",
-      p24_url_return: `${baseUrl}/order/success?orderId=${orderId}`,
-      p24_url_status: `${baseUrl}/api/payments/webhook`,
-      p24_api_version: "3.2",
-      p24_sign,
+      p24_session_id: String(sessionId),
+      p24_amount: String(amount),
+      p24_currency: String(currency),
+      p24_order_id: String(orderId),
+      p24_sign: expected,
     });
 
-    const res = await fetch(`https://${host}/trnRegister`, {
+    const vr = await fetch(`https://${host}/trnVerify`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: payload.toString(),
+      body: verifyPayload.toString(),
     });
+    const vtxt = await vr.text();
 
-    const text = await res.text();
-    let token = "";
-    try {
-      const j = JSON.parse(text);
-      token = j?.data?.token || j?.token || "";
-    } catch {
-      const qs = new URLSearchParams(text);
-      token = qs.get("token") || "";
+    const ok =
+      (vr.ok && /error=0/.test(vtxt)) ||
+      (vr.ok && (() => { try { const j = JSON.parse(vtxt); return j?.data?.status === "success"; } catch { return false; } })());
+
+    // z sessionId wyciągamy id zamówienia
+    const oId = Number(String(sessionId).replace("sisi-", "").split("-")[0]) || null;
+
+    if (ok && oId) {
+      await supabaseAdmin
+        .from("orders")
+        .update({ status: "paid", payment_status: "paid", paid_at: new Date().toISOString() })
+        .eq("id", oId);
+      return NextResponse.json({ ok: true });
     }
-    if (!res.ok || !token) {
-      console.error("P24 trnRegister error:", text);
-      throw new Error("Rejestracja transakcji nie powiodła się.");
+
+    if (oId) {
+      await supabaseAdmin
+        .from("orders")
+        .update({ payment_status: "failed" })
+        .eq("id", oId);
     }
-
-    await supabaseAdmin
-      .from("orders")
-      .update({
-        payment_status: "pending",
-        payment_method: "Online",
-        p24_session_id: sessionId,
-        p24_token: token,
-      })
-      .eq("id", orderId);
-
-    const paymentUrl = `https://${host}/trnRequest/${token}`;
-    return NextResponse.json({ paymentUrl });
+    return NextResponse.json({ ok: false }, { status: 400 });
   } catch (e: any) {
-    console.error("[P24_CREATE_TRANSACTION_ERROR]", e);
-    return NextResponse.json({ error: e.message }, { status: 500 });
+    console.error("[P24_WEBHOOK_ERROR]", e);
+    return NextResponse.json({ error: "Server error" }, { status: 500 });
   }
 }

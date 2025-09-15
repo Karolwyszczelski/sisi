@@ -1,24 +1,41 @@
-// src/lib/p24.ts
 import crypto from "crypto";
 
-export const isProd = (process.env.P24_ENV || "sandbox") === "prod";
+export const P24_ENV = (process.env.P24_ENV || "sandbox").toLowerCase();
+export const isProd = P24_ENV === "prod";
 export const P24_BASE = isProd
   ? "https://secure.przelewy24.pl"
   : "https://sandbox.przelewy24.pl";
 
-export function p24RegisterUrl() {
-  return `${P24_BASE}/api/v1/transaction/register`;
-}
-export function p24VerifyUrl() {
-  return `${P24_BASE}/api/v1/transaction/verify`;
+export const hostFromEnv = () => (isProd ? "secure.przelewy24.pl" : "sandbox.przelewy24.pl");
+
+// API v3.2 (legacy) – md5(sessionId|merchantId|amount|currency|crc)
+export function p24SignRegisterMD5(
+  sessionId: string,
+  merchantId: string | number,
+  amountGr: number,
+  currency: string,
+  crc: string
+) {
+  return crypto
+    .createHash("md5")
+    .update(`${sessionId}|${merchantId}|${amountGr}|${currency}|${crc}`)
+    .digest("hex");
 }
 
-// HMAC-SHA384(json, API_KEY), json musi zawierać crc
-export function p24SignHmacSha384(payload: object, apiKey: string) {
-  const json = JSON.stringify(payload);
-  return crypto.createHmac("sha384", apiKey).update(json).digest("hex");
+// API v3.2 (legacy) verify – md5(sessionId|orderId|amount|currency|crc)
+export function p24SignVerifyMD5(
+  sessionId: string,
+  orderId: string | number,
+  amountGr: number,
+  currency: string,
+  crc: string
+) {
+  return crypto
+    .createHash("md5")
+    .update(`${sessionId}|${orderId}|${amountGr}|${currency}|${crc}`)
+    .digest("hex");
 }
 
 export function amountToGrosze(amountPln: number) {
-  return Math.round(Number(amountPln) * 100);
+  return Math.max(1, Math.round(Number(amountPln) * 100));
 }
