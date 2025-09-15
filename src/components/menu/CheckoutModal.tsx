@@ -310,6 +310,7 @@ export default function CheckoutModal() {
 
   // Turnstile
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const [turnstileError, setTurnstileError] = useState(false);
   const tsIdRef = useRef<any>(null);
   const tsMobileRef = useRef<HTMLDivElement | null>(null);
   const tsDesktopRef = useRef<HTMLDivElement | null>(null);
@@ -373,10 +374,14 @@ export default function CheckoutModal() {
   const renderTurnstile = (target: HTMLDivElement | null) => {
     if (!TURNSTILE_SITE_KEY || !window.turnstile || !isVisible(target)) return;
     try {
+      setTurnstileError(false);
       tsIdRef.current = window.turnstile.render(target!, {
         sitekey: TURNSTILE_SITE_KEY,
         callback: (t: string) => setTurnstileToken(t),
-        "error-callback": () => setTurnstileToken(null),
+        "error-callback": () => {
+          setTurnstileToken(null);
+          setTurnstileError(true);
+        },
         "expired-callback": () => {
           setTurnstileToken(null);
           try {
@@ -387,7 +392,7 @@ export default function CheckoutModal() {
         theme: "auto",
       });
     } catch {
-      // ignore
+      setTurnstileError(true);
     }
   };
 
@@ -399,6 +404,7 @@ export default function CheckoutModal() {
     } catch {}
     tsIdRef.current = null;
     setTurnstileToken(null);
+    setTurnstileError(false);
   };
 
   useEffect(() => {
@@ -412,6 +418,12 @@ export default function CheckoutModal() {
     return () => removeTurnstile();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isClient, isCheckoutOpen, checkoutStep]);
+
+  useEffect(() => {
+    if (TURNSTILE_SITE_KEY && turnstileError) {
+      setShowConfirmation(false);
+    }
+  }, [turnstileError]);
 
   const baseTotal = useMemo<number>(() => {
     return items.reduce((acc: number, it: any) => {
@@ -468,6 +480,8 @@ export default function CheckoutModal() {
   }, [promo, subtotal, deliveryInfo]);
 
   const totalWithDelivery = Math.max(0, subtotal + (deliveryInfo?.cost || 0) - discount);
+
+  const shouldHideOrderActions = Boolean(TURNSTILE_SITE_KEY && turnstileError);
 
   const closeCheckoutModal = () => {
     originalCloseCheckoutModal();
@@ -757,14 +771,25 @@ export default function CheckoutModal() {
   );
 
   // Turnstile widget (mobile/desktop)
-  const TurnstileBox: React.FC<{ boxRef: React.RefObject<HTMLDivElement> }> = ({ boxRef }) =>
-    TURNSTILE_SITE_KEY ? (
+  const TurnstileBox: React.FC<{ boxRef: React.RefObject<HTMLDivElement> }> = ({ boxRef }) => {
+    if (!TURNSTILE_SITE_KEY) return null;
+
+    return (
       <div className="mt-2">
         <h4 className="font-semibold mb-1">Weryfikacja</h4>
-        <div ref={boxRef} />
-        <p className="text-[11px] text-gray-500 mt-1">Chronimy formularz przed botami.</p>
+        {turnstileError ? (
+          <p className="text-sm text-red-600">
+            Nie udało się załadować weryfikacji. Spróbuj odświeżyć stronę.
+          </p>
+        ) : (
+          <>
+            <div ref={boxRef} />
+            <p className="text-[11px] text-gray-500 mt-1">Chronimy formularz przed botami.</p>
+          </>
+        )}
       </div>
-    ) : null;
+    );
+  };
 
   return (
     <>
@@ -774,6 +799,11 @@ export default function CheckoutModal() {
           async
           defer
           strategy="afterInteractive"
+          onError={() => {
+            setTurnstileError(true);
+            setTurnstileToken(null);
+          }}
+          onLoad={() => setTurnstileError(false)}
         />
       )}
 
@@ -1126,25 +1156,29 @@ export default function CheckoutModal() {
                             <TurnstileBox boxRef={tsMobileRef} />
 
                             {!showConfirmation ? (
-                              <button
-                                onClick={() => setShowConfirmation(true)}
-                                disabled={!paymentMethod || !legalAccepted || (TURNSTILE_SITE_KEY ? !turnstileToken : false)}
-                                className="w-full mt-3 py-2 bg-yellow-400 text-black rounded font-semibold disabled:opacity-50"
-                              >
-                                Potwierdź płatność
-                              </button>
-                            ) : (
-                              <div className="flex flex-col gap-2 mt-2">
+                              !shouldHideOrderActions && (
                                 <button
-                                  onClick={paymentMethod === "Online" ? handleOnlinePayment : handleSubmitOrder}
-                                  className="w-full py-2 bg-black text-white rounded font-semibold hover:opacity-95"
+                                  onClick={() => setShowConfirmation(true)}
+                                  disabled={!paymentMethod || !legalAccepted || (TURNSTILE_SITE_KEY ? !turnstileToken : false)}
+                                  className="w-full mt-3 py-2 bg-yellow-400 text-black rounded font-semibold disabled:opacity-50"
                                 >
-                                  ✅ Zamawiam i płacę ({paymentMethod})
+                                  Potwierdź płatność
                                 </button>
-                                <button onClick={() => setShowConfirmation(false)} className="text-xs underline">
-                                  Zmień metodę
-                                </button>
-                              </div>
+                              )
+                            ) : (
+                              !shouldHideOrderActions && (
+                                <div className="flex flex-col gap-2 mt-2">
+                                  <button
+                                    onClick={paymentMethod === "Online" ? handleOnlinePayment : handleSubmitOrder}
+                                    className="w-full py-2 bg-black text-white rounded font-semibold hover:opacity-95"
+                                  >
+                                    ✅ Zamawiam i płacę ({paymentMethod})
+                                  </button>
+                                  <button onClick={() => setShowConfirmation(false)} className="text-xs underline">
+                                    Zmień metodę
+                                  </button>
+                                </div>
+                              )
                             )}
                           </div>
                         </div>
@@ -1240,25 +1274,29 @@ export default function CheckoutModal() {
                   <TurnstileBox boxRef={tsDesktopRef} />
 
                   {!showConfirmation ? (
-                    <button
-                      onClick={() => setShowConfirmation(true)}
-                      disabled={!paymentMethod || !legalAccepted || (TURNSTILE_SITE_KEY ? !turnstileToken : false)}
-                      className="w-full mt-3 py-2 bg-yellow-400 text-black rounded font-semibold disabled:opacity-50"
-                    >
-                      Potwierdź płatność
-                    </button>
-                  ) : (
-                    <div className="flex flex-col gap-2 mt-2">
+                    !shouldHideOrderActions && (
                       <button
-                        onClick={paymentMethod === "Online" ? handleOnlinePayment : handleSubmitOrder}
-                        className="w-full py-2 bg-black text-white rounded font-semibold hover:opacity-95"
+                        onClick={() => setShowConfirmation(true)}
+                        disabled={!paymentMethod || !legalAccepted || (TURNSTILE_SITE_KEY ? !turnstileToken : false)}
+                        className="w-full mt-3 py-2 bg-yellow-400 text-black rounded font-semibold disabled:opacity-50"
                       >
-                        ✅ Zamawiam i płacę ({paymentMethod})
+                        Potwierdź płatność
                       </button>
-                      <button onClick={() => setShowConfirmation(false)} className="text-xs underline">
-                        Zmień
-                      </button>
-                    </div>
+                    )
+                  ) : (
+                    !shouldHideOrderActions && (
+                      <div className="flex flex-col gap-2 mt-2">
+                        <button
+                          onClick={paymentMethod === "Online" ? handleOnlinePayment : handleSubmitOrder}
+                          className="w-full py-2 bg-black text-white rounded font-semibold hover:opacity-95"
+                        >
+                          ✅ Zamawiam i płacę ({paymentMethod})
+                        </button>
+                        <button onClick={() => setShowConfirmation(false)} className="text-xs underline">
+                          Zmień
+                        </button>
+                      </div>
+                    )
                   )}
                 </div>
               </div>
