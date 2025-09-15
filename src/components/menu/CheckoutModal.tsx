@@ -310,6 +310,7 @@ export default function CheckoutModal() {
 
   // Turnstile
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const [turnstileReady, setTurnstileReady] = useState(false);
   const tsIdRef = useRef<any>(null);
   const tsMobileRef = useRef<HTMLDivElement | null>(null);
   const tsDesktopRef = useRef<HTMLDivElement | null>(null);
@@ -402,7 +403,13 @@ export default function CheckoutModal() {
   };
 
   useEffect(() => {
-    if (!isClient || !TURNSTILE_SITE_KEY) return;
+    if (typeof window !== "undefined" && window.turnstile) {
+      setTurnstileReady(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isClient || !TURNSTILE_SITE_KEY || !turnstileReady) return;
     if (checkoutStep === 3 && isCheckoutOpen) {
       renderTurnstile(tsMobileRef.current);
       renderTurnstile(tsDesktopRef.current);
@@ -411,7 +418,7 @@ export default function CheckoutModal() {
     }
     return () => removeTurnstile();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isClient, isCheckoutOpen, checkoutStep]);
+  }, [isClient, isCheckoutOpen, checkoutStep, turnstileReady]);
 
   const baseTotal = useMemo<number>(() => {
     return items.reduce((acc: number, it: any) => {
@@ -774,6 +781,11 @@ export default function CheckoutModal() {
           async
           defer
           strategy="afterInteractive"
+          onReady={() => setTurnstileReady(true)}
+          onError={(e) => {
+            console.error("Turnstile script failed to load", e);
+            setTurnstileReady(false);
+          }}
         />
       )}
 
