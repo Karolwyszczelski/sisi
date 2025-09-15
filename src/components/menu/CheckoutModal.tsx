@@ -386,8 +386,8 @@ export default function CheckoutModal() {
         retry: "auto",
         theme: "auto",
       });
-    } catch {
-      // ignore
+    } catch (error) {
+      console.error("Turnstile render failed for target:", target, error);
     }
   };
 
