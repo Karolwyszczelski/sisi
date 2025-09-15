@@ -1,4 +1,3 @@
-// src/app/admin/pickup-order/page.tsx
 "use client";
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
@@ -29,7 +28,7 @@ interface Order {
   order_items?: any;
   selected_option?: "local" | "takeaway" | "delivery";
   payment_method?: PaymentMethod;
-  payment_status?: PaymentStatus; // 'pending' | 'paid' | 'failed' (dla Online); może być też używana pomocniczo dla innych
+  payment_status?: PaymentStatus; // 'pending' | 'paid' | 'failed'
 }
 
 /* =============== Utils danych + parsery =============== */
@@ -342,11 +341,15 @@ export default function PickupOrdersPage() {
     return () => { void supabase.removeChannel(ch); };
   }, [fetchOrders, supabase]);
 
+  // szybki polling gdy są zamówienia Online->pending
   useEffect(() => {
-    if (editingOrderId) return;
-    const iv = setInterval(() => fetchOrders(), 5000);
+    const hasPending = orders.some(
+      (o) => o.payment_method === "Online" && o.payment_status === "pending"
+    );
+    if (!hasPending || editingOrderId) return;
+    const iv = setInterval(() => fetchOrders(), 3000);
     return () => clearInterval(iv);
-  }, [fetchOrders, editingOrderId]);
+  }, [orders, editingOrderId, fetchOrders]);
 
   const updateLocal = (id: string, upd: Partial<Order>) =>
     setOrders((prev) => prev.map((o) => (o.id === id ? { ...o, ...upd } : o)));
@@ -419,7 +422,7 @@ export default function PickupOrdersPage() {
     try {
       setEditingOrderId(o.id);
       const patch: any = { payment_method: method };
-      if (method !== "Online") patch.payment_status = null; // czyścimy status online
+      if (method !== "Online") patch.payment_status = null;
       const res = await fetch(`/api/orders/${o.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -448,7 +451,6 @@ export default function PickupOrdersPage() {
   };
 
   const markPaidQuick = async (o: Order) => {
-    // szybki przycisk "Oznacz jako opłacone"
     try {
       setEditingOrderId(o.id);
       const res = await fetch(`/api/orders/${o.id}`, {
@@ -461,6 +463,10 @@ export default function PickupOrdersPage() {
     } finally {
       setEditingOrderId(null);
     }
+  };
+
+  const refreshPaymentStatus = async (_id: string) => {
+    await fetchOrders();
   };
 
   const filtered = useMemo(
@@ -530,16 +536,27 @@ export default function PickupOrdersPage() {
                           <option>Online</option>
                         </select>
                         {o.payment_method === "Online" && (
-                          <select
-                            value={o.payment_status || "pending"}
-                            onChange={(e) => setPaymentStatus(o, e.target.value as Exclude<PaymentStatus, null>)}
-                            className="h-8 rounded border px-2 text-xs"
-                            disabled={editingOrderId === o.id}
-                          >
-                            <option value="pending">oczekuje</option>
-                            <option value="paid">opłacone</option>
-                            <option value="failed">błąd</option>
-                          </select>
+                          <>
+                            <select
+                              value={o.payment_status || "pending"}
+                              onChange={(e) => setPaymentStatus(o, e.target.value as Exclude<PaymentStatus, null>)}
+                              className="h-8 rounded border px-2 text-xs"
+                              disabled={editingOrderId === o.id}
+                            >
+                              <option value="pending">oczekuje</option>
+                              <option value="paid">opłacone</option>
+                              <option value="failed">błąd</option>
+                            </select>
+                            {o.payment_status === "pending" && (
+                              <button
+                                onClick={() => refreshPaymentStatus(o.id)}
+                                className="h-8 rounded bg-sky-600 px-2 text-xs font-semibold text-white hover:bg-sky-500"
+                                disabled={editingOrderId === o.id}
+                              >
+                                Odśwież status
+                              </button>
+                            )}
+                          </>
                         )}
                         {o.payment_method !== "Online" && o.payment_status !== "paid" && (
                           <button
@@ -568,7 +585,6 @@ export default function PickupOrdersPage() {
                 </div>
 
                 <footer className="mt-4 flex flex-wrap items-center gap-2">
-                  {/* NEW / PLACED */}
                   {(o.status === "new" || o.status === "placed") && (
                     <>
                       <AcceptButton order={o} onAccept={(m) => acceptAndSetTime(o, m)} />
@@ -584,7 +600,6 @@ export default function PickupOrdersPage() {
                     </>
                   )}
 
-                  {/* ACCEPTED */}
                   {o.status === "accepted" && (
                     <>
                       <CancelButton orderId={o.id} onOrderUpdated={() => fetchOrders()} />
@@ -614,7 +629,6 @@ export default function PickupOrdersPage() {
                     </>
                   )}
 
-                  {/* CANCELLED */}
                   {o.status === "cancelled" && (
                     <button
                       onClick={() => restoreOrder(o.id)}
@@ -634,7 +648,6 @@ export default function PickupOrdersPage() {
 
   return (
     <div className="mx-auto max-w-6xl p-4 sm:p-6">
-      {/* Filtry */}
       <div className="sticky top-0 z-20 -mx-4 mb-5 bg-white/85 p-4 backdrop-blur sm:mx-0 sm:rounded-md sm:border">
         <div className="flex flex-wrap items-center gap-2">
           <select className="h-10 rounded-md border px-3 text-sm" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value as any)}>
@@ -672,7 +685,6 @@ export default function PickupOrdersPage() {
 
       {selectedProduct && <ProductDetailsModal product={selectedProduct} onClose={() => setSelectedProduct(null)} />}
 
-      {/* Paginacja */}
       <div className="mb-24 mt-6 flex flex-col items-center justify-center gap-3 sm:flex-row">
         <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1} className="h-10 rounded-md border px-4 text-sm disabled:opacity-50">
           Poprzednia
