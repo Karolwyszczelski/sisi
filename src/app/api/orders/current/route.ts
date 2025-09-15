@@ -9,7 +9,7 @@ import { createClient } from "@supabase/supabase-js";
 import { getSessionAndRole } from "@/lib/serverAuth";
 import type { Database } from "@/types/supabase";
 
-const supabaseAdmin = createClient(
+const supabaseAdmin = createClient<Database>(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!,
   { auth: { persistSession: false } }
@@ -24,36 +24,29 @@ export async function GET(request: Request) {
     const limit = Math.min(parseInt(searchParams.get("limit") || "10", 10), 50);
     const offset = Math.max(parseInt(searchParams.get("offset") || "0", 10), 0);
 
-    const supabase =
-      role === "admin" || role === "employee"
-        ? supabaseAdmin
-        : createRouteHandlerClient<Database>({ cookies });
+    // Admin/employee: pełne dane + relacje (bez RLS)
+    if (role === "admin" || role === "employee") {
+      const { data, count, error } = await supabaseAdmin
+        .from("orders")
+        .select("*, order_items(*, products(*))", { count: "exact" })
+        .order("created_at", { ascending: false })
+        .range(offset, offset + limit - 1);
 
-    let query = supabase
-      .from("orders")
-      .select(
-        `
-        id, created_at, status,
-        name, customer_name, client_name, phone,
-        items,
-        selected_option, total_price, delivery_cost,
-        street, flat_number, city, address,
-        client_delivery_time, deliveryTime, delivery_time,
-        payment_method, payment_status
-      `,
-        { count: "exact" }
-      )
-      .order("created_at", { ascending: false });
-
-    if (role !== "admin" && role !== "employee") {
-      query = query
-        .eq("user_id", session.user.id)
-        .in("status", ["new", "placed", "accepted"]);
+      if (error) throw error;
+      return NextResponse.json({ orders: data ?? [], totalCount: count ?? 0 });
     }
 
-    const { data, count, error } = await query.range(offset, offset + limit - 1);
-    if (error) throw error;
+    // Klient: prosty widok (RLS), bez joinów żeby nie blokowały
+    const supabaseUser = createRouteHandlerClient<Database>({ cookies });
+    const { data, count, error } = await supabaseUser
+      .from("orders")
+      .select("*", { count: "exact" })
+      .eq("user_id", session.user.id)
+      .in("status", ["new", "placed", "accepted"])
+      .order("created_at", { ascending: false })
+      .range(offset, offset + limit - 1);
 
+    if (error) throw error;
     return NextResponse.json({ orders: data ?? [], totalCount: count ?? 0 });
   } catch (e: any) {
     console.error("[orders.current] error:", e);
