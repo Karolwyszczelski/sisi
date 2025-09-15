@@ -12,6 +12,7 @@ import Image from "next/image";
 import ClientWrapper from "@/components/ClientWrapper";
 import ClientProvider from "@/components/ClientProvider";
 import Footer from "@/components/Footer";
+import CookieBanner from "@/components/legal/CookieBanner";
 
 export const metadata: Metadata = {
   title: "SISI Burger & Pancakes",
@@ -78,6 +79,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <ClientWrapper>{children}</ClientWrapper>
         </ClientProvider>
         <Footer />
+        <CookieBanner />
       </body>
     </html>
   );

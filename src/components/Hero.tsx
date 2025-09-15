@@ -215,7 +215,7 @@ export default function Hero() {
         Zamów teraz
       </a>
       <a
-        href="tel:+48600000000"
+        href="tel:+48515433488"
         className="px-4 py-2 border border-white rounded-md font-semibold text-sm"
       >
         Zadzwoń

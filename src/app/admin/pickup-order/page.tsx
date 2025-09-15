@@ -8,6 +8,8 @@ import CancelButton from "@/components/CancelButton";
 
 /* ===================== Typy ===================== */
 type Any = Record<string, any>;
+type PaymentMethod = "Gotówka" | "Terminal" | "Online";
+type PaymentStatus = "pending" | "paid" | "failed" | null;
 
 interface Order {
   id: string;
@@ -26,6 +28,8 @@ interface Order {
   items?: any;
   order_items?: any;
   selected_option?: "local" | "takeaway" | "delivery";
+  payment_method?: PaymentMethod;
+  payment_status?: PaymentStatus; // 'pending' | 'paid' | 'failed' (dla Online); może być też używana pomocniczo dla innych
 }
 
 /* =============== Utils danych + parsery =============== */
@@ -143,11 +147,13 @@ const normalizeProduct = (raw: Any) => {
 };
 
 /* ===================== UI helpers ===================== */
-const Badge: React.FC<{ tone: "amber" | "blue" | "rose" | "slate"; children: React.ReactNode }> = ({ tone, children }) => {
+const Badge: React.FC<{ tone: "amber" | "blue" | "rose" | "slate" | "green" | "yellow"; children: React.ReactNode }> = ({ tone, children }) => {
   const cls =
     tone === "amber" ? "bg-amber-100 text-amber-700 ring-amber-200"
     : tone === "blue" ? "bg-blue-100 text-blue-700 ring-blue-200"
     : tone === "rose" ? "bg-rose-100 text-rose-700 ring-rose-200"
+    : tone === "green" ? "bg-emerald-100 text-emerald-700 ring-emerald-200"
+    : tone === "yellow" ? "bg-yellow-100 text-yellow-800 ring-yellow-200"
     : "bg-slate-100 text-slate-700 ring-slate-200";
   return <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-semibold ring-1 ${cls}`}>{children}</span>;
 };
@@ -311,6 +317,8 @@ export default function PickupOrdersPage() {
         phone: o.phone,
         items: o.items ?? o.order_items ?? [],
         selected_option: o.selected_option,
+        payment_method: (o.payment_method as PaymentMethod) ?? "Gotówka",
+        payment_status: (o.payment_status as PaymentStatus) ?? null,
       }));
       setTotal(totalCount ?? 0);
       setOrders(
@@ -395,6 +403,66 @@ export default function PickupOrdersPage() {
     }
   };
 
+  // === PŁATNOŚCI: UI + aktualizacja ===
+  const paymentBadge = (o: Order) => {
+    if (o.payment_method === "Online") {
+      if (o.payment_status === "paid") return <Badge tone="green">OPŁACONE ONLINE</Badge>;
+      if (o.payment_status === "pending") return <Badge tone="yellow">ONLINE – OCZEKUJE</Badge>;
+      if (o.payment_status === "failed") return <Badge tone="rose">ONLINE – BŁĄD</Badge>;
+      return <Badge tone="yellow">ONLINE</Badge>;
+    }
+    if (o.payment_method === "Terminal") return <Badge tone="blue">TERMINAL</Badge>;
+    return <Badge tone="amber">GOTÓWKA</Badge>;
+  };
+
+  const setPaymentMethod = async (o: Order, method: PaymentMethod) => {
+    try {
+      setEditingOrderId(o.id);
+      const patch: any = { payment_method: method };
+      if (method !== "Online") patch.payment_status = null; // czyścimy status online
+      const res = await fetch(`/api/orders/${o.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      if (!res.ok) return;
+      updateLocal(o.id, { payment_method: method, payment_status: patch.payment_status ?? o.payment_status });
+    } finally {
+      setEditingOrderId(null);
+    }
+  };
+
+  const setPaymentStatus = async (o: Order, status: Exclude<PaymentStatus, null>) => {
+    try {
+      setEditingOrderId(o.id);
+      const res = await fetch(`/api/orders/${o.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ payment_status: status }),
+      });
+      if (!res.ok) return;
+      updateLocal(o.id, { payment_status: status });
+    } finally {
+      setEditingOrderId(null);
+    }
+  };
+
+  const markPaidQuick = async (o: Order) => {
+    // szybki przycisk "Oznacz jako opłacone"
+    try {
+      setEditingOrderId(o.id);
+      const res = await fetch(`/api/orders/${o.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ payment_status: "paid" }),
+      });
+      if (!res.ok) return;
+      updateLocal(o.id, { payment_status: "paid" });
+    } finally {
+      setEditingOrderId(null);
+    }
+  };
+
   const filtered = useMemo(
     () =>
       orders
@@ -426,6 +494,7 @@ export default function PickupOrdersPage() {
                       <Badge tone={o.status === "accepted" ? "blue" : o.status === "cancelled" ? "rose" : o.status === "completed" ? "slate" : "amber"}>
                         {o.status.toUpperCase()}
                       </Badge>
+                      {paymentBadge(o)}
                     </div>
                     <div className="text-sm text-slate-700">
                       <b>Klient:</b> {o.name || "—"}
@@ -447,6 +516,42 @@ export default function PickupOrdersPage() {
                     {o.selected_option === "delivery" && typeof o.delivery_cost === "number" && <div><b>Dostawa:</b> {o.delivery_cost.toFixed(2)} zł</div>}
                     {o.selected_option === "delivery" && o.address && <div><b>Adres:</b> {o.address}</div>}
                     {o.phone && <div><b>Telefon:</b> {o.phone}</div>}
+                    <div className="mt-1">
+                      <b>Płatność:</b>{" "}
+                      <span className="inline-flex items-center gap-2">
+                        <select
+                          value={o.payment_method || "Gotówka"}
+                          onChange={(e) => setPaymentMethod(o, e.target.value as PaymentMethod)}
+                          className="h-8 rounded border px-2 text-xs"
+                          disabled={editingOrderId === o.id}
+                        >
+                          <option>Gotówka</option>
+                          <option>Terminal</option>
+                          <option>Online</option>
+                        </select>
+                        {o.payment_method === "Online" && (
+                          <select
+                            value={o.payment_status || "pending"}
+                            onChange={(e) => setPaymentStatus(o, e.target.value as Exclude<PaymentStatus, null>)}
+                            className="h-8 rounded border px-2 text-xs"
+                            disabled={editingOrderId === o.id}
+                          >
+                            <option value="pending">oczekuje</option>
+                            <option value="paid">opłacone</option>
+                            <option value="failed">błąd</option>
+                          </select>
+                        )}
+                        {o.payment_method !== "Online" && o.payment_status !== "paid" && (
+                          <button
+                            onClick={() => markPaidQuick(o)}
+                            className="h-8 rounded bg-emerald-600 px-2 text-xs font-semibold text-white hover:bg-emerald-500"
+                            disabled={editingOrderId === o.id}
+                          >
+                            Oznacz jako opłacone
+                          </button>
+                        )}
+                      </span>
+                    </div>
                   </div>
                   <div className="sm:col-span-2">
                     <div className="mb-1 text-sm font-semibold">Produkty</div>
@@ -518,8 +623,6 @@ export default function PickupOrdersPage() {
                       Przywróć
                     </button>
                   )}
-
-                  {/* COMPLETED – brak akcji */}
                 </footer>
               </article>
             );

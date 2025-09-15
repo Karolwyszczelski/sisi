@@ -1,4 +1,5 @@
-// src/app/api/orders/[orderId]/route.ts
+export const runtime = "nodejs";
+
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
@@ -8,9 +9,15 @@ import { getTransport } from "@/lib/mailer";
 import { trackingUrl } from "@/lib/orderLink";
 import type { Database } from "@/types/supabase";
 
+/* ====== Wersje/Linki regulaminów (dopisek w mailach) ====== */
+const TERMS_VERSION = process.env.TERMS_VERSION || "2025-01";
+const PRIVACY_VERSION = process.env.PRIVACY_VERSION || "2025-01";
+const TERMS_URL = process.env.TERMS_URL || "https://www.sisiciechanow.pl/regulamin";
+const PRIVACY_URL = process.env.PRIVACY_URL || "https://www.sisiciechanow.pl/polityka-prywatnosci";
+
 function normalizePhone(phone?: string | null) {
   if (!phone) return null;
-  const d = String(phone).replace(/\D/g, "");
+  let d = String(phone).replace(/\D/g, "");
   if (d.length === 9) return "+48" + d;
   if (d.startsWith("00")) return "+" + d.slice(2);
   if (!String(phone).startsWith("+") && d.length > 9) return "+" + d;
@@ -29,184 +36,163 @@ export async function PATCH(
   }
 
   const supabase = createRouteHandlerClient<Database>({ cookies });
+
+  let body: any;
+  try { body = await request.json(); }
+  catch { return NextResponse.json({ error: "Invalid JSON" }, { status: 400 }); }
+
   const orderId = params.orderId;
 
-  let body: any = {};
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
-  }
+  const employeeTime: string | undefined = body.deliveryTime ?? body.employee_delivery_time;
+  const clientTime: string | undefined = body.client_delivery_time ?? body.delivery_time;
 
-  // Pobierz stan przed aktualizacją (do porównań statusu/czasu)
-  const { data: prev, error: prevErr } = await supabase
-    .from("orders")
-    .select(
-      "id,status,deliveryTime,client_delivery_time,contact_email,name,total_price,selected_option"
-    )
-    .eq("id", orderId)
-    .single();
-
-  if (prevErr || !prev) {
-    return NextResponse.json({ error: "Order not found" }, { status: 404 });
-  }
-
-  // Obsługa aliasów pól czasu
-  const employeeTime: string | undefined =
-    body.deliveryTime ?? body.employee_delivery_time;
-  const clientTime: string | undefined =
-    body.client_delivery_time ?? body.delivery_time;
-
-  // White-list aktualizacji
-  const allowed = new Set([
-    "status",
-    "deliveryTime",
-    "client_delivery_time",
-    "selected_option",
-    "payment_method",
-    "total_price",
-    "name",
-    "customer_name",
-    "address",
-    "street",
-    "postal_code",
-    "city",
-    "flat_number",
-    "phone",
-    "contact_email",
-    "items",
-  ]);
   const updateData: Record<string, any> = {};
-  for (const [k, v] of Object.entries(body)) {
-    if (!allowed.has(k)) continue;
-    if (k === "items") {
-      updateData.items = typeof v === "string" ? v : JSON.stringify(v);
-    } else if (k === "customer_name") {
-      updateData.name = v;
-    } else {
-      updateData[k] = v;
-    }
-  }
+  if (body.status) updateData.status = body.status;
   if (employeeTime) updateData.deliveryTime = employeeTime;
   if (clientTime) updateData.client_delivery_time = clientTime;
+  if (body.items !== undefined) updateData.items = typeof body.items === "string" ? body.items : JSON.stringify(body.items);
+  if (body.selected_option) updateData.selected_option = body.selected_option;
+  if (body.payment_method) updateData.payment_method = body.payment_method;
+  if (body.payment_status !== undefined) updateData.payment_status = body.payment_status;
+  if (body.total_price !== undefined) updateData.total_price = body.total_price;
+  if (body.address) updateData.address = body.address;
+  if (body.street) updateData.street = body.street;
+  if (body.postal_code) updateData.postal_code = body.postal_code;
+  if (body.city) updateData.city = body.city;
+  if (body.flat_number) updateData.flat_number = body.flat_number;
+  if (body.phone) updateData.phone = body.phone;
+  if (body.contact_email) updateData.contact_email = body.contact_email;
+  if (body.name) updateData.name = body.name;
+  if (body.customer_name) updateData.name = body.customer_name;
+  if (body.promo_code !== undefined) updateData.promo_code = body.promo_code;
+  if (body.discount_amount !== undefined) updateData.discount_amount = body.discount_amount;
+  if (body.legal_accept && typeof body.legal_accept === "object") updateData.legal_accept = body.legal_accept;
 
-  const { data: updated, error: updErr } = await supabase
+  const { data, error } = await supabase
     .from("orders")
     .update(updateData)
     .eq("id", orderId)
-    .select("*")
+    .select()
     .single();
 
-  if (updErr || !updated) {
-    console.error("[PATCH /orders/:id] Supabase error:", updErr);
-    return NextResponse.json({ error: "Update failed" }, { status: 500 });
+  if (error) {
+    console.error("[orders.patch] supabase error:", error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
+  if (!data) return NextResponse.json({ error: "Order not found after update" }, { status: 404 });
 
-  // ------- SMS -------
-  const when: string | null =
-    updated.deliveryTime ?? updated.client_delivery_time ?? null;
+  const updated = data as any;
+  const when: string | null = updated.deliveryTime ?? updated.client_delivery_time ?? null;
 
-  const onlyTimeUpdate =
-    !!employeeTime && prev.status === "accepted" && body.status !== "accepted";
-
+  // SMS
+  const onlyTimeUpdate = !!employeeTime && updated.status === "accepted" && body.status !== "accepted";
   let smsBody = "";
   if (onlyTimeUpdate) {
-    const t = when
-      ? new Date(when).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    const t = when && !Number.isNaN(Date.parse(when))
+      ? new Date(when).toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" })
       : null;
-    smsBody = t
-      ? `⏰ Aktualizacja: zamówienie ${orderId} będzie gotowe ok. ${t}.`
-      : `⏰ Zaktualizowano czas dla zamówienia ${orderId}.`;
+    smsBody = t ? `⏰ Aktualizacja: zamówienie ${orderId} będzie gotowe ok. ${t}.`
+                : `⏰ Zaktualizowano czas dla zamówienia ${orderId}.`;
   } else {
     switch (updated.status) {
       case "accepted": {
-        const t = when
-          ? new Date(when).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+        const t = when && !Number.isNaN(Date.parse(when))
+          ? new Date(when).toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" })
           : null;
-        smsBody = t
-          ? `👍 Zamówienie ${orderId} przyjęte. Odbiór ok. ${t}.`
-          : `👍 Zamówienie ${orderId} przyjęte.`;
+        smsBody = t ? `👍 Zamówienie ${orderId} przyjęte. Odbiór ok. ${t}.` : `👍 Zamówienie ${orderId} przyjęte.`;
         break;
       }
-      case "completed":
-        smsBody = `✅ Zamówienie ${orderId} zrealizowane.`;
-        break;
-      case "cancelled":
-        smsBody = `❌ Zamówienie ${orderId} anulowane.`;
-        break;
-      default:
-        smsBody = "";
+      case "completed": smsBody = `✅ Zamówienie ${orderId} zrealizowane.`; break;
+      case "cancelled": smsBody = `❌ Zamówienie ${orderId} anulowane.`; break;
     }
   }
-
-  const shouldSms =
-    !!updated.phone &&
-    (["accepted", "completed", "cancelled"].includes(body.status) || onlyTimeUpdate);
-
+  const shouldSms = !!updated.phone && (["accepted", "completed", "cancelled"].includes(updated.status) || onlyTimeUpdate);
   if (shouldSms && smsBody) {
     const to = normalizePhone(updated.phone);
-    if (to) {
-      try {
-        await sendSms(to, smsBody);
-      } catch (e) {
-        console.error("[PATCH /orders/:id] SMS error:", e);
-      }
-    }
+    if (to) { try { await sendSms(to, smsBody); } catch (e) { console.error("[orders.patch] sms error:", e); } }
   }
 
-  // ------- E-MAIL (Resend przez nodemailer transport) -------
+  // E-MAIL
   try {
-    const becameAccepted = body.status === "accepted" && prev.status !== "accepted";
-    const timeChanged =
-      !!employeeTime && employeeTime !== (prev.deliveryTime ?? "");
-
-    const email = (updated as any).contact_email || prev.contact_email;
-    if (email && (becameAccepted || timeChanged)) {
+    const toEmail: string | undefined = updated.contact_email || updated.email || undefined;
+    if (toEmail) {
       const tr = getTransport();
-      const total =
-        typeof updated.total_price === "number"
-          ? updated.total_price.toFixed(2).replace(".", ",")
-          : String(updated.total_price ?? "0");
+      const origin =
+        request.headers.get("origin") ||
+        process.env.APP_BASE_URL ||
+        process.env.NEXT_PUBLIC_BASE_URL ||
+        "";
+      const trackUrl = origin ? trackingUrl(origin, String(orderId)) : null;
 
-      const origin = process.env.APP_BASE_URL || request.headers.get("origin") || "";
-      const url = trackingUrl(origin, String(updated.id));
-      const whenTxt = updated.deliveryTime
-        ? new Date(updated.deliveryTime).toLocaleTimeString("pl-PL", {
-            hour: "2-digit",
-            minute: "2-digit",
-          })
-        : "wkrótce";
+      const timeStr = when && !Number.isNaN(Date.parse(when))
+        ? new Date(when).toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" })
+        : null;
 
-      const subject = becameAccepted
-        ? `SISI • Zamówienie #${updated.id} przyjęte`
-        : `SISI • Aktualizacja czasu dla zamówienia #${updated.id}`;
+      const optionTxt = optLabel(updated.selected_option);
+      const changingPaymentStatus = body.payment_status !== undefined;
 
-      const html = `
-        <div style="font-family:Inter,Arial,sans-serif;line-height:1.5;color:#111">
-          <h2 style="margin:0 0 8px">${becameAccepted ? "Zamówienie przyjęte" : "Aktualizacja czasu"} #${updated.id}</h2>
-          <p style="margin:0 0 8px">
-            Opcja: <strong>${optLabel(updated.selected_option)}</strong><br/>
-            Kwota: <strong>${total} zł</strong><br/>
-            Planowany czas: <strong>${whenTxt}</strong>
-          </p>
-          <p style="margin:16px 0">
-            <a href="${url}" style="display:inline-block;padding:12px 18px;background:#111;color:#fff;border-radius:8px;text-decoration:none">
-              Sprawdź status zamówienia
-            </a>
-          </p>
-          <p style="margin:8px 0;color:#555">Dziękujemy za zamówienie w SISI.</p>
-        </div>
-      `;
+      let subject = `SISI • Zamówienie #${orderId}`;
+      let headline = "";
+      let extra = "";
 
-      await tr.sendMail({
-        from: process.env.EMAIL_FROM!,
-        to: email,
-        subject,
-        html,
-      });
+      if (onlyTimeUpdate) {
+        subject += " — zaktualizowany czas";
+        headline = "Zaktualizowaliśmy czas realizacji";
+        extra = timeStr ? `Nowy czas: <b>${timeStr}</b>` : "";
+      } else if (["accepted", "completed", "cancelled"].includes(updated.status)) {
+        switch (updated.status) {
+          case "accepted":
+            subject += " przyjęte";
+            headline = "Przyjęliśmy Twoje zamówienie";
+            extra = timeStr ? `Szacowany czas: <b>${timeStr}</b>` : "";
+            break;
+          case "completed":
+            subject += " zrealizowane";
+            headline = "Zamówienie zrealizowane";
+            break;
+          case "cancelled":
+            subject += " anulowane";
+            headline = "Zamówienie zostało anulowane";
+            break;
+        }
+      } else if (changingPaymentStatus && body.payment_status === "paid" && updated.payment_method === "Online") {
+        subject += " — płatność potwierdzona";
+        headline = "Otrzymaliśmy Twoją płatność online";
+        extra = "Status płatności: <b>opłacone</b>";
+      }
+
+      const la = (updated.legal_accept ?? {}) as any;
+      const termsV = la.terms_version || TERMS_VERSION;
+      const privV = la.privacy_version || PRIVACY_VERSION;
+
+      if (headline) {
+        await tr.sendMail({
+          from: process.env.EMAIL_FROM!,
+          to: toEmail,
+          subject,
+          html: `
+            <div style="font-family:Inter,Arial,sans-serif;line-height:1.6;color:#111">
+              <h2 style="margin:0 0 8px">${headline}</h2>
+              <p style="margin:0 0 6px">Numer: <b>#${orderId}</b></p>
+              <p style="margin:0 0 6px">Opcja: <b>${optionTxt}</b></p>
+              ${extra ? `<p style="margin:0 0 10px">${extra}</p>` : ""}
+              ${trackUrl ? `<p style="margin:14px 0">
+                <a href="${trackUrl}" style="display:inline-block;padding:12px 18px;background:#111;color:#fff;border-radius:8px;text-decoration:none">
+                  Sprawdź status zamówienia
+                </a>
+              </p>` : ""}
+              <hr style="margin:20px 0;border:none;border-top:1px solid #eee" />
+              <p style="font-size:12px;color:#555;margin:0">
+                Akceptacja: Regulamin v${termsV} (<a href="${TERMS_URL}">link</a>),
+                Polityka prywatności v${privV} (<a href="${PRIVACY_URL}">link</a>)
+              </p>
+            </div>
+          `,
+        });
+      }
     }
   } catch (e) {
-    console.error("[PATCH /orders/:id] email error:", e);
+    console.error("[orders.patch] email error:", e);
   }
 
   return NextResponse.json(updated);
