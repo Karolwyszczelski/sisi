@@ -2,8 +2,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
-import { z } from "zod";
 import { createClient } from "@supabase/supabase-js";
+import { z } from "zod";
 import { getSessionAndRole } from "@/lib/serverAuth";
 
 const supabaseAdmin = createClient(
@@ -12,12 +12,14 @@ const supabaseAdmin = createClient(
   { auth: { persistSession: false } }
 );
 
-const TableSchema = z.object({
+// To samo, czego oczekuje TableLayoutForm (mapka)
+const TableRow = z.object({
+  id: z.string().uuid().optional(),
   table_number: z.string().min(1),
-  name: z.string().optional().default(""),
-  x: z.number().int().nonnegative(),
-  y: z.number().int().nonnegative(),
-  seats: z.number().int().positive(),
+  name: z.string().nullable().optional(),
+  x: z.number(),
+  y: z.number(),
+  number_of_seats: z.number().int().min(1),
 });
 
 export async function GET() {
@@ -39,17 +41,19 @@ export async function POST(req: Request) {
   if (!session || (role !== "admin" && role !== "employee"))
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const body = await req.json();
-  const parsed = TableSchema.safeParse(body);
+  const json = await req.json();
+  const parsed = TableRow.safeParse({
+    ...json,
+    x: Number(json?.x),
+    y: Number(json?.y),
+    number_of_seats: Number(json?.number_of_seats ?? json?.seats),
+  });
   if (!parsed.success)
-    return NextResponse.json({ error: parsed.error.message }, { status: 400 });
-
-  // dla zgodności z kolumną number_of_seats:
-  const row = { ...parsed.data, number_of_seats: parsed.data.seats };
+    return NextResponse.json({ error: "Validation", details: parsed.error.format() }, { status: 400 });
 
   const { data, error } = await supabaseAdmin
     .from("restaurant_tables")
-    .insert(row)
+    .insert(parsed.data)
     .select()
     .single();
 

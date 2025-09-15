@@ -2,8 +2,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
-import { z } from "zod";
 import { createClient } from "@supabase/supabase-js";
+import { z } from "zod";
 import { getSessionAndRole } from "@/lib/serverAuth";
 
 const supabaseAdmin = createClient(
@@ -12,12 +12,14 @@ const supabaseAdmin = createClient(
   { auth: { persistSession: false } }
 );
 
-const PatchSchema = z.object({
+const Patch = z.object({
   table_number: z.string().min(1).optional(),
-  name: z.string().optional(),
-  x: z.number().int().nonnegative().optional(),
-  y: z.number().int().nonnegative().optional(),
-  seats: z.number().int().positive().optional(),
+  name: z.string().nullable().optional(),
+  x: z.number().optional(),
+  y: z.number().optional(),
+  number_of_seats: z.number().int().min(1).optional(),
+  // stary frontend czasem wysyła "seats"
+  seats: z.number().int().min(1).optional(),
 });
 
 export async function PATCH(req: Request, { params }: { params: { id: string } }) {
@@ -25,17 +27,26 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   if (!session || (role !== "admin" && role !== "employee"))
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const body = await req.json();
-  const parsed = PatchSchema.safeParse(body);
+  const json = await req.json();
+  const raw = {
+    ...json,
+    x: json.x !== undefined ? Number(json.x) : undefined,
+    y: json.y !== undefined ? Number(json.y) : undefined,
+    number_of_seats:
+      json.number_of_seats !== undefined ? Number(json.number_of_seats)
+      : json.seats !== undefined ? Number(json.seats)
+      : undefined,
+  };
+  const parsed = Patch.safeParse(raw);
   if (!parsed.success)
-    return NextResponse.json({ error: parsed.error.message }, { status: 400 });
+    return NextResponse.json({ error: "Validation", details: parsed.error.format() }, { status: 400 });
 
-  const upd: any = { ...parsed.data };
-  if (upd.seats !== undefined) upd.number_of_seats = upd.seats;
+  const patch: any = { ...parsed.data };
+  delete patch.seats;
 
   const { data, error } = await supabaseAdmin
     .from("restaurant_tables")
-    .update(upd)
+    .update(patch)
     .eq("id", params.id)
     .select()
     .single();
@@ -44,7 +55,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   return NextResponse.json({ table: data });
 }
 
-export async function DELETE(_: Request, { params }: { params: { id: string } }) {
+export async function DELETE(_req: Request, { params }: { params: { id: string } }) {
   const { session, role } = await getSessionAndRole();
   if (!session || (role !== "admin" && role !== "employee"))
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
