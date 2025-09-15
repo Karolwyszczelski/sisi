@@ -1,4 +1,5 @@
-// src/app/api/orders/create/route.ts
+export const runtime = "nodejs";
+
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { toZonedTime } from "date-fns-tz";
@@ -23,6 +24,14 @@ const twilioClient = Twilio(
 const STAFF_PHONE_NUMBER = process.env.STAFF_PHONE_NUMBER || "";
 const TWILIO_FROM_NUMBER =
   process.env.TWILIO_FROM_NUMBER || process.env.TWILIO_PHONE_NUMBER || "";
+
+/* ====== Wersje/Linki regulaminów (do maili) ====== */
+const TERMS_VERSION = process.env.TERMS_VERSION || "2025-01";
+const PRIVACY_VERSION = process.env.PRIVACY_VERSION || "2025-01";
+const TERMS_URL =
+  process.env.TERMS_URL || "https://www.sisiciechanow.pl/regulamin";
+const PRIVACY_URL =
+  process.env.PRIVACY_URL || "https://www.sisiciechanow.pl/polityka-prywatnosci";
 
 /* ============== Typy i utils =============== */
 type Any = Record<string, any>;
@@ -193,7 +202,7 @@ function buildItemFromDbAndOptions(dbRow: ProductRow | undefined, raw: Any): Nor
 }
 
 /* ============== Normalizacja BODY ============== */
-function normalizeBody(raw: any) {
+function normalizeBody(raw: any, req: Request) {
   const base = raw?.orderPayload ? raw.orderPayload : raw;
   const rawItems =
     raw?.items ??
@@ -215,6 +224,34 @@ function normalizeBody(raw: any) {
       : Array.isArray(rawItems)
       ? rawItems
       : [];
+
+  // akceptacja prawna (z ciała lub auto)
+  const ip =
+    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    req.headers.get("x-real-ip") ||
+    null;
+  const ua = req.headers.get("user-agent") || null;
+  const accepted_at = new Date().toISOString();
+
+  const legal_accept =
+    base?.legal_accept && typeof base.legal_accept === "object"
+      ? {
+          terms_version: base.legal_accept.terms_version || TERMS_VERSION,
+          privacy_version: base.legal_accept.privacy_version || PRIVACY_VERSION,
+          marketing_opt_in: !!base.legal_accept.marketing_opt_in,
+          accepted_at: base.legal_accept.accepted_at || accepted_at,
+          ip: base.legal_accept.ip || ip,
+          ua: base.legal_accept.ua || ua,
+        }
+      : {
+          terms_version: TERMS_VERSION,
+          privacy_version: PRIVACY_VERSION,
+          marketing_opt_in: !!base?.marketing_opt_in,
+          accepted_at,
+          ip,
+          ua,
+        };
+
   return {
     name: base?.name ?? base?.customer_name ?? null,
     phone: normalizePhone(base?.phone ?? null),
@@ -226,13 +263,18 @@ function normalizeBody(raw: any) {
     flat_number: base?.flat_number ?? null,
     selected_option: (base?.selected_option as any) ?? "local",
     payment_method: base?.payment_method ?? "Gotówka",
+    payment_status:
+      (base?.payment_method ?? "Gotówka") === "Online" ? "pending" : null,
     total_price: num(base?.total_price, 0),
+    promo_code: base?.promo_code ?? null,
+    discount_amount: num(base?.discount_amount, 0) ?? 0,
     delivery_cost: num(base?.delivery_cost, null),
     status: (base?.status as any) ?? "placed",
     client_delivery_time: base?.client_delivery_time ?? base?.delivery_time ?? null,
     deliveryTime: null,
     eta: base?.eta ?? null,
     user: base?.user ?? base?.user_id ?? null,
+    legal_accept,
     itemsArray,
   };
 }
@@ -260,7 +302,15 @@ export async function POST(req: Request) {
     } catch {
       return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
     }
-    const n = normalizeBody(raw);
+    const n = normalizeBody(raw, req);
+
+    // wymagamy e-maila i akceptacji
+    if (!n.contact_email) {
+      return NextResponse.json(
+        { error: "Wymagany jest adres e-mail do potwierdzenia." },
+        { status: 400 }
+      );
+    }
 
     // 3) Dociągnij produkty po STRING id
     const productIds = n.itemsArray
@@ -291,6 +341,7 @@ export async function POST(req: Request) {
         flat_number: n.flat_number,
         selected_option: n.selected_option,
         payment_method: n.payment_method,
+        payment_status: n.payment_status,            // ⬅️ zapis statusu płatności (pending dla Online)
         items: itemsForOrdersColumn,
         total_price: n.total_price,
         delivery_cost: n.delivery_cost,
@@ -299,6 +350,9 @@ export async function POST(req: Request) {
         deliveryTime: n.deliveryTime,
         eta: n.eta,
         user: n.user,
+        promo_code: n.promo_code,                    // ⬅️ kod
+        discount_amount: n.discount_amount,          // ⬅️ kwota zniżki
+        legal_accept: n.legal_accept,                // ⬅️ akceptacja (IP/UA/wersje)
       })
       .select("id, selected_option, total_price, name")
       .single();
@@ -336,11 +390,10 @@ export async function POST(req: Request) {
       }
     }
 
-    // 6.1) E-mail do klienta z linkiem śledzenia (Resend / fallback)
+    // 6.1) E-mail do klienta z linkiem śledzenia + dopisek o wersjach
     try {
       if (n.contact_email) {
-        const origin =
-          process.env.APP_BASE_URL || new URL(req.url).origin;
+        const origin = process.env.APP_BASE_URL || new URL(req.url).origin;
         const url = trackingUrl(origin, String(newOrderId));
 
         const total =
@@ -359,6 +412,11 @@ export async function POST(req: Request) {
             </p>
             <p style="margin:8px 0">Kwota: <strong>${total} zł</strong></p>
             <p style="margin:8px 0">Opcja: <strong>${optLabel(orderRow.selected_option)}</strong></p>
+            <hr style="margin:20px 0;border:none;border-top:1px solid #eee" />
+            <p style="font-size:12px;color:#555;margin:0">
+              Akceptacja: Regulamin v${TERMS_VERSION} (<a href="${TERMS_URL}">link</a>),
+              Polityka prywatności v${PRIVACY_VERSION} (<a href="${PRIVACY_URL}">link</a>)
+            </p>
           </div>
         `;
 

@@ -1,4 +1,3 @@
-// src/middleware.ts
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { createMiddlewareClient } from "@supabase/auth-helpers-nextjs";
@@ -36,7 +35,7 @@ export async function middleware(req: NextRequest) {
     }
   }
 
-  // Pobierz rolę (bez crashowania, jeśli coś nie zadziała)
+  // Pobierz rolę
   let role: string | null = null;
   try {
     const { data: profile, error } = await supabase
@@ -54,7 +53,6 @@ export async function middleware(req: NextRequest) {
   // Ochrona panelu / redirecty
   if (url.pathname.startsWith("/admin")) {
     if (role === "client") {
-      // klient nie ma dostępu do /admin
       url.pathname = "/";
       return NextResponse.redirect(url);
     }
