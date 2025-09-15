@@ -465,9 +465,17 @@ export default function PickupOrdersPage() {
     }
   };
 
-  const refreshPaymentStatus = async (_id: string) => {
-    await fetchOrders();
-  };
+  const refreshPaymentStatus = async (id: string) => {
+  try {
+    setEditingOrderId(id);
+    const res = await fetch(`/api/payments/p24/refresh?id=${id}`, { method: "POST" });
+    if (!res.ok) return;
+    const { payment_status } = await res.json();
+    updateLocal(id, { payment_status: payment_status as PaymentStatus });
+  } finally {
+    setEditingOrderId(null);
+  }
+};
 
   const filtered = useMemo(
     () =>
