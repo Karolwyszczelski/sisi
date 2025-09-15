@@ -1,16 +1,88 @@
 // src/app/components/FloatingAuthButtons.tsx
 "use client";
 
-import React, { useState, useEffect, memo, useCallback } from "react";
+import React, { useState, useEffect, memo, useCallback, useMemo, useRef } from "react";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 import { useSession, Session } from "@supabase/auth-helpers-react";
 import { ShoppingCart, User, X } from "lucide-react";
 import useCartStore from "../store/cartStore";
 import { useRouter } from "next/navigation";
-import QRCode from "react-qr-code";
 import AddressAutocomplete from "@/components/menu/AddressAutocomplete";
 
-// --- Modale / Podkomponenty ---
+declare global {
+  interface Window {
+    turnstile?: any;
+  }
+}
+
+const TERMS_URL =
+  process.env.NEXT_PUBLIC_TERMS_URL || "https://www.sisiciechanow.pl/regulamin";
+const PRIVACY_URL =
+  process.env.NEXT_PUBLIC_PRIVACY_URL || "https://www.sisiciechanow.pl/polityka-prywatnosci";
+const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || "";
+
+/* ------------------- utils ------------------- */
+function normalizePlPhone(input: string): string | null {
+  const d = String(input).replace(/\D/g, "");
+  if (d.length === 9) return "+48" + d;
+  if (d.startsWith("48") && d.length === 11) return "+" + d;
+  if (d.startsWith("0048") && d.length === 13) return "+" + d.slice(2);
+  if (/^\+48\d{9}$/.test("+" + d)) return "+48" + d.slice(-9);
+  if (/^\+\d{9,15}$/.test(input)) return input;
+  return null;
+}
+
+/* ------------------- Turnstile ------------------- */
+const TurnstileBox: React.FC<{ onVerify: (token: string) => void }> = ({ onVerify }) => {
+  const ref = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    let rendered = false;
+
+    function render() {
+      if (rendered || !ref.current || !window.turnstile || !TURNSTILE_SITE_KEY) return;
+      rendered = true;
+      window.turnstile.render(ref.current, {
+        sitekey: TURNSTILE_SITE_KEY,
+        theme: "light",
+        appearance: "always",
+        callback: (token: string) => onVerify(token),
+        "error-callback": () => onVerify(""),
+        "timeout-callback": () => onVerify(""),
+        "unsupported-callback": () => onVerify(""),
+      });
+    }
+
+    // doładowanie skryptu jeśli nie ma
+    if (!window.turnstile) {
+      const id = "cf-turnstile-api";
+      if (!document.getElementById(id)) {
+        const s = document.createElement("script");
+        s.id = id;
+        s.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+        s.async = true;
+        s.defer = true;
+        s.onload = render;
+        document.head.appendChild(s);
+      } else {
+        // może już się ładuje – spróbuj wyrenderować po chwili
+        const t = setInterval(() => {
+          if (window.turnstile) {
+            clearInterval(t);
+            render();
+          }
+        }, 200);
+        return () => clearInterval(t);
+      }
+    } else {
+      render();
+    }
+  }, [onVerify]);
+
+  return <div ref={ref} className="cf-turnstile" />;
+};
+
+/* ------------------- Modale ------------------- */
 
 const RegistrationModal = memo(({
   onClose,
@@ -20,7 +92,7 @@ const RegistrationModal = memo(({
   email, setEmail,
   password, setPassword,
   confirmPassword, setConfirmPassword,
-  captchaChecked, setCaptchaChecked,
+  captchaToken, setCaptchaToken,
   acceptTerms, setAcceptTerms,
 }: {
   onClose: () => void;
@@ -30,10 +102,10 @@ const RegistrationModal = memo(({
   email: string; setEmail: React.Dispatch<React.SetStateAction<string>>;
   password: string; setPassword: React.Dispatch<React.SetStateAction<string>>;
   confirmPassword: string; setConfirmPassword: React.Dispatch<React.SetStateAction<string>>;
-  captchaChecked: boolean; setCaptchaChecked: React.Dispatch<React.SetStateAction<boolean>>;
+  captchaToken: string; setCaptchaToken: React.Dispatch<React.SetStateAction<string>>;
   acceptTerms: boolean; setAcceptTerms: React.Dispatch<React.SetStateAction<boolean>>;
 }) => (
-  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
     <div className="bg-white p-6 rounded-lg max-w-md w-full relative max-h-[80vh] overflow-y-auto">
       <button aria-label="Zamknij" onClick={onClose} className="absolute top-3 right-3 text-gray-500 hover:text-black">
         <X size={20} />
@@ -50,8 +122,8 @@ const RegistrationModal = memo(({
         />
         <input
           type="tel"
-          placeholder="Telefon (9 cyfr)"
-          pattern="^\\d{9}$"
+          inputMode="tel"
+          placeholder="Telefon (+48… lub 9 cyfr)"
           className="w-full border rounded-lg px-3 py-2"
           value={phone}
           onChange={e => setPhone(e.target.value)}
@@ -81,32 +153,39 @@ const RegistrationModal = memo(({
           onChange={e => setConfirmPassword(e.target.value)}
           required
         />
-        <div className="flex items-center">
-          <input
-            type="checkbox"
-            checked={captchaChecked}
-            onChange={e => setCaptchaChecked(e.target.checked)}
-            required
-            className="mr-2"
-            id="captcha-register"
-          />
-          <label htmlFor="captcha-register" className="text-sm">
-            Nie jestem robotem
-          </label>
-        </div>
-        <div className="flex items-center">
+
+        {/* Turnstile */}
+        {TURNSTILE_SITE_KEY ? (
+          <div>
+            <TurnstileBox onVerify={setCaptchaToken} />
+            {!captchaToken && (
+              <p className="mt-1 text-xs text-gray-500">
+                Zaznacz proszę weryfikację, aby kontynuować.
+              </p>
+            )}
+          </div>
+        ) : (
+          <div className="text-xs text-amber-600">
+            Uwaga: brak klucza <code>NEXT_PUBLIC_TURNSTILE_SITE_KEY</code>.
+          </div>
+        )}
+
+        <label className="flex items-start gap-2 text-sm">
           <input
             type="checkbox"
             checked={acceptTerms}
             onChange={e => setAcceptTerms(e.target.checked)}
             required
-            className="mr-2"
-            id="terms-register"
+            className="mt-1"
           />
-          <label htmlFor="terms-register" className="text-sm">
-            Akceptuję regulamin
-          </label>
-        </div>
+          <span>
+            Akceptuję{" "}
+            <a href={TERMS_URL} target="_blank" className="text-blue-600 underline">regulamin</a>{" "}
+            oraz{" "}
+            <a href={PRIVACY_URL} target="_blank" className="text-blue-600 underline">politykę prywatności</a>.
+          </span>
+        </label>
+
         <button
           type="submit"
           className="w-full py-2 bg-yellow-500 text-white font-bold rounded-lg hover:bg-yellow-600"
@@ -227,7 +306,7 @@ const OrdersHistory: React.FC<{ supabaseClient: ReturnType<typeof createClientCo
     supabaseClient
       .from("orders")
       .select("id, created_at, status, total_price, selected_option, items")
-      .eq("user", userId) // <-- kluczowa poprawka
+      .eq("user_id", userId) // <— poprawione
       .order("created_at", { ascending: false })
       .limit(15)
       .then(({ data, error }) => {
@@ -321,7 +400,7 @@ const LoyaltyProgram: React.FC<{ supabaseClient: ReturnType<typeof createClientC
   );
 };
 
-// --- Główny komponent ---
+/* ------------------- Main ------------------- */
 
 export default function FloatingAuthButtons() {
   const router = useRouter();
@@ -372,26 +451,44 @@ export default function FloatingAuthButtons() {
   const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [captchaChecked, setCaptchaChecked] = useState(false);
+  const [captchaToken, setCaptchaToken] = useState("");
   const [acceptTerms, setAcceptTerms] = useState(false);
 
   const handleSubmitRegister = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
-      if (password !== confirmPassword) return alert("Hasła muszą być identyczne");
-      const { error: signUpError } = await supabase.auth.signUp(
-        { email, password },
-        {
+
+      if (!acceptTerms) return alert("Musisz zaakceptować regulamin i politykę prywatności.");
+      if (!captchaToken && TURNSTILE_SITE_KEY) return alert("Potwierdź proszę captcha.");
+      if (password !== confirmPassword) return alert("Hasła muszą być identyczne.");
+
+      const normalizedPhone = normalizePlPhone(phone);
+      if (!normalizedPhone) return alert("Podaj prawidłowy polski numer telefonu (9 cyfr lub +48…).");
+
+      const { error: signUpError } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
           emailRedirectTo: `${window.location.origin}/verify`,
-          data: { role: "client", full_name: fullName, phone },
-        }
-      );
+          data: {
+            role: "client",
+            full_name: fullName,
+            phone: normalizedPhone,
+            legal_accept: {
+              terms: true,
+              privacy: true,
+              at: new Date().toISOString(),
+            },
+          },
+        },
+      });
+
       if (signUpError) return alert("Błąd: " + signUpError.message);
-      await supabase.auth.updateUser({ data: { full_name: fullName, phone } });
-      alert("Zarejestrowano! Potwierdź email i zaloguj się.");
+
+      alert("Zarejestrowano! Sprawdź skrzynkę i potwierdź adres e-mail.");
       setShowModal(false);
     },
-    [email, password, confirmPassword, fullName, phone, supabase]
+    [acceptTerms, captchaToken, email, password, confirmPassword, fullName, phone, supabase]
   );
 
   const handleLogout = useCallback(async () => {
@@ -404,7 +501,6 @@ export default function FloatingAuthButtons() {
     }
   }, [supabase, router]);
 
-  // prosty „Zamów ponownie”: odkładamy pozycje do localStorage i przenosimy do menu
   const repeatOrder = useCallback(
     (o: any) => {
       try {
@@ -487,8 +583,8 @@ export default function FloatingAuthButtons() {
               setPassword={setPassword}
               confirmPassword={confirmPassword}
               setConfirmPassword={setConfirmPassword}
-              captchaChecked={captchaChecked}
-              setCaptchaChecked={setCaptchaChecked}
+              captchaToken={captchaToken}
+              setCaptchaToken={setCaptchaToken}
               acceptTerms={acceptTerms}
               setAcceptTerms={setAcceptTerms}
             />
@@ -499,7 +595,8 @@ export default function FloatingAuthButtons() {
   );
 }
 
-// Komponent wrapper dla panelu z zakładkami, aby przekazać supabaseClient
+/* -------- Panel klienta (tabs) -------- */
+
 const ClientPanelWithTabsWrapper: React.FC<{
   onClose: () => void;
   supabaseClient: ReturnType<typeof createClientComponentClient>;
@@ -508,7 +605,6 @@ const ClientPanelWithTabsWrapper: React.FC<{
   const session = useSession();
   const [tab, setTab] = useState<"orders" | "loyalty" | "settings">("orders");
 
-  // stany do ustawień
   const [localName, setLocalName] = useState<string>(
     ((session?.user?.user_metadata as any)?.full_name as string) || ""
   );
@@ -525,6 +621,11 @@ const ClientPanelWithTabsWrapper: React.FC<{
 
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // walidacja i normalizacja telefonu
+    const norm = normalizePlPhone(localPhone);
+    if (!norm) return alert("Podaj prawidłowy numer telefonu (+48…).");
+
     if (newPass || newPass2) {
       if (newPass !== newPass2) return alert("Nowe hasła nie pasują!");
       const { error: reauthErr } = await supabaseClient.auth.signInWithPassword({
@@ -535,16 +636,18 @@ const ClientPanelWithTabsWrapper: React.FC<{
       const { error: updErr } = await supabaseClient.auth.updateUser({ password: newPass });
       if (updErr) return alert("Błąd zmiany hasła: " + updErr.message);
     }
+
     const { error: updMeta } = await supabaseClient.auth.updateUser({
-      data: { full_name: localName, phone: localPhone, address: localAddress },
+      data: { full_name: localName, phone: norm, address: localAddress },
     });
     if (updMeta) return alert("Błąd zapisu profilu: " + updMeta.message);
+
     alert("Ustawienia zapisane!");
     onClose();
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
       <div className="bg-white p-4 rounded-lg max-w-lg w-full relative max-h-[80vh] overflow-y-auto">
         <button aria-label="Zamknij" onClick={onClose} className="absolute top-3 right-3 text-gray-500">
           <X size={20} />
@@ -579,7 +682,7 @@ const ClientPanelWithTabsWrapper: React.FC<{
               />
               <input
                 type="tel"
-                placeholder="Telefon"
+                placeholder="Telefon (+48…)"
                 className="w-full border rounded px-3 py-2"
                 value={localPhone}
                 onChange={e => setLocalPhone(e.target.value)}
