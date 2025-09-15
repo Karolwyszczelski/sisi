@@ -1,3 +1,4 @@
+// src/components/menu/CheckoutModal.tsx
 "use client";
 
 import React, { useState, useEffect, useMemo, useRef } from "react";
@@ -358,17 +359,22 @@ export default function CheckoutModal() {
       });
   }, []);
 
-  // Render Turnstile (odpalany tylko w kroku 3)
+  // utils
+  const isVisible = (el: HTMLDivElement | null) => !!el && !!el.offsetParent;
+
+  // Render Turnstile (explicit; tylko na widocznym kontenerze)
   const renderTurnstile = (target: HTMLDivElement | null) => {
-    if (!TURNSTILE_SITE_KEY || !window.turnstile || !target) return;
+    if (!TURNSTILE_SITE_KEY || !window.turnstile || !isVisible(target)) return;
     try {
-      tsIdRef.current = window.turnstile.render(target, {
+      tsIdRef.current = window.turnstile.render(target!, {
         sitekey: TURNSTILE_SITE_KEY,
         callback: (t: string) => setTurnstileToken(t),
         "error-callback": () => setTurnstileToken(null),
         "expired-callback": () => {
           setTurnstileToken(null);
-          try { window.turnstile?.reset(tsIdRef.current); } catch {}
+          try {
+            window.turnstile?.reset(tsIdRef.current);
+          } catch {}
         },
         retry: "auto",
         theme: "auto",
@@ -391,7 +397,7 @@ export default function CheckoutModal() {
   useEffect(() => {
     if (!isClient || !TURNSTILE_SITE_KEY) return;
     if (checkoutStep === 3 && isCheckoutOpen) {
-      // spróbuj wyrenderować w obu – widoczny będzie tylko jeden (mobile/desktop)
+      // Spróbuj w obu miejscach – zrenderuje się tylko widoczny
       renderTurnstile(tsMobileRef.current);
       renderTurnstile(tsDesktopRef.current);
     } else {
@@ -745,7 +751,7 @@ export default function CheckoutModal() {
     TURNSTILE_SITE_KEY ? (
       <div className="mt-2">
         <h4 className="font-semibold mb-1">Weryfikacja</h4>
-        <div ref={boxRef} className="cf-turnstile" />
+        <div ref={boxRef} />
         <p className="text-[11px] text-gray-500 mt-1">Chronimy formularz przed botami.</p>
       </div>
     ) : null;
@@ -753,7 +759,12 @@ export default function CheckoutModal() {
   return (
     <>
       {TURNSTILE_SITE_KEY && (
-        <Script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer strategy="afterInteractive" />
+        <Script
+          src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"
+          async
+          defer
+          strategy="afterInteractive"
+        />
       )}
 
       <div className="fixed inset-0 z-50 bg-black/60 flex items-start justify-center p-4 overflow-auto">
