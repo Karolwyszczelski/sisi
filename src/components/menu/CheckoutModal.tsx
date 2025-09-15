@@ -75,11 +75,9 @@ const AVAILABLE_ADDONS = [
   ...SAUCES,
 ];
 
-type Product = {
-  id: number;
-  name: string;
-};
+type Product = { id: number; name: string };
 
+/* helpers */
 const buildClientDeliveryTime = (
   selectedOption: string | null,
   deliveryTimeOption: "asap" | "schedule",
@@ -87,15 +85,12 @@ const buildClientDeliveryTime = (
 ): string | null => {
   if (selectedOption !== "delivery") return null;
   if (deliveryTimeOption === "asap") return "asap";
-
   const [hours, minutes] = scheduledTime.split(":").map(Number);
   const tz = "Europe/Warsaw";
   const nowZoned = toZonedTime(new Date(), tz);
   const dt = new Date(nowZoned);
   dt.setHours(hours, minutes, 0, 0);
-  if (dt.getTime() < nowZoned.getTime()) {
-    dt.setDate(dt.getDate() + 1);
-  }
+  if (dt.getTime() < nowZoned.getTime()) dt.setDate(dt.getDate() + 1);
   return dt.toISOString();
 };
 
@@ -115,6 +110,7 @@ const safeFetch = async (url: string, opts: RequestInit) => {
   return data;
 };
 
+/* child */
 const ProductItem: React.FC<{
   prod: any;
   helpers: {
@@ -128,51 +124,31 @@ const ProductItem: React.FC<{
     removeWholeItem: (name: string) => void;
   };
 }> = ({ prod, helpers }) => {
-  const {
-    changeMeatType,
-    addExtraMeat,
-    removeExtraMeat,
-    addAddon,
-    removeAddon,
-    swapIngredient,
-    removeItem,
-    removeWholeItem,
-  } = helpers;
+  const { changeMeatType, addExtraMeat, removeExtraMeat, addAddon, removeAddon, swapIngredient, removeItem, removeWholeItem } =
+    helpers;
 
-  const priceNum =
-    typeof prod.price === "string" ? parseFloat(prod.price) : prod.price || 0;
-  const addonsCost = (prod.addons ?? []).reduce(
-    (sum: number, addon: string) => sum + (SAUCES.includes(addon) ? 3 : 4),
-    0
-  );
+  const priceNum = typeof prod.price === "string" ? parseFloat(prod.price) : prod.price || 0;
+  const addonsCost = (prod.addons ?? []).reduce((sum: number, addon: string) => sum + (SAUCES.includes(addon) ? 3 : 4), 0);
   const extraMeatCost = (prod.extraMeatCount || 0) * 10;
   const lineTotal = (priceNum + addonsCost + extraMeatCost) * (prod.quantity || 1);
 
   return (
     <div className="border p-3 rounded bg-gray-50 relative">
       <div className="flex justify-between items-center font-semibold mb-2">
-        <span>
-          {prod.name} x{prod.quantity || 1}
-        </span>
+        <span>{prod.name} x{prod.quantity || 1}</span>
         <span>{lineTotal.toFixed(2).replace(".", ",")} zł</span>
       </div>
       <div className="text-xs text-gray-700 space-y-2">
         <div className="font-semibold">Mięso:</div>
         <div className="flex gap-2 flex-wrap">
           <button
-            className={clsx(
-              "px-2 py-1 rounded text-xs border",
-              prod.meatType === "wołowina" ? "bg-yellow-300 border-yellow-400" : "bg-gray-200 border-gray-300"
-            )}
+            className={clsx("px-2 py-1 rounded text-xs border", prod.meatType === "wołowina" ? "bg-yellow-300 border-yellow-400" : "bg-gray-200 border-gray-300")}
             onClick={() => changeMeatType(prod.name, "wołowina")}
           >
             Wołowina
           </button>
           <button
-            className={clsx(
-              "px-2 py-1 rounded text-xs border",
-              prod.meatType === "kurczak" ? "bg-yellow-300 border-yellow-400" : "bg-gray-200 border-gray-300"
-            )}
+            className={clsx("px-2 py-1 rounded text-xs border", prod.meatType === "kurczak" ? "bg-yellow-300 border-yellow-400" : "bg-gray-200 border-gray-300")}
             onClick={() => changeMeatType(prod.name, "kurczak")}
           >
             Kurczak
@@ -184,17 +160,8 @@ const ProductItem: React.FC<{
           {AVAILABLE_ADDONS.map((add) => (
             <button
               key={add}
-              onClick={() =>
-                prod.addons?.includes(add)
-                  ? removeAddon(prod.name, add)
-                  : addAddon(prod.name, add)
-              }
-              className={clsx(
-                "border text-xs px-2 py-1 rounded",
-                prod.addons?.includes(add)
-                  ? "bg-gray-800 text-white border-gray-900"
-                  : "bg-white text-black hover:bg-gray-50"
-              )}
+              onClick={() => (prod.addons?.includes(add) ? removeAddon(prod.name, add) : addAddon(prod.name, add))}
+              className={clsx("border text-xs px-2 py-1 rounded", prod.addons?.includes(add) ? "bg-gray-800 text-white border-gray-900" : "bg-white text-black hover:bg-gray-50")}
             >
               {prod.addons?.includes(add) ? `✓ ${add}` : `+ ${add}`}
             </button>
@@ -203,23 +170,15 @@ const ProductItem: React.FC<{
 
         <div className="font-semibold mt-2">Dodatkowe mięso:</div>
         <div className="flex items-center gap-2 flex-wrap">
-          <button
-            onClick={() => addExtraMeat(prod.name)}
-            className="px-2 py-1 text-xs bg-gray-200 rounded border border-gray-300"
-          >
+          <button onClick={() => addExtraMeat(prod.name)} className="px-2 py-1 text-xs bg-gray-200 rounded border border-gray-300">
             +1 mięso (+10 zł)
           </button>
           {prod.extraMeatCount > 0 && (
-            <button
-              onClick={() => removeExtraMeat(prod.name)}
-              className="px-2 py-1 text-xs bg-red-100 text-red-700 rounded border border-red-200"
-            >
+            <button onClick={() => removeExtraMeat(prod.name)} className="px-2 py-1 text-xs bg-red-100 text-red-700 rounded border border-red-200">
               Usuń mięso
             </button>
           )}
-          <span className="text-xs text-gray-600">
-            Ilość: {prod.extraMeatCount || 0}
-          </span>
+          <span className="text-xs text-gray-600">Ilość: {prod.extraMeatCount || 0}</span>
         </div>
 
         <div className="font-semibold mt-2">Wymiana składnika:</div>
@@ -230,28 +189,65 @@ const ProductItem: React.FC<{
             </div>
           ))}
           {prod.availableSwaps?.map((opt: any, i: number) => (
-            <button
-              key={i}
-              onClick={() => swapIngredient(prod.name, opt.from, opt.to)}
-              className="bg-white border px-2 py-1 text-xs rounded hover:bg-gray-100"
-            >
+            <button key={i} onClick={() => swapIngredient(prod.name, opt.from, opt.to)} className="bg-white border px-2 py-1 text-xs rounded hover:bg-gray-100">
               {opt.from} → {opt.to}
             </button>
           ))}
         </div>
       </div>
       <div className="flex justify-end items-center mt-2 gap-2 flex-wrap text-[11px]">
-        <button onClick={() => removeItem(prod.name)} className="text-red-600 underline">
-          Usuń 1 szt.
-        </button>
-        <button onClick={() => removeWholeItem(prod.name)} className="text-red-600 underline">
-          Usuń produkt
-        </button>
+        <button onClick={() => removeItem(prod.name)} className="text-red-600 underline">Usuń 1 szt.</button>
+        <button onClick={() => removeWholeItem(prod.name)} className="text-red-600 underline">Usuń produkt</button>
       </div>
     </div>
   );
-};
+}
 
+/* kupony poza głównym renderem */
+type PromoType = { code: string; type: "percent" | "amount"; value: number } | null;
+function PromoSectionExternal({
+  promo, promoError, onApply, onClear,
+}: {
+  promo: PromoType;
+  promoError: string | null;
+  onApply: (code: string) => void;
+  onClear: () => void;
+}) {
+  const [localCode, setLocalCode] = useState("");
+  const deferred = useDeferredValue(localCode);
+  const handleApply = useCallback(() => onApply(deferred), [deferred, onApply]);
+
+  return (
+    <div className="mt-2">
+      <h4 className="font-semibold mb-1">Kod promocyjny</h4>
+      <div className="flex gap-2">
+        <input
+          type="text"
+          inputMode="text"
+          autoComplete="off"
+          spellCheck={false}
+          value={localCode}
+          onChange={(e) => setLocalCode(e.target.value)}
+          placeholder="Wpisz kod"
+          className="flex-1 border rounded px-3 py-2 text-sm"
+        />
+        {!promo ? (
+          <button onClick={handleApply} className="px-3 py-2 bg-gray-900 text-white rounded text-sm">Zastosuj</button>
+        ) : (
+          <button onClick={onClear} className="px-3 py-2 bg-gray-200 rounded text-sm">Usuń kod</button>
+        )}
+      </div>
+      {promoError && <p className="text-xs text-red-600 mt-1">{promoError}</p>}
+      {promo && (
+        <p className="text-xs text-green-700 mt-1">
+          Zastosowano kod <b>{promo.code}</b> — {promo.type === "percent" ? `${promo.value}%` : `${promo.value.toFixed(2)} zł`} zniżki.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/* main */
 export default function CheckoutModal() {
   const isClient = useIsClient();
   const session = useSession();
@@ -301,30 +297,36 @@ export default function CheckoutModal() {
   const [restLoc, setRestLoc] = useState<{ lat: number; lng: number } | null>(null);
   const [deliveryInfo, setDeliveryInfo] = useState<{ cost: number; eta: string } | null>(null);
 
-  // LEGAL CHECKBOX (wymagany)
   const [legalAccepted, setLegalAccepted] = useState(false);
 
-  // PROMO
-  const [promo, setPromo] = useState<{ code: string; type: "percent" | "amount"; value: number } | null>(null);
+  const [promo, setPromo] = useState<PromoType>(null);
   const [promoError, setPromoError] = useState<string | null>(null);
 
   // Turnstile
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const [turnstileError, setTurnstileError] = useState(false);
+  const [tsReady, setTsReady] = useState(false);
   const tsIdRef = useRef<any>(null);
   const tsMobileRef = useRef<HTMLDivElement | null>(null);
   const tsDesktopRef = useRef<HTMLDivElement | null>(null);
 
-  // EMAIL: sesja + walidacja (+ fallback do wpisanego)
+  // email
   const sessionEmail = session?.user?.email || "";
   const effectiveEmail = (contactEmail || sessionEmail).trim();
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   const validEmail = emailRegex.test(effectiveEmail);
 
+  useEffect(() => {
+    const id = setInterval(() => setShowBurger((b) => !b), 2000);
+    return () => clearInterval(id);
+  }, []);
+
   // ESC + blokada scrolla
   useEffect(() => {
     if (!isCheckoutOpen) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") closeCheckoutModal(); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closeCheckoutModal();
+    };
     window.addEventListener("keydown", onKey);
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -332,6 +334,7 @@ export default function CheckoutModal() {
       window.removeEventListener("keydown", onKey);
       document.body.style.overflow = prev;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isCheckoutOpen]);
 
   useEffect(() => {
@@ -367,10 +370,8 @@ export default function CheckoutModal() {
       });
   }, []);
 
-  // utils
   const isVisible = (el: HTMLDivElement | null) => !!el && !!el.offsetParent;
 
-  // Render Turnstile (explicit; tylko na widocznym kontenerze)
   const renderTurnstile = (target: HTMLDivElement | null) => {
     if (!TURNSTILE_SITE_KEY || !window.turnstile || !isVisible(target)) return;
     try {
@@ -398,41 +399,34 @@ export default function CheckoutModal() {
 
   const removeTurnstile = () => {
     try {
-      if (tsIdRef.current && window.turnstile) {
-        window.turnstile.remove(tsIdRef.current);
-      }
+      if (tsIdRef.current && window.turnstile) window.turnstile.remove(tsIdRef.current);
     } catch {}
     tsIdRef.current = null;
     setTurnstileToken(null);
     setTurnstileError(false);
   };
 
+  // czekaj aż skrypt się załaduje
   useEffect(() => {
-    if (!isClient || !TURNSTILE_SITE_KEY) return;
-    if (checkoutStep === 3 && isCheckoutOpen) {
+    if (!isClient || !TURNSTILE_SITE_KEY || !tsReady) return;
+    if (isCheckoutOpen && checkoutStep === 3) {
       renderTurnstile(tsMobileRef.current);
       renderTurnstile(tsDesktopRef.current);
-    } else {
-      removeTurnstile();
+      return () => removeTurnstile();
     }
-    return () => removeTurnstile();
+    removeTurnstile();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isClient, isCheckoutOpen, checkoutStep]);
+  }, [isClient, isCheckoutOpen, checkoutStep, tsReady]);
 
   useEffect(() => {
-    if (TURNSTILE_SITE_KEY && turnstileError) {
-      setShowConfirmation(false);
-    }
+    if (TURNSTILE_SITE_KEY && turnstileError) setShowConfirmation(false);
   }, [turnstileError]);
 
   const baseTotal = useMemo<number>(() => {
     return items.reduce((acc: number, it: any) => {
       const qty = it.quantity || 1;
       const priceNum = typeof it.price === "string" ? parseFloat(it.price) : it.price || 0;
-      const addonsCost = (it.addons ?? []).reduce(
-        (sum: number, addon: string) => sum + (SAUCES.includes(addon) ? 3 : 4),
-        0
-      );
+      const addonsCost = (it.addons ?? []).reduce((sum: number, addon: string) => sum + (SAUCES.includes(addon) ? 3 : 4), 0);
       const extraMeatCost = (it.extraMeatCount || 0) * 10;
       return acc + (priceNum + addonsCost + extraMeatCost) * qty;
     }, 0);
@@ -454,9 +448,7 @@ export default function CheckoutModal() {
         return;
       }
 
-      let cost: number;
-      if (zone.min_distance_km === 0) cost = zone.cost;
-      else cost = zone.cost * distance_km;
+      let cost: number = zone.min_distance_km === 0 ? zone.cost : zone.cost * distance_km;
       if (zone.free_over !== null && baseTotal >= zone.free_over) cost = 0;
 
       const eta = `${zone.eta_min_minutes}-${zone.eta_max_minutes} min`;
@@ -471,7 +463,6 @@ export default function CheckoutModal() {
     calcDelivery(lat, lng);
   };
 
-  // PROMO — obliczenie zniżki
   const discount = useMemo(() => {
     if (!promo) return 0;
     const base = subtotal + (deliveryInfo?.cost || 0);
@@ -480,7 +471,6 @@ export default function CheckoutModal() {
   }, [promo, subtotal, deliveryInfo]);
 
   const totalWithDelivery = Math.max(0, subtotal + (deliveryInfo?.cost || 0) - discount);
-
   const shouldHideOrderActions = Boolean(TURNSTILE_SITE_KEY && turnstileError);
 
   const closeCheckoutModal = () => {
@@ -519,12 +509,7 @@ export default function CheckoutModal() {
       total_price: totalWithDelivery,
       discount_amount: discount || 0,
       promo_code: promo?.code || null,
-      legal_accept: {
-        terms: true,
-        privacy: true,
-        version: TERMS_VERSION,
-        ts: new Date().toISOString(),
-      },
+      legal_accept: { terms: true, privacy: true, version: TERMS_VERSION, ts: new Date().toISOString() },
       status: isOnline ? "pending" : paymentMethod === "Online" ? "pending" : "placed",
     };
     if (selectedOption === "delivery") {
@@ -539,8 +524,8 @@ export default function CheckoutModal() {
     return payload;
   };
 
-  const buildItemsPayload = () => {
-    return items.map((item: any, index: number) => {
+  const buildItemsPayload = () =>
+    items.map((item: any, index: number) => {
       const product = products.find((p) => (p as any).name === item.name);
       return {
         product_id: product?.id,
@@ -556,7 +541,6 @@ export default function CheckoutModal() {
         },
       };
     });
-  };
 
   const hoursGuardFail = () => {
     const nowPl = toZonedTime(new Date(), "Europe/Warsaw");
@@ -575,14 +559,11 @@ export default function CheckoutModal() {
     return true;
   };
 
-  // PROMO — walidacja
   const applyPromo = async (codeRaw: string) => {
     setPromoError(null);
     const code = codeRaw.trim();
     if (!code) return;
-
     const currentBase = subtotal + (deliveryInfo?.cost || 0);
-
     try {
       const { data, error } = await supabase
         .from("discount_codes")
@@ -619,7 +600,10 @@ export default function CheckoutModal() {
     }
   };
 
-  const clearPromo = () => { setPromo(null); setPromoError(null); };
+  const clearPromo = () => {
+    setPromo(null);
+    setPromoError(null);
+  };
 
   const requireLegalBeforeConfirm = () => {
     if (!legalAccepted) {
@@ -707,89 +691,19 @@ export default function CheckoutModal() {
 
   if (!isClient || !isCheckoutOpen) return null;
 
-  // Sekcja promocji
-  const PromoSection: React.FC = () => {
-    const [localCode, setLocalCode] = useState("");
-    const deferred = useDeferredValue(localCode);
-    const onApply = useCallback(() => { applyPromo(deferred); }, [deferred]);
-
-    return (
-      <div className="mt-2">
-        <h4 className="font-semibold mb-1">Kod promocyjny</h4>
-        <div className="flex gap-2">
-          <input
-            type="text"
-            inputMode="text"
-            autoComplete="off"
-            spellCheck={false}
-            value={localCode}
-            onChange={(e) => setLocalCode(e.target.value)}
-            placeholder="Wpisz kod"
-            className="flex-1 border rounded px-3 py-2 text-sm"
-          />
-          {!promo ? (
-            <button onClick={onApply} className="px-3 py-2 bg-gray-900 text-white rounded text-sm">
-              Zastosuj
-            </button>
-          ) : (
-            <button onClick={clearPromo} className="px-3 py-2 bg-gray-200 rounded text-sm">
-              Usuń kod
-            </button>
-          )}
-        </div>
-        {promoError && <p className="text-xs text-red-600 mt-1">{promoError}</p>}
-        {promo && (
-          <p className="text-xs text-green-700 mt-1">
-            Zastosowano kod <b>{promo.code}</b> — {promo.type === "percent" ? `${promo.value}%` : `${promo.value.toFixed(2)} zł`} zniżki.
-          </p>
-        )}
-      </div>
-    );
-  };
-
-  // Zgody
-  const LegalConsent = () => (
+  /* zgody jako element */
+  const LegalConsentEl = (
     <label className="flex items-start gap-2 mt-3 text-xs leading-5">
-      <input
-        type="checkbox"
-        checked={legalAccepted}
-        onChange={(e) => setLegalAccepted(e.target.checked)}
-        className="mt-0.5"
-      />
+      <input type="checkbox" checked={legalAccepted} onChange={(e) => setLegalAccepted(e.target.checked)} className="mt-0.5" />
       <span>
         Akceptuję{" "}
-        <a href="/legal/regulamin" target="_blank" rel="noopener noreferrer" className="underline">
-          Regulamin
-        </a>{" "}
+        <a href="/legal/regulamin" target="_blank" rel="noopener noreferrer" className="underline">Regulamin</a>{" "}
         oraz{" "}
-        <a href="/legal/polityka-prywatnosci" target="_blank" rel="noopener noreferrer" className="underline">
-          Politykę prywatności
-        </a>{" "}
+        <a href="/legal/polityka-prywatnosci" target="_blank" rel="noopener noreferrer" className="underline">Politykę prywatności</a>{" "}
         (v{TERMS_VERSION}).
       </span>
     </label>
   );
-
-  // Turnstile widget (mobile/desktop)
-  const TurnstileBox: React.FC<{ boxRef: React.RefObject<HTMLDivElement> }> = ({ boxRef }) => {
-    if (!TURNSTILE_SITE_KEY) return null;
-
-    return (
-      <div className="mt-2">
-        <h4 className="font-semibold mb-1">Weryfikacja</h4>
-        {turnstileError ? (
-          <p className="text-sm text-red-600">
-            Nie udało się załadować weryfikacji. Spróbuj odświeżyć stronę.
-          </p>
-        ) : (
-          <>
-            <div ref={boxRef} />
-            <p className="text-[11px] text-gray-500 mt-1">Chronimy formularz przed botami.</p>
-          </>
-        )}
-      </div>
-    );
-  };
 
   return (
     <>
@@ -799,11 +713,7 @@ export default function CheckoutModal() {
           async
           defer
           strategy="afterInteractive"
-          onError={() => {
-            setTurnstileError(true);
-            setTurnstileToken(null);
-          }}
-          onLoad={() => setTurnstileError(false)}
+          onLoad={() => setTsReady(true)}
         />
       )}
 
@@ -811,20 +721,15 @@ export default function CheckoutModal() {
         className="fixed inset-0 z-50 bg-black/60 flex items-start justify-center p-4 overflow-auto"
         role="dialog"
         aria-modal="true"
-        onMouseDown={(e) => { if (e.target === e.currentTarget) closeCheckoutModal(); }}
+        onMouseDown={(e) => {
+          if (e.target === e.currentTarget) closeCheckoutModal();
+        }}
       >
-        <div
-          className="relative flex flex-col lg:flex-row w-full max-w-4xl gap-6"
-          onMouseDown={(e) => e.stopPropagation()}
-        >
+        <div className="relative flex flex-col lg:flex-row w-full max-w-4xl gap-6" onMouseDown={(e) => e.stopPropagation()}>
           {/* MAIN CARD */}
           <div className="flex-1 bg-white rounded-md shadow-lg p-6 overflow-auto max-h-[90vh]">
             {!orderSent && (
-              <button
-                aria-label="Zamknij"
-                onClick={closeCheckoutModal}
-                className="absolute top-3 right-3 text-gray-700 hover:text-black"
-              >
+              <button aria-label="Zamknij" onClick={closeCheckoutModal} className="absolute top-3 right-3 text-gray-700 hover:text-black">
                 <X size={24} />
               </button>
             )}
@@ -839,10 +744,7 @@ export default function CheckoutModal() {
                 )}
                 <QRCode value="https://g.co/kgs/47NSDMH" size={140} />
                 <div className="flex justify-center gap-4 mt-4 flex-wrap">
-                  <button
-                    onClick={() => window.open("https://g.co/kgs/47NSDMH", "_blank")}
-                    className="px-4 py-2 bg-blue-500 text-white rounded"
-                  >
+                  <button onClick={() => window.open("https://g.co/kgs/47NSDMH", "_blank")} className="px-4 py-2 bg-blue-500 text-white rounded">
                     Zostaw opinię
                   </button>
                   <button onClick={closeCheckoutModal} className="px-4 py-2 bg-gray-300 text-black rounded">
@@ -852,11 +754,7 @@ export default function CheckoutModal() {
               </div>
             ) : (
               <>
-                {errorMessage && (
-                  <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-2 rounded">
-                    {errorMessage}
-                  </div>
-                )}
+                {errorMessage && <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-2 rounded">{errorMessage}</div>}
 
                 {/* STEP 1 */}
                 {checkoutStep === 1 && (
@@ -872,9 +770,7 @@ export default function CheckoutModal() {
                             onClick={() => setSelectedOption(opt)}
                             className={clsx(
                               "flex flex-col items-center p-4 rounded border transition",
-                              selectedOption === opt
-                                ? "bg-yellow-400 text-black border-yellow-500"
-                                : "bg-gray-100 text-gray-800 hover:bg-gray-200 border-gray-200"
+                              selectedOption === opt ? "bg-yellow-400 text-black border-yellow-500" : "bg-gray-100 text-gray-800 hover:bg-gray-200 border-gray-200"
                             )}
                           >
                             <Icon size={24} />
@@ -889,34 +785,15 @@ export default function CheckoutModal() {
                         <h3 className="font-semibold">Czas dostawy</h3>
                         <div className="flex flex-wrap gap-6 items-center">
                           <label className="flex items-center gap-2">
-                            <input
-                              type="radio"
-                              name="timeOption"
-                              value="asap"
-                              checked={deliveryTimeOption === "asap"}
-                              onChange={() => setDeliveryTimeOption("asap")}
-                            />
+                            <input type="radio" name="timeOption" value="asap" checked={deliveryTimeOption === "asap"} onChange={() => setDeliveryTimeOption("asap")} />
                             <span>Jak najszybciej</span>
                           </label>
                           <label className="flex items-center gap-2">
-                            <input
-                              type="radio"
-                              name="timeOption"
-                              value="schedule"
-                              checked={deliveryTimeOption === "schedule"}
-                              onChange={() => setDeliveryTimeOption("schedule")}
-                            />
+                            <input type="radio" name="timeOption" value="schedule" checked={deliveryTimeOption === "schedule"} onChange={() => setDeliveryTimeOption("schedule")} />
                             <span>Na godzinę</span>
                           </label>
                           {deliveryTimeOption === "schedule" && (
-                            <input
-                              type="time"
-                              className="border rounded px-2 py-1"
-                              min="11:30"
-                              max="21:45"
-                              value={scheduledTime}
-                              onChange={(e) => setScheduledTime(e.target.value)}
-                            />
+                            <input type="time" className="border rounded px-2 py-1" min="11:30" max="21:45" value={scheduledTime} onChange={(e) => setScheduledTime(e.target.value)} />
                           )}
                         </div>
                       </div>
@@ -925,20 +802,8 @@ export default function CheckoutModal() {
                     <div className="space-y-3">
                       {!isLoggedIn ? (
                         <>
-                          <input
-                            type="text"
-                            placeholder="Email"
-                            className="w-full px-3 py-2 border rounded"
-                            value={email}
-                            onChange={(e) => setEmail(e.target.value)}
-                          />
-                          <input
-                            type="password"
-                            placeholder="Hasło"
-                            className="w-full px-3 py-2 border rounded"
-                            value={password}
-                            onChange={(e) => setPassword(e.target.value)}
-                          />
+                          <input type="text" placeholder="Email" className="w-full px-3 py-2 border rounded" value={email} onChange={(e) => setEmail(e.target.value)} />
+                          <input type="password" placeholder="Hasło" className="w-full px-3 py-2 border rounded" value={password} onChange={(e) => setPassword(e.target.value)} />
                           <div className="flex flex-col gap-2">
                             <button
                               onClick={async () => {
@@ -951,11 +816,7 @@ export default function CheckoutModal() {
                             >
                               Zaloguj się
                             </button>
-                            <button
-                              onClick={nextStep}
-                              disabled={!selectedOption}
-                              className="w-full bg-black text-white py-2 rounded mt-1"
-                            >
+                            <button onClick={nextStep} disabled={!selectedOption} className="w-full bg-black text-white py-2 rounded mt-1">
                               Kontynuuj bez logowania
                             </button>
                           </div>
@@ -975,94 +836,32 @@ export default function CheckoutModal() {
                     <h2 className="text-2xl font-bold text-center">Dane kontaktowe</h2>
                     {selectedOption === "delivery" && (
                       <>
-                        <AddressAutocomplete
-                          onAddressSelect={onAddressSelect}
-                          setCity={setCity}
-                          setPostalCode={setPostalCode}
-                          setFlatNumber={setFlatNumber}
-                        />
+                        <AddressAutocomplete onAddressSelect={onAddressSelect} setCity={setCity} setPostalCode={setPostalCode} setFlatNumber={setFlatNumber} />
                         <p className="text-xs text-gray-500">Wybierz adres z listy, aby obliczyć koszt dostawy</p>
                         <div className="grid grid-cols-1 gap-2">
-                          <input
-                            type="text"
-                            placeholder="Adres"
-                            className="w-full px-3 py-2 border rounded"
-                            value={street}
-                            onChange={(e) => setStreet(e.target.value)}
-                          />
+                          <input type="text" placeholder="Adres" className="w-full px-3 py-2 border rounded" value={street} onChange={(e) => setStreet(e.target.value)} />
                           <div className="flex gap-2">
-                            <input
-                              type="text"
-                              placeholder="Nr mieszkania"
-                              className="flex-1 px-3 py-2 border rounded"
-                              value={flatNumber}
-                              onChange={(e) => setFlatNumber(e.target.value)}
-                            />
-                            <input
-                              type="text"
-                              placeholder="Kod pocztowy"
-                              className="flex-1 px-3 py-2 border rounded"
-                              value={postalCode}
-                              onChange={(e) => setPostalCode(e.target.value)}
-                            />
+                            <input type="text" placeholder="Nr mieszkania" className="flex-1 px-3 py-2 border rounded" value={flatNumber} onChange={(e) => setFlatNumber(e.target.value)} />
+                            <input type="text" placeholder="Kod pocztowy" className="flex-1 px-3 py-2 border rounded" value={postalCode} onChange={(e) => setPostalCode(e.target.value)} />
                           </div>
-                          <input
-                            type="text"
-                            placeholder="Miasto"
-                            className="w-full px-3 py-2 border rounded"
-                            value={city}
-                            onChange={(e) => setCity(e.target.value)}
-                          />
+                          <input type="text" placeholder="Miasto" className="w-full px-3 py-2 border rounded" value={city} onChange={(e) => setCity(e.target.value)} />
                         </div>
                       </>
                     )}
                     <div className="grid grid-cols-1 gap-2">
-                      <input
-                        type="text"
-                        placeholder="Imię"
-                        className="w-full px-3 py-2 border rounded"
-                        value={name}
-                        onChange={(e) => setName(e.target.value)}
-                      />
-                      <input
-                        type="tel"
-                        placeholder="Telefon"
-                        className="w-full px-3 py-2 border rounded"
-                        value={phone}
-                        onChange={(e) => setPhone(e.target.value)}
-                      />
+                      <input type="text" placeholder="Imię" className="w-full px-3 py-2 border rounded" value={name} onChange={(e) => setName(e.target.value)} />
+                      <input type="tel" placeholder="Telefon" className="w-full px-3 py-2 border rounded" value={phone} onChange={(e) => setPhone(e.target.value)} />
                       {(selectedOption === "local" || selectedOption === "takeaway") && (
-                        <input
-                          type="text"
-                          placeholder="Adres (opcjonalnie)"
-                          className="w-full px-3 py-2 border rounded"
-                          value={optionalAddress}
-                          onChange={(e) => setOptionalAddress(e.target.value)}
-                        />
+                        <input type="text" placeholder="Adres (opcjonalnie)" className="w-full px-3 py-2 border rounded" value={optionalAddress} onChange={(e) => setOptionalAddress(e.target.value)} />
                       )}
-                      <input
-                        type="email"
-                        placeholder="Email (wymagany do potwierdzenia)"
-                        className="w-full px-3 py-2 border rounded"
-                        value={contactEmail}
-                        onChange={(e) => setContactEmail(e.target.value)}
-                      />
-                      {contactEmail !== "" && !validEmail && (
-                        <p className="text-xs text-red-600">Podaj poprawny adres e-mail.</p>
-                      )}
+                      <input type="email" placeholder="Email (wymagany do potwierdzenia)" className="w-full px-3 py-2 border rounded" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} />
+                      {contactEmail !== "" && !validEmail && <p className="text-xs text-red-600">Podaj poprawny adres e-mail.</p>}
                     </div>
                     <div className="flex justify-between mt-2">
-                      <button onClick={() => goToStep(1)} className="px-4 py-2 bg-gray-200 rounded">
-                        ← Wstecz
-                      </button>
+                      <button onClick={() => goToStep(1)} className="px-4 py-2 bg-gray-200 rounded">← Wstecz</button>
                       <button
                         onClick={nextStep}
-                        disabled={
-                          !name ||
-                          !phone ||
-                          !validEmail ||
-                          (selectedOption === "delivery" && (!street || !postalCode || !city))
-                        }
+                        disabled={!name || !phone || !validEmail || (selectedOption === "delivery" && (!street || !postalCode || !city))}
                         className="px-4 py-2 bg-yellow-400 rounded font-semibold disabled:opacity-50"
                       >
                         Dalej →
@@ -1082,101 +881,67 @@ export default function CheckoutModal() {
                         {items.map((item, idx) => (
                           <div key={idx}>
                             <ProductItem prod={item} helpers={productHelpers} />
-                            <textarea
-                              className="w-full text-xs border rounded px-2 py-1 mt-1"
-                              placeholder="Notatka do produktu"
-                              value={notes[idx] || ""}
-                              onChange={(e) => setNotes({ ...notes, [idx]: e.target.value })}
-                            />
+                            <textarea className="w-full text-xs border rounded px-2 py-1 mt-1" placeholder="Notatka do produktu" value={notes[idx] || ""} onChange={(e) => setNotes({ ...notes, [idx]: e.target.value })} />
                           </div>
                         ))}
                         {items.length === 0 && <p className="text-center text-gray-500">Brak produktów w koszyku.</p>}
                       </div>
 
-                      {/* PODSUMOWANIE + PŁATNOŚĆ — tylko MOBILE */}
+                      {/* MOBILE SUMMARY */}
                       <div className="w-full lg:hidden flex-shrink-0">
                         <div className="border rounded p-4 bg-gray-50 space-y-3">
                           <h3 className="text-lg font-semibold">Podsumowanie</h3>
-                          <div className="flex justify-between text-sm">
-                            <span>Produkty:</span>
-                            <span>{baseTotal.toFixed(2)} zł</span>
-                          </div>
-                          {(selectedOption === "takeaway" || selectedOption === "delivery") && (
-                            <div className="flex justify-between text-sm">
-                              <span>Opakowanie:</span>
-                              <span>2.00 zł</span>
-                            </div>
-                          )}
-                          {deliveryInfo && (
-                            <div className="flex justify-between text-sm">
-                              <span>Dostawa:</span>
-                              <span>{deliveryInfo.cost.toFixed(2)} zł</span>
-                            </div>
-                          )}
+                          <div className="flex justify-between text-sm"><span>Produkty:</span><span>{baseTotal.toFixed(2)} zł</span></div>
+                          {(selectedOption === "takeaway" || selectedOption === "delivery") && <div className="flex justify-between text-sm"><span>Opakowanie:</span><span>2.00 zł</span></div>}
+                          {deliveryInfo && <div className="flex justify-between text-sm"><span>Dostawa:</span><span>{deliveryInfo.cost.toFixed(2)} zł</span></div>}
 
-                          {/* PROMO (mobile) */}
-                          <PromoSection />
+                          <PromoSectionExternal promo={promo} promoError={promoError} onApply={applyPromo} onClear={clearPromo} />
 
-                          {discount > 0 && (
-                            <div className="flex justify-between text-sm text-green-700">
-                              <span>Rabat:</span>
-                              <span>-{discount.toFixed(2)} zł</span>
-                            </div>
-                          )}
+                          {discount > 0 && <div className="flex justify-between text-sm text-green-700"><span>Rabat:</span><span>-{discount.toFixed(2)} zł</span></div>}
 
-                          <div className="flex justify-between font-semibold border-t pt-2">
-                            <span>Razem:</span>
-                            <span>{totalWithDelivery.toFixed(2)} zł</span>
-                          </div>
+                          <div className="flex justify-between font-semibold border-t pt-2"><span>Razem:</span><span>{totalWithDelivery.toFixed(2)} zł</span></div>
                           {deliveryInfo && <p className="text-xs text-gray-600 mt-1">Szacowany czas dostawy: {deliveryInfo.eta}</p>}
 
                           <div id="paymentBox" className="mt-2">
                             <h4 className="font-semibold mb-1">Metoda płatności</h4>
                             <div className="flex flex-wrap gap-2">
                               {(["Gotówka", "Terminal", "Online"] as const).map((m) => (
-                                <button
-                                  key={m}
-                                  onClick={() => {
-                                    setPaymentMethod(m);
-                                    setShowConfirmation(false);
-                                  }}
-                                  className={clsx(
-                                    "px-3 py-2 rounded font-semibold text-sm transition",
-                                    paymentMethod === m ? "bg-green-600 text-white" : "bg-gray-200 text-black hover:bg-gray-300"
-                                  )}
-                                >
+                                <button key={m} onClick={() => { setPaymentMethod(m); setShowConfirmation(false); }}
+                                  className={clsx("px-3 py-2 rounded font-semibold text-sm transition", paymentMethod === m ? "bg-green-600 text-white" : "bg-gray-200 text-black hover:bg-gray-300")}>
                                   {m}
                                 </button>
                               ))}
                             </div>
 
-                            {/* LEGAL CHECKBOX (mobile) */}
-                            <LegalConsent />
-                            {/* Turnstile (mobile) */}
-                            <TurnstileBox boxRef={tsMobileRef} />
+                            {LegalConsentEl}
+
+                            {TURNSTILE_SITE_KEY ? (
+                              <div className="mt-2">
+                                <h4 className="font-semibold mb-1">Weryfikacja</h4>
+                                {turnstileError ? (
+                                  <p className="text-sm text-red-600">Nie udało się załadować weryfikacji. Sprawdź CSP lub blokery.</p>
+                                ) : (
+                                  <>
+                                    <div ref={tsMobileRef} />
+                                    <p className="text-[11px] text-gray-500 mt-1">Chronimy formularz przed botami.</p>
+                                  </>
+                                )}
+                              </div>
+                            ) : null}
 
                             {!showConfirmation ? (
                               !shouldHideOrderActions && (
-                                <button
-                                  onClick={() => setShowConfirmation(true)}
-                                  disabled={!paymentMethod || !legalAccepted || (TURNSTILE_SITE_KEY ? !turnstileToken : false)}
-                                  className="w-full mt-3 py-2 bg-yellow-400 text-black rounded font-semibold disabled:opacity-50"
-                                >
+                                <button onClick={() => setShowConfirmation(true)} disabled={!paymentMethod || !legalAccepted || (TURNSTILE_SITE_KEY ? !turnstileToken : false)} className="w-full mt-3 py-2 bg-yellow-400 text-black rounded font-semibold disabled:opacity-50">
                                   Potwierdź płatność
                                 </button>
                               )
                             ) : (
                               !shouldHideOrderActions && (
                                 <div className="flex flex-col gap-2 mt-2">
-                                  <button
-                                    onClick={paymentMethod === "Online" ? handleOnlinePayment : handleSubmitOrder}
-                                    className="w-full py-2 bg-black text-white rounded font-semibold hover:opacity-95"
-                                  >
+                                  <button onClick={paymentMethod === "Online" ? handleOnlinePayment : handleSubmitOrder} className="w-full py-2 bg-black text-white rounded font-semibold hover:opacity-95">
                                     ✅ Zamawiam i płacę ({paymentMethod})
                                   </button>
-                                  <button onClick={() => setShowConfirmation(false)} className="text-xs underline">
-                                    Zmień metodę
-                                  </button>
+                                  <button onClick={() => setShowConfirmation(false)} className="text-xs underline">Zmień metodę</button>
                                 </div>
                               )
                             )}
@@ -1187,16 +952,13 @@ export default function CheckoutModal() {
 
                     {/* Nawigacja kroku 3 */}
                     <div className="mt-2 flex justify-between">
-                      <button onClick={() => goToStep(2)} className="px-4 py-2 bg-gray-200 rounded">
-                        ← Wstecz
-                      </button>
+                      <button onClick={() => goToStep(2)} className="px-4 py-2 bg-gray-200 rounded">← Wstecz</button>
                       <button
                         onClick={() => {
                           if (!paymentMethod) setErrorMessage("Wybierz metodę płatności.");
                           if (!legalAccepted) setErrorMessage("Zaznacz akceptację regulaminu i polityki prywatności.");
                           if (TURNSTILE_SITE_KEY && !turnstileToken) setErrorMessage("Potwierdź, że nie jesteś robotem.");
-                          const el = document.getElementById("paymentBox");
-                          if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+                          document.getElementById("paymentBox")?.scrollIntoView({ behavior: "smooth", block: "start" });
                           setShowConfirmation(true);
                         }}
                         className="px-4 py-2 bg-yellow-400 rounded font-semibold"
@@ -1210,91 +972,62 @@ export default function CheckoutModal() {
             )}
           </div>
 
-          {/* DESKTOP: stałe podsumowanie po prawej */}
+          {/* DESKTOP SUMMARY */}
           {!orderSent && (
             <aside className="hidden lg:block w-[320px] flex-shrink-0">
               <div className="sticky top-16 bg-white border rounded-md shadow p-5 space-y-4">
                 <h2 className="text-xl font-bold">Podsumowanie</h2>
-                <div className="flex justify-between">
-                  <span>Produkty:</span>
-                  <span>{baseTotal.toFixed(2)} zł</span>
-                </div>
-                {(selectedOption === "takeaway" || selectedOption === "delivery") && (
-                  <div className="flex justify-between">
-                    <span>Opakowanie:</span>
-                    <span>2.00 zł</span>
-                  </div>
-                )}
-                {deliveryInfo && (
-                  <div className="flex justify-between">
-                    <span>Dostawa:</span>
-                    <span>{deliveryInfo.cost.toFixed(2)} zł</span>
-                  </div>
-                )}
+                <div className="flex justify-between"><span>Produkty:</span><span>{baseTotal.toFixed(2)} zł</span></div>
+                {(selectedOption === "takeaway" || selectedOption === "delivery") && <div className="flex justify-between"><span>Opakowanie:</span><span>2.00 zł</span></div>}
+                {deliveryInfo && <div className="flex justify-between"><span>Dostawa:</span><span>{deliveryInfo.cost.toFixed(2)} zł</span></div>}
 
-                {/* PROMO (desktop) */}
-                <PromoSection />
+                <PromoSectionExternal promo={promo} promoError={promoError} onApply={applyPromo} onClear={clearPromo} />
 
-                {discount > 0 && (
-                  <div className="flex justify-between text-green-700">
-                    <span>Rabat:</span>
-                    <span>-{discount.toFixed(2)} zł</span>
-                  </div>
-                )}
+                {discount > 0 && <div className="flex justify-between text-green-700"><span>Rabat:</span><span>-{discount.toFixed(2)} zł</span></div>}
 
-                <div className="flex justify-between font-semibold border-t pt-2">
-                  <span>RAZEM:</span>
-                  <span>{totalWithDelivery.toFixed(2)} zł</span>
-                </div>
+                <div className="flex justify-between font-semibold border-t pt-2"><span>RAZEM:</span><span>{totalWithDelivery.toFixed(2)} zł</span></div>
                 {deliveryInfo && <p className="text-xs text-gray-600">ETA: {deliveryInfo.eta}</p>}
 
                 <div id="paymentBox" className="mt-2">
                   <h4 className="font-semibold mb-1">Płatność</h4>
                   <div className="flex flex-wrap gap-2">
                     {(["Gotówka", "Terminal", "Online"] as const).map((m) => (
-                      <button
-                        key={m}
-                        onClick={() => {
-                          setPaymentMethod(m);
-                          setShowConfirmation(false);
-                        }}
-                        className={clsx(
-                          "px-3 py-2 rounded font-semibold text-sm transition",
-                          paymentMethod === m ? "bg-green-600 text-white" : "bg-gray-200 text-black hover:bg-gray-300"
-                        )}
-                      >
+                      <button key={m} onClick={() => { setPaymentMethod(m); setShowConfirmation(false); }}
+                        className={clsx("px-3 py-2 rounded font-semibold text-sm transition", paymentMethod === m ? "bg-green-600 text-white" : "bg-gray-200 text-black hover:bg-gray-300")}>
                         {m}
                       </button>
                     ))}
                   </div>
 
-                  {/* LEGAL CHECKBOX (desktop) */}
-                  <LegalConsent />
-                  {/* Turnstile (desktop) */}
-                  <TurnstileBox boxRef={tsDesktopRef} />
+                  {LegalConsentEl}
+
+                  {TURNSTILE_SITE_KEY ? (
+                    <div className="mt-2">
+                      <h4 className="font-semibold mb-1">Weryfikacja</h4>
+                      {turnstileError ? (
+                        <p className="text-sm text-red-600">Nie udało się załadować weryfikacji. Sprawdź CSP lub blokery.</p>
+                      ) : (
+                        <>
+                          <div ref={tsDesktopRef} />
+                          <p className="text-[11px] text-gray-500 mt-1">Chronimy formularz przed botami.</p>
+                        </>
+                      )}
+                    </div>
+                  ) : null}
 
                   {!showConfirmation ? (
                     !shouldHideOrderActions && (
-                      <button
-                        onClick={() => setShowConfirmation(true)}
-                        disabled={!paymentMethod || !legalAccepted || (TURNSTILE_SITE_KEY ? !turnstileToken : false)}
-                        className="w-full mt-3 py-2 bg-yellow-400 text-black rounded font-semibold disabled:opacity-50"
-                      >
+                      <button onClick={() => setShowConfirmation(true)} disabled={!paymentMethod || !legalAccepted || (TURNSTILE_SITE_KEY ? !turnstileToken : false)} className="w-full mt-3 py-2 bg-yellow-400 text-black rounded font-semibold disabled:opacity-50">
                         Potwierdź płatność
                       </button>
                     )
                   ) : (
                     !shouldHideOrderActions && (
                       <div className="flex flex-col gap-2 mt-2">
-                        <button
-                          onClick={paymentMethod === "Online" ? handleOnlinePayment : handleSubmitOrder}
-                          className="w-full py-2 bg-black text-white rounded font-semibold hover:opacity-95"
-                        >
+                        <button onClick={paymentMethod === "Online" ? handleOnlinePayment : handleSubmitOrder} className="w-full py-2 bg-black text-white rounded font-semibold hover:opacity-95">
                           ✅ Zamawiam i płacę ({paymentMethod})
                         </button>
-                        <button onClick={() => setShowConfirmation(false)} className="text-xs underline">
-                          Zmień
-                        </button>
+                        <button onClick={() => setShowConfirmation(false)} className="text-xs underline">Zmień</button>
                       </div>
                     )
                   )}

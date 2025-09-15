@@ -1,34 +1,23 @@
-// next.config.ts
 import type { NextConfig } from "next";
 
 const csp = [
-  // Domyślne źródła
   "default-src 'self'",
   "base-uri 'self'",
   "block-all-mixed-content",
 
-  // Zasoby
   "font-src 'self' https://fonts.gstatic.com data:",
   "img-src 'self' blob: data: https://*.googleusercontent.com https://*.ggpht.com https://maps.gstatic.com https://maps.googleapis.com",
   "object-src 'none'",
 
-  // Skrypty / style
-  // (+) dodano https://challenges.cloudflare.com dla Turnstile
   "script-src 'self' 'unsafe-inline' https://maps.googleapis.com https://maps.gstatic.com https://www.googletagmanager.com https://challenges.cloudflare.com",
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
 
-  // Połączenia sieciowe
-  // (+) dodano https://challenges.cloudflare.com dla Turnstile
   "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://maps.googleapis.com https://*.googleapis.com https://*.google.com https://secure.przelewy24.pl https://sandbox.przelewy24.pl https://challenges.cloudflare.com",
 
-  // Iframe’y
-  // (+) dodano https://challenges.cloudflare.com dla Turnstile
   "frame-src 'self' https://*.google.com https://*.gstatic.com https://challenges.cloudflare.com",
 
-  // Formularze (powrót/status P24)
   "form-action 'self' https://secure.przelewy24.pl https://sandbox.przelewy24.pl",
 
-  // Inne
   "manifest-src 'self'",
   "worker-src 'self' blob:",
   "frame-ancestors 'none'",
@@ -40,17 +29,13 @@ const nextConfig: NextConfig = {
   eslint: { ignoreDuringBuilds: true },
   typescript: { ignoreBuildErrors: true },
   poweredByHeader: false,
-
   async headers() {
     return [
       {
         source: "/(.*)",
         headers: [
           { key: "Content-Security-Policy", value: csp },
-          {
-            key: "Strict-Transport-Security",
-            value: "max-age=31536000; includeSubDomains; preload",
-          },
+          { key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains; preload" },
           { key: "X-Content-Type-Options", value: "nosniff" },
           { key: "X-Frame-Options", value: "DENY" },
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
