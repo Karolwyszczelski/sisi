@@ -74,7 +74,7 @@ export default function Header() {
         className={clsx(
           "fixed right-0 top-0 z-50 h-full w-80 max-w-[85%]",
           "translate-x-full transition-transform duration-300 ease-out",
-          "bg-white text-black shadow-xl md:hidden"
+          "bg-yellow-400 text-white shadow-xl md:hidden"
         )}
         style={{ transform: open ? "translateX(0)" : "translateX(100%)" }}
         role="dialog"

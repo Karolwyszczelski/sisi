@@ -104,15 +104,15 @@ export default function Footer() {
           <ul className="space-y-2">
             <li className="flex items-center justify-center md:justify-start">
               <FileText className="w-5 h-5 mr-2" aria-hidden="true" />
-              <Link href="/legal/regulamin" className="hover:text-primary">Regulamin (v{TERMS_VERSION})</Link>
+              <Link href="/regulamin" className="hover:text-primary">Regulamin (v{TERMS_VERSION})</Link>
             </li>
             <li className="flex items-center justify-center md:justify-start">
               <ShieldCheck className="w-5 h-5 mr-2" aria-hidden="true" />
-              <Link href="/legal/polityka-prywatnosci" className="hover:text-primary">Polityka prywatności</Link>
+              <Link href="/polityka-prywatnosci" className="hover:text-primary">Polityka prywatności</Link>
             </li>
             <li className="flex items-center justify-center md:justify-start">
               <ShieldCheck className="w-5 h-5 mr-2" aria-hidden="true" />
-              <Link href="/legal/cookies" className="hover:text-primary">Polityka cookies</Link>
+              <Link href="/cookies" className="hover:text-primary">Polityka cookies</Link>
             </li>
             <li className="flex items-center justify-center md:justify-start">
               <button
