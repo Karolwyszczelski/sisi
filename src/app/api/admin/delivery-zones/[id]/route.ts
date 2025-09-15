@@ -13,13 +13,15 @@ const supabaseAdmin = createClient(
 );
 
 const Patch = z.object({
-  table_number: z.string().min(1).optional(),
-  name: z.string().nullable().optional(),
-  x: z.number().optional(),
-  y: z.number().optional(),
-  number_of_seats: z.number().int().min(1).optional(),
-  // stary frontend czasem wysyła "seats"
-  seats: z.number().int().min(1).optional(),
+  min_distance_km: z.number().optional(),
+  max_distance_km: z.number().optional(),
+  min_order_value: z.number().optional(),
+  cost: z.number().optional(),
+  free_over: z.number().nullable().optional(),
+  eta_min_minutes: z.number().optional(),
+  eta_max_minutes: z.number().optional(),
+  cost_fixed: z.number().optional(),
+  cost_per_km: z.number().optional(),
 });
 
 export async function PATCH(req: Request, { params }: { params: { id: string } }) {
@@ -28,31 +30,25 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const json = await req.json();
-  const raw = {
-    ...json,
-    x: json.x !== undefined ? Number(json.x) : undefined,
-    y: json.y !== undefined ? Number(json.y) : undefined,
-    number_of_seats:
-      json.number_of_seats !== undefined ? Number(json.number_of_seats)
-      : json.seats !== undefined ? Number(json.seats)
-      : undefined,
-  };
-  const parsed = Patch.safeParse(raw);
+  const prepared = Object.fromEntries(
+    Object.entries(json).map(([k, v]) => [
+      k,
+      v === "" ? null : v === null ? null : Number.isFinite(Number(v)) ? Number(v) : v,
+    ])
+  );
+  const parsed = Patch.safeParse(prepared);
   if (!parsed.success)
     return NextResponse.json({ error: "Validation", details: parsed.error.format() }, { status: 400 });
 
-  const patch: any = { ...parsed.data };
-  delete patch.seats;
-
   const { data, error } = await supabaseAdmin
-    .from("restaurant_tables")
-    .update(patch)
+    .from("delivery_zones")
+    .update(parsed.data)
     .eq("id", params.id)
     .select()
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ table: data });
+  return NextResponse.json({ zone: data });
 }
 
 export async function DELETE(_req: Request, { params }: { params: { id: string } }) {
@@ -60,7 +56,7 @@ export async function DELETE(_req: Request, { params }: { params: { id: string }
   if (!session || (role !== "admin" && role !== "employee"))
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { error } = await supabaseAdmin.from("restaurant_tables").delete().eq("id", params.id);
+  const { error } = await supabaseAdmin.from("delivery_zones").delete().eq("id", params.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ ok: true });
 }

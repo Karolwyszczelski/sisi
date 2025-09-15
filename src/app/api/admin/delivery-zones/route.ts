@@ -2,8 +2,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
-import { z } from "zod";
 import { createClient } from "@supabase/supabase-js";
+import { z } from "zod";
 import { getSessionAndRole } from "@/lib/serverAuth";
 
 const supabaseAdmin = createClient(
@@ -12,16 +12,18 @@ const supabaseAdmin = createClient(
   { auth: { persistSession: false } }
 );
 
-const ZoneSchema = z.object({
-  min_distance_km: z.number().nonnegative(),
-  max_distance_km: z.number().nonnegative(),
-  min_order_value: z.number().nonnegative(),
-  cost: z.number().nonnegative(),
-  free_over: z.number().nonnegative().nullable().optional(),
-  eta_min_minutes: z.number().int().nonnegative(),
-  eta_max_minutes: z.number().int().nonnegative(),
-  cost_fixed: z.number().nonnegative().default(0),
-  cost_per_km: z.number().nonnegative().default(0),
+// Schemat zgodny z formularzem DeliveryZonesForm
+const Zone = z.object({
+  id: z.string().uuid().optional(),
+  min_distance_km: z.number(),
+  max_distance_km: z.number(),
+  min_order_value: z.number(),
+  cost: z.number(),
+  free_over: z.number().nullable().optional(),
+  eta_min_minutes: z.number(),
+  eta_max_minutes: z.number(),
+  cost_fixed: z.number(),
+  cost_per_km: z.number(),
 });
 
 export async function GET() {
@@ -32,7 +34,7 @@ export async function GET() {
   const { data, error } = await supabaseAdmin
     .from("delivery_zones")
     .select("*")
-    .order("min_distance_km", { ascending: true });
+    .order("min_distance_km");
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ zones: data ?? [] });
@@ -43,10 +45,21 @@ export async function POST(req: Request) {
   if (!session || (role !== "admin" && role !== "employee"))
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const body = await req.json();
-  const parsed = ZoneSchema.safeParse(body);
+  const json = await req.json();
+  const parsed = Zone.safeParse({
+    ...json,
+    min_distance_km: Number(json.min_distance_km),
+    max_distance_km: Number(json.max_distance_km),
+    min_order_value: Number(json.min_order_value),
+    cost: Number(json.cost),
+    free_over: json.free_over === null || json.free_over === "" ? null : Number(json.free_over),
+    eta_min_minutes: Number(json.eta_min_minutes),
+    eta_max_minutes: Number(json.eta_max_minutes),
+    cost_fixed: Number(json.cost_fixed),
+    cost_per_km: Number(json.cost_per_km),
+  });
   if (!parsed.success)
-    return NextResponse.json({ error: parsed.error.message }, { status: 400 });
+    return NextResponse.json({ error: "Validation", details: parsed.error.format() }, { status: 400 });
 
   const { data, error } = await supabaseAdmin
     .from("delivery_zones")
