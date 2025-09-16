@@ -17,7 +17,6 @@ const POS_ID      = process.env.P24_POS_ID!;
 const API_KEY     = process.env.P24_API_KEY!;
 
 export async function POST(request: Request) {
-  // ważne: przekaż request
   const { session, role } = await getSessionAndRole(request);
   if (!session || (role !== "admin" && role !== "employee")) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -29,7 +28,6 @@ export async function POST(request: Request) {
 
   const supabase = createRouteHandlerClient<Database>({ cookies });
 
-  // zamówienie (dodano p24_order_id)
   const { data: order, error: ordErr } = await supabase
     .from("orders")
     .select("id,total_price,payment_method,payment_status,p24_session_id,p24_order_id,currency")
@@ -46,13 +44,12 @@ export async function POST(request: Request) {
   const sessionId = (order as any).p24_session_id || order.id;
   const orderId   = (order as any).p24_order_id ? Number((order as any).p24_order_id) : undefined;
 
-  // Auth
   const auth = Buffer.from(`${MERCHANT_ID}:${API_KEY}`).toString("base64");
   const body: Record<string, any> = {
     merchantId: Number(MERCHANT_ID),
     posId: Number(POS_ID),
     sessionId,
-    amount: Math.round(Number(order.total_price || 0) * 100), // grosze
+    amount: Math.round(Number(order.total_price || 0) * 100),
     currency: (order as any).currency || "PLN",
   };
   if (orderId) body.orderId = orderId;
@@ -72,25 +69,21 @@ export async function POST(request: Request) {
     const safeJson = await r.json().catch(() => null as any);
 
     if (r.ok) {
-      // typowe odpowiedzi:
-      // { data: { status: "success" } }  OR  200 bez pola status -> traktujemy jako paid
       const st = safeJson?.data?.status ?? safeJson?.status;
       if (!st || st === "success" || st === true) newStatus = "paid";
       else if (st === "failed") newStatus = "failed";
       else newStatus = "pending";
     } else {
-      // nie-200 – sprawdź błąd „already processed/verified”
       const msg = (safeJson?.error?.message || safeJson?.message || "").toString().toLowerCase();
       const code = (safeJson?.error?.code || "").toString().toLowerCase();
       if (msg.includes("already") || code.includes("already")) {
-        // transakcja była już potwierdzona
         newStatus = "paid";
       } else if (r.status === 400 || r.status === 422) {
         newStatus = "pending";
       }
     }
   } catch {
-    // błąd sieci – nie zmieniaj
+    // sieć padła – zostaw bez zmian
   }
 
   if (newStatus !== order.payment_status) {
