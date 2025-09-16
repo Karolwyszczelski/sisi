@@ -92,6 +92,7 @@ export async function POST(req: Request) {
       (vr.ok && (() => { try { const j = JSON.parse(vtxt); return j?.data?.status === "success"; } catch { return false; } })());
 
     // z sessionId wyciągamy id zamówienia w formie tekstowe
+    const orderIdFromSession = extractOrderIdFromSession(sessionId);
 
     if (!orderIdFromSession) {
       console.warn("P24 webhook: unable to derive order id", { sessionId });
@@ -155,10 +156,16 @@ export async function POST(req: Request) {
       return "not-found";
     };
 
+    const baseValues: Record<string, unknown> =
+      orderIdFromGateway
+        ? { p24_order_id: String(orderIdFromGateway) }
+        : {};
+
+
     if (ok) {
       const paidAt = new Date().toISOString();
       const updateResult = await updateOrderWithFallback(
-        { payment_status: "paid", paid_at: paidAt },
+        { ...baseValues, payment_status: "paid", paid_at: paidAt },
         "paid"
       );
 
@@ -174,7 +181,7 @@ export async function POST(req: Request) {
     }
 
     const failedResult = await updateOrderWithFallback(
-      { payment_status: "failed" },
+      { ...baseValues, payment_status: "failed" },
       "failed"
     );
 
