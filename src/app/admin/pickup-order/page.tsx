@@ -5,11 +5,9 @@ import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 import EditOrderButton from "@/components/EditOrderButton";
 import CancelButton from "@/components/CancelButton";
 
-/* ===================== Typy ===================== */
 type Any = Record<string, any>;
 type PaymentMethod = "Gotówka" | "Terminal" | "Online";
 type PaymentStatus = "pending" | "paid" | "failed" | null;
-type OrderStatus = "pending" | "new" | "placed" | "accepted" | "cancelled" | "completed";
 
 interface Order {
   id: string;
@@ -17,7 +15,7 @@ interface Order {
   total_price: number;
   delivery_cost?: number | null;
   created_at: string;
-  status: OrderStatus;
+  status: "new" | "placed" | "accepted" | "cancelled" | "completed";
   clientDelivery?: string;
   deliveryTime?: string;
   address?: string;
@@ -32,7 +30,6 @@ interface Order {
   payment_status?: PaymentStatus;
 }
 
-/* =============== Utils =============== */
 const getOptionLabel = (opt?: Order["selected_option"]) =>
   opt === "delivery" ? "DOSTAWA" : opt === "takeaway" ? "NA WYNOS" : opt === "local" ? "NA MIEJSCU" : "BRAK";
 
@@ -48,7 +45,7 @@ const toNumber = (x: any, d = 0) => {
   return isFinite(n) ? n : d;
 };
 
-function parseProducts(itemsData: any): any[] {
+const parseProducts = (itemsData: any): any[] => {
   if (!itemsData) return [];
   if (typeof itemsData === "string") {
     try { return parseProducts(JSON.parse(itemsData)); }
@@ -61,7 +58,7 @@ function parseProducts(itemsData: any): any[] {
     return [itemsData];
   }
   return [];
-}
+};
 
 const collectStrings = (val: any): string[] => {
   if (!val) return [];
@@ -81,7 +78,7 @@ const collectStrings = (val: any): string[] => {
   return [];
 };
 
-function deepFindName(root: Any): string | undefined {
+const deepFindName = (root: Any): string | undefined => {
   const skipKeys = new Set(["addons","extras","toppings","ingredients","options","selected_addons"]);
   const nameMatchers = [
     /^name$/i, /^title$/i, /^label$/i,
@@ -102,9 +99,9 @@ function deepFindName(root: Any): string | undefined {
     }
   }
   return undefined;
-}
+};
 
-function normalizeProduct(raw: Any) {
+const normalizeProduct = (raw: Any) => {
   const shallow = [
     raw.name, raw.product_name, raw.productName, raw.title, raw.label, raw.menu_item_name, raw.item_name,
     raw.nazwa, raw.nazwa_pl, typeof raw.product === "string" ? raw.product : undefined,
@@ -144,11 +141,9 @@ function normalizeProduct(raw: Any) {
     undefined;
 
   return { name, price, quantity, addons, ingredients, description, note, _raw: raw };
-}
+};
 
-/* ===================== UI helpers ===================== */
-function Badge(props: { tone: "amber" | "blue" | "rose" | "slate" | "green" | "yellow"; children: React.ReactNode }) {
-  const { tone, children } = props;
+const Badge: React.FC<{ tone: "amber" | "blue" | "rose" | "slate" | "green" | "yellow"; children: React.ReactNode }> = ({ tone, children }) => {
   const cls =
     tone === "amber" ? "bg-amber-100 text-amber-700 ring-amber-200"
     : tone === "blue" ? "bg-blue-100 text-blue-700 ring-blue-200"
@@ -157,9 +152,9 @@ function Badge(props: { tone: "amber" | "blue" | "rose" | "slate" | "green" | "y
     : tone === "yellow" ? "bg-yellow-100 text-yellow-800 ring-yellow-200"
     : "bg-slate-100 text-slate-700 ring-slate-200";
   return <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-semibold ring-1 ${cls}`}>{children}</span>;
-}
+};
 
-function InlineCountdown({ targetTime, onComplete }: { targetTime: string; onComplete?: () => void }) {
+const InlineCountdown: React.FC<{ targetTime: string; onComplete?: () => void }> = ({ targetTime, onComplete }) => {
   const [ms, setMs] = useState(() => Math.max(0, new Date(targetTime).getTime() - Date.now()));
   useEffect(() => {
     const iv = setInterval(() => {
@@ -173,10 +168,12 @@ function InlineCountdown({ targetTime, onComplete }: { targetTime: string; onCom
   const mm = String(Math.floor(sec / 60)).padStart(2, "0");
   const ss = String(sec % 60).padStart(2, "0");
   return <span className="rounded-md bg-slate-900 px-2 py-0.5 font-mono text-xs text-white">{mm}:{ss}</span>;
-}
+};
 
-/* ===================== Accept dropdown ===================== */
-function AcceptButton({ order, onAccept }: { order: Order; onAccept: (minutes: number) => Promise<void> | void }) {
+const AcceptButton: React.FC<{
+  order: Order;
+  onAccept: (minutes: number) => Promise<void> | void;
+}> = ({ order, onAccept }) => {
   const isDelivery = order.selected_option === "delivery";
   const options = isDelivery ? [30, 60, 90, 120] : [15, 30, 45, 60];
   const [open, setOpen] = useState(false);
@@ -213,9 +210,8 @@ function AcceptButton({ order, onAccept }: { order: Order; onAccept: (minutes: n
       )}
     </div>
   );
-}
+};
 
-/* ===================== Główna strona ===================== */
 export default function PickupOrdersPage() {
   const supabase = createClientComponentClient();
   const [orders, setOrders] = useState<Order[]>([]);
@@ -232,7 +228,7 @@ export default function PickupOrdersPage() {
 
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
 
-  /* ======= AUDIO: nowy order ======= */
+  // AUDIO
   const newOrderAudio = useRef<HTMLAudioElement | null>(null);
   useEffect(() => {
     const a = new Audio("/new-order.mp3");
@@ -244,12 +240,10 @@ export default function PickupOrdersPage() {
     return () => window.removeEventListener("pointerdown", unlock);
   }, []);
   const playDing = useCallback(async () => {
-    const a = newOrderAudio.current;
-    if (!a) return;
-    try { a.currentTime = 0; await a.play(); } catch {}
+    try { if (newOrderAudio.current) { newOrderAudio.current.currentTime = 0; await newOrderAudio.current.play(); } } catch {}
   }, []);
 
-  /* ======= detekcja nowych ID ======= */
+  // nowe ID
   const prevIdsRef = useRef<Set<string>>(new Set());
   const initializedRef = useRef(false);
 
@@ -267,7 +261,7 @@ export default function PickupOrdersPage() {
         total_price: toNumber(o.total_price),
         delivery_cost: o.delivery_cost ?? null,
         created_at: o.created_at,
-        status: o.status as OrderStatus,
+        status: o.status,
         clientDelivery: o.client_delivery_time ?? o.delivery_time ?? o.clientDelivery,
         deliveryTime: o.deliveryTime,
         address:
@@ -294,7 +288,7 @@ export default function PickupOrdersPage() {
 
       const prev = prevIdsRef.current;
       const newOnes = mapped.filter(
-        (o) => (o.status === "new" || o.status === "placed" || o.status === "pending") && !prev.has(o.id)
+        (o) => (o.status === "new" || o.status === "placed") && !prev.has(o.id)
       );
       if (initializedRef.current && newOnes.length > 0) void playDing();
       prevIdsRef.current = new Set(mapped.map((o) => o.id));
@@ -315,15 +309,15 @@ export default function PickupOrdersPage() {
     return () => { void supabase.removeChannel(ch); };
   }, [fetchOrders, supabase]);
 
-  // polling listy, gdy Online->pending
+  // szybki polling gdy Online->pending
   useEffect(() => {
-    const hasPending = orders.some((o) => o.payment_method === "Online" && (o.payment_status ?? "pending") === "pending");
+    const hasPending = orders.some((o) => o.payment_method === "Online" && o.payment_status === "pending");
     if (!hasPending || editingOrderId) return;
     const iv = setInterval(() => fetchOrders(), 3000);
     return () => clearInterval(iv);
   }, [orders, editingOrderId, fetchOrders]);
 
-  // co 15s dopytujemy P24 dla Online->pending
+  // odświeżanie statusu z P24 co 15s
   const lastRefreshRef = useRef<Map<string, number>>(new Map());
   const refreshPaymentStatus = async (id: string) => {
     try {
@@ -340,7 +334,7 @@ export default function PickupOrdersPage() {
     const iv = setInterval(() => {
       const now = Date.now();
       orders.forEach((o) => {
-        if (o.payment_method === "Online" && (o.payment_status ?? "pending") === "pending") {
+        if (o.payment_method === "Online" && o.payment_status === "pending") {
           const last = lastRefreshRef.current.get(o.id) ?? 0;
           if (now - last >= 15000) {
             lastRefreshRef.current.set(o.id, now);
@@ -404,12 +398,10 @@ export default function PickupOrdersPage() {
     if (res.ok) { updateLocal(id, { status: "new" }); fetchOrders(); }
   };
 
-  // BADGE płatności
   const paymentBadge = (o: Order) => {
     if (o.payment_method === "Online") {
-      const st = (o.payment_status ?? "pending") as Exclude<PaymentStatus, null>;
-      if (st === "paid")   return <Badge tone="green">OPŁACONE ONLINE</Badge>;
-      if (st === "failed") return <Badge tone="rose">ONLINE – BŁĄD</Badge>;
+      if (o.payment_status === "paid")   return <Badge tone="green">OPŁACONE ONLINE</Badge>;
+      if (o.payment_status === "failed") return <Badge tone="rose">ONLINE – BŁĄD</Badge>;
       return <Badge tone="yellow">ONLINE – OCZEKUJE</Badge>;
     }
     if (o.payment_method === "Terminal") return <Badge tone="blue">TERMINAL</Badge>;
@@ -431,22 +423,19 @@ export default function PickupOrdersPage() {
     } finally { setEditingOrderId(null); }
   };
 
-  const setPaymentStatus = async (o: Order, status: Exclude<PaymentStatus, null>) => {
-    if (o.payment_method !== "Online") return;
-    try {
-      setEditingOrderId(o.id);
-      const res = await fetch(`/api/orders/${o.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ payment_status: status }),
-      });
-      if (!res.ok) return;
-      updateLocal(o.id, { payment_status: status });
-    } finally { setEditingOrderId(null); }
-  };
+  const filtered = useMemo(
+    () =>
+      orders
+        .filter((o) => (filterStatus === "all" ? true : o.status === filterStatus))
+        .filter((o) => (filterOption === "all" ? true : o.selected_option === filterOption)),
+    [orders, filterStatus, filterOption]
+  );
 
-  /* ======= komponenty pozycji ======= */
-  function ProductItem({ raw, onDetails }: { raw: any; onDetails?: (p: any) => void }) {
+  const newList = filtered.filter((o) => o.status === "new" || o.status === "placed");
+  const currList = filtered.filter((o) => o.status === "accepted");
+  const histList = filtered.filter((o) => o.status === "cancelled" || o.status === "completed");
+
+  const ProductItem: React.FC<{ raw: any; onDetails?: (p: any) => void }> = ({ raw, onDetails }) => {
     const p = normalizeProduct(raw);
     return (
       <div className="rounded-md border bg-white p-3 shadow-sm">
@@ -471,9 +460,9 @@ export default function PickupOrdersPage() {
         </div>
       </div>
     );
-  }
+  };
 
-  function ProductDetailsModal({ product, onClose }: { product: any; onClose(): void }) {
+  const ProductDetailsModal: React.FC<{ product: any; onClose(): void }> = ({ product, onClose }) => {
     const p = normalizeProduct(product);
     const title = p.quantity > 1 ? `${p.name} x${p.quantity}` : p.name;
     return (
@@ -498,7 +487,7 @@ export default function PickupOrdersPage() {
         </div>
       </div>
     );
-  }
+  };
 
   const ProductList = ({ list, title }: { list: Order[]; title: string }) => (
     <section className="space-y-3">
@@ -559,7 +548,7 @@ export default function PickupOrdersPage() {
                         {o.payment_method === "Online" && (
                           <>
                             <span className="ml-1">{paymentBadge(o)}</span>
-                            {(!o.payment_status || o.payment_status === "pending") && (
+                            {o.payment_status === "pending" && (
                               <button
                                 onClick={() => refreshPaymentStatus(o.id)}
                                 className="h-8 rounded bg-sky-600 px-2 text-xs font-semibold text-white hover:bg-sky-500"
@@ -568,16 +557,6 @@ export default function PickupOrdersPage() {
                                 Odśwież status
                               </button>
                             )}
-                            <select
-                              value={o.payment_status || "pending"}
-                              onChange={(e) => setPaymentStatus(o, e.target.value as Exclude<PaymentStatus, null>)}
-                              className="h-8 rounded border px-2 text-xs"
-                              disabled={editingOrderId === o.id}
-                            >
-                              <option value="pending">oczekuje</option>
-                              <option value="paid">opłacone</option>
-                              <option value="failed">błąd</option>
-                            </select>
                           </>
                         )}
 
@@ -601,7 +580,7 @@ export default function PickupOrdersPage() {
                 </div>
 
                 <footer className="mt-4 flex flex-wrap items-center gap-2">
-                  {(o.status === "new" || o.status === "placed" || o.status === "pending") && (
+                  {(o.status === "new" || o.status === "placed") && (
                     <>
                       <AcceptButton order={o} onAccept={(m) => acceptAndSetTime(o, m)} />
                       <EditOrderButton
@@ -662,26 +641,12 @@ export default function PickupOrdersPage() {
     </section>
   );
 
-  /* ======= listy ======= */
-  const filtered = useMemo(
-    () =>
-      orders
-        .filter((o) => (filterStatus === "all" ? true : o.status === filterStatus))
-        .filter((o) => (filterOption === "all" ? true : o.selected_option === filterOption)),
-    [orders, filterStatus, filterOption]
-  );
-
-  const newList = filtered.filter((o) => o.status === "new" || o.status === "placed" || o.status === "pending");
-  const currList = filtered.filter((o) => o.status === "accepted");
-  const histList = filtered.filter((o) => o.status === "cancelled" || o.status === "completed");
-
   return (
     <div className="mx-auto max-w-6xl p-4 sm:p-6">
       <div className="sticky top-0 z-20 -mx-4 mb-5 bg-white/85 p-4 backdrop-blur sm:mx-0 sm:rounded-md sm:border">
         <div className="flex flex-wrap items-center gap-2">
           <select className="h-10 rounded-md border px-3 text-sm" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value as any)}>
             <option value="all">Wszystkie statusy</option>
-            <option value="pending">Oczekujące</option>
             <option value="new">Nowe</option>
             <option value="placed">Złożone</option>
             <option value="accepted">W trakcie</option>
