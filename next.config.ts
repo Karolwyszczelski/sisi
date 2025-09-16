@@ -1,4 +1,3 @@
-// next.config.ts
 import type { NextConfig } from "next";
 
 const csp = [
@@ -8,17 +7,20 @@ const csp = [
 
   "font-src 'self' https://fonts.gstatic.com data:",
   "img-src 'self' blob: data: https://*.googleusercontent.com https://*.ggpht.com https://maps.gstatic.com https://maps.googleapis.com",
+  "media-src 'self'",
   "object-src 'none'",
 
-  // pozwól na WebAssembly bez 'unsafe-eval'
-  "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://maps.googleapis.com https://maps.gstatic.com https://www.googletagmanager.com https://challenges.cloudflare.com",
+  // UWAGA: dodano 'unsafe-eval' (potrzebne m.in. dla niektórych loaderów WASM)
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://maps.googleapis.com https://maps.gstatic.com https://www.googletagmanager.com https://challenges.cloudflare.com",
+  "script-src-elem 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://maps.googleapis.com https://maps.gstatic.com https://www.googletagmanager.com https://challenges.cloudflare.com",
 
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
 
-  // + jsdelivr i unpkg dla pobierania .wasm
+  // CDN-y do pobierania .wasm i innych assetów
   "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://maps.googleapis.com https://*.googleapis.com https://*.google.com https://secure.przelewy24.pl https://sandbox.przelewy24.pl https://challenges.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com",
 
-  "frame-src 'self' https://*.google.com https://*.gstatic.com https://challenges.cloudflare.com",
+  // dodano P24 do frame-src (na przyszłość, jeśli coś będzie osadzane)
+  "frame-src 'self' https://*.google.com https://*.gstatic.com https://challenges.cloudflare.com https://secure.przelewy24.pl https://sandbox.przelewy24.pl",
   "form-action 'self' https://secure.przelewy24.pl https://sandbox.przelewy24.pl",
   "manifest-src 'self'",
   "worker-src 'self' blob:",
@@ -28,11 +30,24 @@ const csp = [
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  reactStrictMode: true,
+  poweredByHeader: false,
   eslint: { ignoreDuringBuilds: true },
   typescript: { ignoreBuildErrors: true },
-  poweredByHeader: false,
+
+  images: {
+    remotePatterns: [
+      { protocol: "https", hostname: "*.googleusercontent.com" },
+      { protocol: "https", hostname: "*.ggpht.com" },
+      { protocol: "https", hostname: "maps.gstatic.com" },
+      { protocol: "https", hostname: "maps.googleapis.com" },
+      { protocol: "https", hostname: "*.supabase.co", pathname: "/storage/v1/object/public/**" },
+    ],
+  },
+
   async headers() {
     return [
+      // Global security headers + CSP
       {
         source: "/(.*)",
         headers: [
@@ -53,6 +68,26 @@ const nextConfig: NextConfig = {
           { key: "Cross-Origin-Resource-Policy", value: "same-origin" },
         ],
       },
+      // Noindex dla starych ścieżek WP (dodatkowe zabezpieczenie SEO)
+      {
+        source: "/wp-:slug*(.*)",
+        headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }],
+      },
+      { source: "/xmlrpc.php", headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }] },
+      { source: "/category/:path*", headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }] },
+      { source: "/tag/:path*", headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }] },
+    ];
+  },
+
+  // Twarde przekierowanie ścieżek WordPress do /gone (tam zwróć 410 w route handlerze)
+  async rewrites() {
+    return [
+      { source: "/wp-admin/:path*", destination: "/gone" },
+      { source: "/wp-content/:path*", destination: "/gone" },
+      { source: "/wp-includes/:path*", destination: "/gone" },
+      { source: "/xmlrpc.php", destination: "/gone" },
+      { source: "/category/:path*", destination: "/gone" },
+      { source: "/tag/:path*", destination: "/gone" },
     ];
   },
 };
