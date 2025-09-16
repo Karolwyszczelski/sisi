@@ -71,7 +71,7 @@ const collectStrings = (val: any): string[] => {
       .filter(([, v]) => v === true || v === 1 || v === "1")
       .map(([k]) => k);
     if (truthy.length) return truthy;
-    if (Array.isArray((val as any).items)) return collectStrings((val as any).items);
+    if ((val as any).items && Array.isArray((val as any).items)) return collectStrings((val as any).items);
     const preferred = ["name", "title", "label", "value", "option", "variant"]
       .map((k) => (typeof (val as any)[k] === "string" ? (val as any)[k] : undefined))
       .filter(Boolean) as string[];
@@ -233,29 +233,35 @@ export default function PickupOrdersPage() {
 
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
 
-  /* ======= AUDIO: nowy order ======= */
+  /* ======= AUDIO: nowy order (bez przycisku) ======= */
   const newOrderAudio = useRef<HTMLAudioElement | null>(null);
-  const [needsUnlock, setNeedsUnlock] = useState(false);
   useEffect(() => {
     const a = new Audio("/new-order.mp3");
     a.preload = "auto";
     a.volume = 1;
     newOrderAudio.current = a;
+
+    // Jednorazowe odblokowanie po pierwszym tapnięciu/kliknięciu:
+    const unlock = async () => {
+      try {
+        if (!newOrderAudio.current) return;
+        newOrderAudio.current.currentTime = 0;
+        await newOrderAudio.current.play();
+        newOrderAudio.current.pause(); // odblokowane
+      } catch { /* zignoruj */ }
+    };
+    window.addEventListener("pointerdown", unlock, { once: true });
+    return () => window.removeEventListener("pointerdown", unlock);
   }, []);
+
   const playDing = useCallback(async () => {
     const a = newOrderAudio.current;
     if (!a) return;
     try {
       a.currentTime = 0;
-      await a.play();
-      setNeedsUnlock(false);
-    } catch {
-      // przeglądarka wymaga interakcji użytkownika
-      setNeedsUnlock(true);
-    }
+      await a.play(); // jeśli zablokowane – odblokuje się po pierwszym "pointerdown"
+    } catch { /* zignoruj */ }
   }, []);
-  const [audioEnabled, setAudioEnabled] = useState(false);
-  const enableAudio = async () => { setAudioEnabled(true); await playDing(); };
 
   /* ======= detekcja nowych ID, żeby nie dzwonić w kółko ======= */
   const prevIdsRef = useRef<Set<string>>(new Set());
@@ -265,7 +271,7 @@ export default function PickupOrdersPage() {
     try {
       if (!editingOrderId) setLoading(true);
       const offset = (page - 1) * perPage;
-      const res = await fetch(`/api/orders/current?limit=${perPage}&offset=${offset}`);
+      const res = await fetch(`/api/orders/current?limit=${perPage}&offset=${offset}`, { cache: "no-store" });
       if (!res.ok) return;
 
       const { orders: raw, totalCount } = await res.json();
@@ -306,7 +312,7 @@ export default function PickupOrdersPage() {
       const newOnes = mapped.filter(
         (o) => (o.status === "new" || o.status === "placed") && !prev.has(o.id)
       );
-      if (initializedRef.current && newOnes.length > 0 && audioEnabled) {
+      if (initializedRef.current && newOnes.length > 0) {
         void playDing();
       }
       prevIdsRef.current = new Set(mapped.map((o) => o.id));
@@ -316,7 +322,7 @@ export default function PickupOrdersPage() {
     } finally {
       if (!editingOrderId) setLoading(false);
     }
-  }, [page, perPage, sortOrder, editingOrderId, playDing, audioEnabled]);
+  }, [page, perPage, sortOrder, editingOrderId, playDing]);
 
   useEffect(() => {
     fetchOrders();
@@ -478,6 +484,7 @@ export default function PickupOrdersPage() {
     }
   };
 
+  /* ======= filtry/listy ======= */
   const filtered = useMemo(
     () =>
       orders
@@ -490,6 +497,7 @@ export default function PickupOrdersPage() {
   const currList = filtered.filter((o) => o.status === "accepted");
   const histList = filtered.filter((o) => o.status === "cancelled" || o.status === "completed");
 
+  /* ======= komponenty pozycji ======= */
   const ProductItem: React.FC<{ raw: any; onDetails?: (p: any) => void }> = ({ raw, onDetails }) => {
     const p = normalizeProduct(raw);
     return (
@@ -711,17 +719,6 @@ export default function PickupOrdersPage() {
 
   return (
     <div className="mx-auto max-w-6xl p-4 sm:p-6">
-      {/* przycisk do odblokowania dźwięku jeśli autoplay został zablokowany */}
-      {(!audioEnabled || needsUnlock) && (
-        <button
-          onClick={enableAudio}
-          className="fixed bottom-4 right-4 z-50 rounded-full bg-amber-500 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-amber-400"
-          title="Włącz dźwięk powiadomień"
-        >
-          🔔 Włącz dźwięk
-        </button>
-      )}
-
       <div className="sticky top-0 z-20 -mx-4 mb-5 bg-white/85 p-4 backdrop-blur sm:mx-0 sm:rounded-md sm:border">
         <div className="flex flex-wrap items-center gap-2">
           <select className="h-10 rounded-md border px-3 text-sm" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value as any)}>

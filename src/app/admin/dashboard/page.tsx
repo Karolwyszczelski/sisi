@@ -1,4 +1,3 @@
-// src/app/admin/AdminPanel/DashboardPage.tsx
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
@@ -13,15 +12,15 @@ const Chart = dynamic(() => import("./Chart"), { ssr: false });
 
 type StatsResponse = {
   ordersPerDay?: Record<string, number>;
-  avgFulfillmentTime?: Record<string, number>; // minuty lub sekundy – traktujemy jako minuty
+  avgFulfillmentTime?: Record<string, number>; // minuty per dzień (YYYY-MM-DD)
   popularProducts?: Record<string, number>;
   kpis?: {
     todayOrders?: number;
-    todayRevenue?: number;          // w groszach albo PLN – formatujemy ostrożnie
+    todayRevenue?: number;
     todayReservations?: number;
     monthOrders?: number;
-    monthRevenue?: number;          // w groszach albo PLN
-    monthAvgFulfillment?: number;   // minuty
+    monthRevenue?: number;
+    monthAvgFulfillment?: number;
     newOrders?: number;
     currentOrders?: number;
     reservations?: number;
@@ -36,8 +35,7 @@ const PLN = new Intl.NumberFormat("pl-PL", {
 
 function toPln(v: number | undefined | null): string {
   if (v == null || Number.isNaN(v)) return "—";
-  // jeśli backend zwraca grosze, przeskaluj do PLN
-  const val = v > 100000 ? v / 100 : v;
+  const val = v > 100000 ? v / 100 : v; // fallback jeśli backend zwraca grosze
   return PLN.format(Math.round(val));
 }
 
@@ -45,23 +43,53 @@ export default function DashboardPage() {
   const [stats, setStats] = useState<StatsResponse | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // „Live” liczniki jako fallback, gdy /stats nie poda KPIs
+  const [live, setLive] = useState({ newOrders: 0, currentOrders: 0, reservations: 0 });
+
   const [showCalendar, setShowCalendar] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
 
   const router = useRouter();
 
   useEffect(() => {
-    (async () => {
+    let stop = false;
+
+    const loadStats = async () => {
       try {
-        const res = await fetch("/api/orders/stats", { cache: "no-store" });
+        const res = await fetch(`/api/orders/stats?t=${Date.now()}`, { cache: "no-store" });
         const d = (await res.json()) as StatsResponse;
-        setStats(d ?? {});
+        if (!stop) setStats(d ?? {});
       } catch {
-        setStats({});
+        if (!stop) setStats({});
       } finally {
-        setLoading(false);
+        if (!stop) setLoading(false);
       }
-    })();
+    };
+
+    // Dociągamy bieżące zamówienia i liczymy statusy lokalnie
+    const loadLiveCounts = async () => {
+      try {
+        const r = await fetch(`/api/orders/current?limit=200&offset=0&t=${Date.now()}`, { cache: "no-store" });
+        const j = await r.json();
+        const arr: any[] = Array.isArray(j?.orders) ? j.orders : [];
+        const newOrders = arr.filter(o => o.status === "new" || o.status === "placed").length;
+        const currentOrders = arr.filter(o => o.status === "accepted").length;
+        if (!stop) setLive({ newOrders, currentOrders, reservations: 0 });
+      } catch {
+        /* ignore */
+      }
+    };
+
+    const tick = async () => {
+      await Promise.all([loadStats(), loadLiveCounts()]);
+    };
+
+    tick();
+    const iv = setInterval(() => {
+      if (document.visibilityState === "visible") tick();
+    }, 10000);
+
+    return () => { stop = true; clearInterval(iv); };
   }, []);
 
   const safeEntries = (o?: Record<string, number>) => Object.entries(o ?? {});
@@ -85,11 +113,9 @@ export default function DashboardPage() {
     [stats]
   );
 
-  // Dzisiejsza/miesięczna data w ISO (YYYY-MM-DD)
+  // Dzisiejsza/miesięczna data
   const todayKey = new Date().toISOString().slice(0, 10);
   const ym = todayKey.slice(0, 7); // YYYY-MM
-
-  // KPIs — preferuj d.kpis, a jeśli brak, staraj się wyliczyć
   const k = stats?.kpis ?? {};
 
   const todayOrders =
@@ -117,10 +143,11 @@ export default function DashboardPage() {
   const monthRevenue = k.monthRevenue;
   const todayReservations = k.todayReservations;
 
-  // Karty górne — liczniki i procenty (skalowane względem max, żeby nie szacować planu)
-  const newOrders = k.newOrders ?? 0;
-  const currentOrders = k.currentOrders ?? 0;
-  const reservations = k.reservations ?? 0;
+  // Fallbacki z „live”
+  const newOrders = k.newOrders ?? live.newOrders;
+  const currentOrders = k.currentOrders ?? live.currentOrders;
+  const reservations = k.reservations ?? live.reservations;
+
   const maxTop = Math.max(1, newOrders, currentOrders, reservations);
   const pct = (x: number) => Math.min(100, Math.round((x / maxTop) * 100));
 
@@ -245,7 +272,7 @@ export default function DashboardPage() {
             </div>
 
             <div className="flex flex-col items-center justify-center">
-              <RadialIcon percentage={Math.min(100, pct(monthOrders))} size={40} />
+              <RadialIcon percentage={Math.min(100, Math.max(0, Math.round((monthOrders / Math.max(1, monthOrders)) * 100)))} size={40} />
               <p className="mt-1 text-center text-xs text-gray-500">
                 Wypełnienie miesiąca (relatywne)
               </p>
