@@ -48,7 +48,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ payment_status: order.payment_status ?? null });
   }
 
-  const sessionId = (order as any).p24_session_id || order.id;
+  const sessionId =
+    (order as any).p24_session_id || `sisi-${String(order.id).trim()}`;
   const orderId = (order as any).p24_order_id || null;
   const auth = Buffer.from(`${MERCHANT_ID}:${API_KEY}`).toString("base64");
 
