@@ -1,4 +1,7 @@
 // src/app/api/p24/callback/route.ts
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import {
@@ -33,10 +36,7 @@ export async function POST(req: NextRequest) {
       data.orderId ?? data.p24_order_id;
 
     if (!sessionId || !rawAmount || !orderIdFromGateway) {
-      return NextResponse.json(
-        { error: "Missing required fields" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
     if (!P24_MERCHANT_ID || !P24_POS_ID) {
       console.error("P24 env missing: P24_MERCHANT_ID or P24_POS_ID");
@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
 
     const amountGr = parseP24Amount(rawAmount, currency);
 
-    // podpis do /trnVerify
+    // podpis wymagany w /trnVerify
     const expected = p24SignVerifyMD5({
       sessionId,
       orderId: String(orderIdFromGateway),
@@ -53,7 +53,7 @@ export async function POST(req: NextRequest) {
       currency,
     });
 
-    // verify call (wymagane przez P24)
+    // verify call do P24
     const host = hostFromEnv();
     const verifyBody = new URLSearchParams({
       p24_merchant_id: String(P24_MERCHANT_ID),
@@ -84,11 +84,17 @@ export async function POST(req: NextRequest) {
           }
         })());
 
-    // wyciągnij orderId z sessionId jako fallback
+    // fallback: orderId z sessionId
     const orderIdFromSession = extractOrderIdFromSession(sessionId);
     if (!orderIdFromSession) {
       console.warn("P24 callback: unable to derive order id", { sessionId });
     }
+
+    // wartości pomocnicze do zapisu
+    const baseValues: Record<string, unknown> = {
+      p24_session_id: String(sessionId),
+      ...(orderIdFromGateway ? { p24_order_id: String(orderIdFromGateway) } : {}),
+    };
 
     const updateOrderWithFallback = async (
       values: Record<string, unknown>,
@@ -143,7 +149,7 @@ export async function POST(req: NextRequest) {
     if (ok) {
       const paidAt = new Date().toISOString();
       const updateResult = await updateOrderWithFallback(
-        { payment_status: "paid", paid_at: paidAt },
+        { ...baseValues, payment_status: "paid", paid_at: paidAt },
         "paid"
       );
 
@@ -157,7 +163,7 @@ export async function POST(req: NextRequest) {
     }
 
     const failedResult = await updateOrderWithFallback(
-      { payment_status: "failed" },
+      { ...baseValues, payment_status: "failed" },
       "failed"
     );
 
