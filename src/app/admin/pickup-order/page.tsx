@@ -32,7 +32,7 @@ interface Order {
   payment_status?: PaymentStatus;
 }
 
-/* =============== Utils danych + parsery =============== */
+/* =============== Utils =============== */
 const getOptionLabel = (opt?: Order["selected_option"]) =>
   opt === "delivery" ? "DOSTAWA" : opt === "takeaway" ? "NA WYNOS" : opt === "local" ? "NA MIEJSCU" : "BRAK";
 
@@ -48,7 +48,7 @@ const toNumber = (x: any, d = 0) => {
   return isFinite(n) ? n : d;
 };
 
-const parseProducts = (itemsData: any): any[] => {
+function parseProducts(itemsData: any): any[] {
   if (!itemsData) return [];
   if (typeof itemsData === "string") {
     try { return parseProducts(JSON.parse(itemsData)); }
@@ -61,7 +61,7 @@ const parseProducts = (itemsData: any): any[] => {
     return [itemsData];
   }
   return [];
-};
+}
 
 const collectStrings = (val: any): string[] => {
   if (!val) return [];
@@ -81,7 +81,7 @@ const collectStrings = (val: any): string[] => {
   return [];
 };
 
-const deepFindName = (root: Any): string | undefined => {
+function deepFindName(root: Any): string | undefined {
   const skipKeys = new Set(["addons","extras","toppings","ingredients","options","selected_addons"]);
   const nameMatchers = [
     /^name$/i, /^title$/i, /^label$/i,
@@ -102,9 +102,9 @@ const deepFindName = (root: Any): string | undefined => {
     }
   }
   return undefined;
-};
+}
 
-const normalizeProduct = (raw: Any) => {
+function normalizeProduct(raw: Any) {
   const shallow = [
     raw.name, raw.product_name, raw.productName, raw.title, raw.label, raw.menu_item_name, raw.item_name,
     raw.nazwa, raw.nazwa_pl, typeof raw.product === "string" ? raw.product : undefined,
@@ -144,10 +144,11 @@ const normalizeProduct = (raw: Any) => {
     undefined;
 
   return { name, price, quantity, addons, ingredients, description, note, _raw: raw };
-};
+}
 
 /* ===================== UI helpers ===================== */
-const Badge: React.FC<{ tone: "amber" | "blue" | "rose" | "slate" | "green" | "yellow"; children: React.ReactNode }> = ({ tone, children }) => {
+function Badge(props: { tone: "amber" | "blue" | "rose" | "slate" | "green" | "yellow"; children: React.ReactNode }) {
+  const { tone, children } = props;
   const cls =
     tone === "amber" ? "bg-amber-100 text-amber-700 ring-amber-200"
     : tone === "blue" ? "bg-blue-100 text-blue-700 ring-blue-200"
@@ -156,9 +157,9 @@ const Badge: React.FC<{ tone: "amber" | "blue" | "rose" | "slate" | "green" | "y
     : tone === "yellow" ? "bg-yellow-100 text-yellow-800 ring-yellow-200"
     : "bg-slate-100 text-slate-700 ring-slate-200";
   return <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-semibold ring-1 ${cls}`}>{children}</span>;
-};
+}
 
-const InlineCountdown: React.FC<{ targetTime: string; onComplete?: () => void }> = ({ targetTime, onComplete }) => {
+function InlineCountdown({ targetTime, onComplete }: { targetTime: string; onComplete?: () => void }) {
   const [ms, setMs] = useState(() => Math.max(0, new Date(targetTime).getTime() - Date.now()));
   useEffect(() => {
     const iv = setInterval(() => {
@@ -172,13 +173,10 @@ const InlineCountdown: React.FC<{ targetTime: string; onComplete?: () => void }>
   const mm = String(Math.floor(sec / 60)).padStart(2, "0");
   const ss = String(sec % 60).padStart(2, "0");
   return <span className="rounded-md bg-slate-900 px-2 py-0.5 font-mono text-xs text-white">{mm}:{ss}</span>;
-};
+}
 
 /* ===================== Accept dropdown ===================== */
-const AcceptButton: React.FC<{
-  order: Order;
-  onAccept: (minutes: number) => Promise<void> | void;
-}> = ({ order, onAccept }) => {
+function AcceptButton({ order, onAccept }: { order: Order; onAccept: (minutes: number) => Promise<void> | void }) {
   const isDelivery = order.selected_option === "delivery";
   const options = isDelivery ? [30, 60, 90, 120] : [15, 30, 45, 60];
   const [open, setOpen] = useState(false);
@@ -215,7 +213,7 @@ const AcceptButton: React.FC<{
       )}
     </div>
   );
-};
+}
 
 /* ===================== Główna strona ===================== */
 export default function PickupOrdersPage() {
@@ -433,7 +431,6 @@ export default function PickupOrdersPage() {
     } finally { setEditingOrderId(null); }
   };
 
-  // ręczny override tylko dla Online
   const setPaymentStatus = async (o: Order, status: Exclude<PaymentStatus, null>) => {
     if (o.payment_method !== "Online") return;
     try {
@@ -448,21 +445,8 @@ export default function PickupOrdersPage() {
     } finally { setEditingOrderId(null); }
   };
 
-  /* ======= filtry/listy ======= */
-  const filtered = useMemo(
-    () =>
-      orders
-        .filter((o) => (filterStatus === "all" ? true : o.status === filterStatus))
-        .filter((o) => (filterOption === "all" ? true : o.selected_option === filterOption)),
-    [orders, filterStatus, filterOption]
-  );
-
-  const newList = filtered.filter((o) => o.status === "new" || o.status === "placed" || o.status === "pending");
-  const currList = filtered.filter((o) => o.status === "accepted");
-  const histList = filtered.filter((o) => o.status === "cancelled" || o.status === "completed");
-
   /* ======= komponenty pozycji ======= */
-  const ProductItem: React.FC<{ raw: any; onDetails?: (p: any) => void }> = ({ raw, onDetails }) => {
+  function ProductItem({ raw, onDetails }: { raw: any; onDetails?: (p: any) => void }) {
     const p = normalizeProduct(raw);
     return (
       <div className="rounded-md border bg-white p-3 shadow-sm">
@@ -471,7 +455,7 @@ export default function PickupOrdersPage() {
             <div className="truncate text-sm font-semibold">{p.name}</div>
             <div className="mt-0.5 text-[12px] text-slate-600">
               Ilość: <b>{p.quantity}</b>
-              {p.addons.length > 0 && <> <span className="text-slate-400"> · </span> Dodatki: {p.addons.join(", ")}</>
+              {p.addons.length > 0 && <> <span className="text-slate-400"> · </span> Dodatki: {p.addons.join(", ")}</>}
             </div>
             {p.ingredients.length > 0 && (
               <div className="mt-0.5 text-[12px] text-slate-600">Skład: {p.ingredients.join(", ")}</div>
@@ -487,9 +471,9 @@ export default function PickupOrdersPage() {
         </div>
       </div>
     );
-  };
+  }
 
-  const ProductDetailsModal: React.FC<{ product: any; onClose(): void }> = ({ product, onClose }) => {
+  function ProductDetailsModal({ product, onClose }: { product: any; onClose(): void }) {
     const p = normalizeProduct(product);
     const title = p.quantity > 1 ? `${p.name} x${p.quantity}` : p.name;
     return (
@@ -514,7 +498,7 @@ export default function PickupOrdersPage() {
         </div>
       </div>
     );
-  };
+  }
 
   const ProductList = ({ list, title }: { list: Order[]; title: string }) => (
     <section className="space-y-3">
@@ -584,7 +568,6 @@ export default function PickupOrdersPage() {
                                 Odśwież status
                               </button>
                             )}
-                            {/* opcjonalny ręczny override */}
                             <select
                               value={o.payment_status || "pending"}
                               onChange={(e) => setPaymentStatus(o, e.target.value as Exclude<PaymentStatus, null>)}
@@ -678,6 +661,19 @@ export default function PickupOrdersPage() {
       )}
     </section>
   );
+
+  /* ======= listy ======= */
+  const filtered = useMemo(
+    () =>
+      orders
+        .filter((o) => (filterStatus === "all" ? true : o.status === filterStatus))
+        .filter((o) => (filterOption === "all" ? true : o.selected_option === filterOption)),
+    [orders, filterStatus, filterOption]
+  );
+
+  const newList = filtered.filter((o) => o.status === "new" || o.status === "placed" || o.status === "pending");
+  const currList = filtered.filter((o) => o.status === "accepted");
+  const histList = filtered.filter((o) => o.status === "cancelled" || o.status === "completed");
 
   return (
     <div className="mx-auto max-w-6xl p-4 sm:p-6">
