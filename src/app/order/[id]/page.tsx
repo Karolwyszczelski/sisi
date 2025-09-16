@@ -2,14 +2,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 
+export const metadata = {
+  robots: { index: false, follow: false, googleBot: { index: false, follow: false, noimageindex: true } },
+};
+
 type S = {
   id: number;
   status: "new" | "placed" | "accepted" | "completed" | "cancelled" | string;
-  eta: string | null;                 // ISO lub null – czas ustawiony przez restaurację
+  eta: string | null;
   option: "local" | "takeaway" | "delivery" | string;
   total: number;
-  placedAt: string;                   // ISO
-  clientRequestedTime: string | null; // ISO | "asap" | null
+  placedAt: string;
+  clientRequestedTime: string | null;
 };
 
 const fmtHM = (iso?: string | null) => {
@@ -41,7 +45,6 @@ export default function OrderTrackPage() {
   const [data, setData] = useState<S | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
-  // === fetch + polling (15s) ===
   useEffect(() => {
     const t = sp.get("t") || "";
     const url = `/api/orders/status/${id}?t=${encodeURIComponent(t)}`;
@@ -50,15 +53,10 @@ export default function OrderTrackPage() {
     const load = async () => {
       try {
         const r = await fetch(url, { cache: "no-store" });
-        const j = await r.json(); // ← czytamy TYLKO raz
-        if (!r.ok) {
-          setErr(j?.error || "Błąd");
-          return;
-        }
+        const j = await r.json();
+        if (!r.ok) { setErr(j?.error || "Błąd"); return; }
         if (!stop) setData(j as S);
-      } catch {
-        if (!stop) setErr("Błąd sieci");
-      }
+      } catch { if (!stop) setErr("Błąd sieci"); }
     };
 
     load();
@@ -66,7 +64,6 @@ export default function OrderTrackPage() {
     return () => { stop = true; clearInterval(iv); };
   }, [id, sp]);
 
-  // === licznik do ETA (odświeża się co sekundę, jeśli jest) ===
   const [tick, setTick] = useState(0);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const msLeft = useMemo(() => {
@@ -78,9 +75,9 @@ export default function OrderTrackPage() {
 
   useEffect(() => {
     if (!data?.eta) return;
-    timerRef.current && clearInterval(timerRef.current);
+    if (timerRef.current) clearInterval(timerRef.current);
     timerRef.current = setInterval(() => setTick((x) => x + 1), 1000);
-    return () => { timerRef.current && clearInterval(timerRef.current); };
+    return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [data?.eta]);
 
   const countdown = useMemo(() => {
@@ -91,58 +88,24 @@ export default function OrderTrackPage() {
     return `${mm}:${ss}`;
   }, [msLeft]);
 
-  if (err) {
-    return (
-      <section className="min-h-[50vh] flex items-center justify-center text-white">
-        Błąd: {err}
-      </section>
-    );
-  }
-  if (!data) {
-    return (
-      <section className="min-h-[50vh] flex items-center justify-center text-white">
-        Ładowanie…
-      </section>
-    );
-  }
+  if (err) return <section className="min-h-[50vh] flex items-center justify-center text-white">Błąd: {err}</section>;
+  if (!data) return <section className="min-h-[50vh] flex items-center justify-center text-white">Ładowanie…</section>;
 
   const etaHM = fmtHM(data.eta);
   const placedHM = fmtHM(data.placedAt);
-  const clientReq =
-    data.clientRequestedTime === "asap"
-      ? "Jak najszybciej"
-      : fmtHM(data.clientRequestedTime) || null;
+  const clientReq = data.clientRequestedTime === "asap" ? "Jak najszybciej" : fmtHM(data.clientRequestedTime) || null;
 
   return (
     <section className="min-h-[60vh] flex items-center justify-center px-6 py-16 text-white">
       <div className="w-full max-w-md text-center border border-white/30 rounded-2xl p-6 bg-black/40">
         <h1 className="text-2xl font-bold mb-2">Zamówienie #{data.id}</h1>
-        <p className="text-sm opacity-80 mb-4">
-          Opcja: {optionLabel(data.option)}{placedHM ? ` • złożone ${placedHM}` : ""}
-        </p>
-
-        <div className="text-lg">
-          Status: <span className="font-semibold">{statusLabel(data.status, data.eta)}</span>
-        </div>
-
+        <p className="text-sm opacity-80 mb-4">Opcja: {optionLabel(data.option)}{placedHM ? ` • złożone ${placedHM}` : ""}</p>
+        <div className="text-lg">Status: <span className="font-semibold">{statusLabel(data.status, data.eta)}</span></div>
         <div className="mt-2 text-lg">
-          ETA:{" "}
-          <span className="font-semibold">
-            {etaHM ?? "w przygotowaniu"}
-          </span>
-          {etaHM && msLeft !== null && (
-            <span className="ml-2 inline-block rounded bg-white/10 px-2 py-0.5 text-xs">
-              {countdown}
-            </span>
-          )}
+          ETA: <span className="font-semibold">{etaHM ?? "w przygotowaniu"}</span>
+          {etaHM && msLeft !== null && <span className="ml-2 inline-block rounded bg-white/10 px-2 py-0.5 text-xs">{countdown}</span>}
         </div>
-
-        {clientReq && (
-          <div className="mt-1 text-sm opacity-80">
-            Czas wybrany przez klienta: {clientReq}
-          </div>
-        )}
-
+        {clientReq && <div className="mt-1 text-sm opacity-80">Czas wybrany przez klienta: {clientReq}</div>}
         <div className="mt-4 text-sm opacity-80">Suma: {Number(data.total).toFixed(2)} zł</div>
       </div>
     </section>
