@@ -11,20 +11,38 @@ import { RadialIcon } from "./RadialIcon";
 const Calendar = dynamic(() => import("react-calendar"), { ssr: false });
 const Chart = dynamic(() => import("./Chart"), { ssr: false });
 
-type StatsData = {
-  ordersPerDay: Record<string, number>;
-  avgFulfillmentTime: Record<string, number>;
-  popularProducts: Record<string, number>;
+type StatsResponse = {
+  ordersPerDay?: Record<string, number>;
+  avgFulfillmentTime?: Record<string, number>; // minuty lub sekundy – traktujemy jako minuty
+  popularProducts?: Record<string, number>;
+  kpis?: {
+    todayOrders?: number;
+    todayRevenue?: number;          // w groszach albo PLN – formatujemy ostrożnie
+    todayReservations?: number;
+    monthOrders?: number;
+    monthRevenue?: number;          // w groszach albo PLN
+    monthAvgFulfillment?: number;   // minuty
+    newOrders?: number;
+    currentOrders?: number;
+    reservations?: number;
+  };
 };
 
-const EMPTY: StatsData = {
-  ordersPerDay: {},
-  avgFulfillmentTime: {},
-  popularProducts: {},
-};
+const PLN = new Intl.NumberFormat("pl-PL", {
+  style: "currency",
+  currency: "PLN",
+  maximumFractionDigits: 0,
+});
+
+function toPln(v: number | undefined | null): string {
+  if (v == null || Number.isNaN(v)) return "—";
+  // jeśli backend zwraca grosze, przeskaluj do PLN
+  const val = v > 100000 ? v / 100 : v;
+  return PLN.format(Math.round(val));
+}
 
 export default function DashboardPage() {
-  const [stats, setStats] = useState<StatsData>(EMPTY);
+  const [stats, setStats] = useState<StatsResponse | null>(null);
   const [loading, setLoading] = useState(true);
 
   const [showCalendar, setShowCalendar] = useState(false);
@@ -33,77 +51,102 @@ export default function DashboardPage() {
   const router = useRouter();
 
   useEffect(() => {
-    const load = async () => {
+    (async () => {
       try {
-        const res = await fetch("/api/orders/stats");
-        const d = await res.json().catch(() => ({} as Partial<StatsData>));
-
-        setStats({
-          ordersPerDay:
-            d && typeof d === "object" && d.ordersPerDay && typeof d.ordersPerDay === "object"
-              ? d.ordersPerDay
-              : {},
-          avgFulfillmentTime:
-            d && typeof d === "object" && d.avgFulfillmentTime && typeof d.avgFulfillmentTime === "object"
-              ? d.avgFulfillmentTime
-              : {},
-          popularProducts:
-            d && typeof d === "object" && d.popularProducts && typeof d.popularProducts === "object"
-              ? d.popularProducts
-              : {},
-        });
+        const res = await fetch("/api/orders/stats", { cache: "no-store" });
+        const d = (await res.json()) as StatsResponse;
+        setStats(d ?? {});
       } catch {
-        setStats(EMPTY);
+        setStats({});
       } finally {
         setLoading(false);
       }
-    };
-    load();
+    })();
   }, []);
 
-  const safeEntries = (o: any) => Object.entries(o || {});
+  const safeEntries = (o?: Record<string, number>) => Object.entries(o ?? {});
 
+  // Dane do wykresów
   const dailyOrdersData = useMemo(
-    () => safeEntries(stats.ordersPerDay).map(([name, value]) => ({ name, value })),
+    () => safeEntries(stats?.ordersPerDay).map(([name, value]) => ({ name, value })),
     [stats]
   );
 
   const fulfillmentTimeData = useMemo(
-    () => safeEntries(stats.avgFulfillmentTime).map(([name, value]) => ({ name, value })),
+    () => safeEntries(stats?.avgFulfillmentTime).map(([name, value]) => ({ name, value })),
     [stats]
   );
 
   const topDishesData = useMemo(
     () =>
-      safeEntries(stats.popularProducts)
+      safeEntries(stats?.popularProducts)
         .sort(([, a], [, b]) => (b as number) - (a as number))
         .map(([dish, orders]) => ({ dish, orders: orders as number })),
     [stats]
   );
 
-  const openCalendar = () => setShowCalendar(true);
-  const closeCalendar = () => setShowCalendar(false);
+  // Dzisiejsza/miesięczna data w ISO (YYYY-MM-DD)
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const ym = todayKey.slice(0, 7); // YYYY-MM
+
+  // KPIs — preferuj d.kpis, a jeśli brak, staraj się wyliczyć
+  const k = stats?.kpis ?? {};
+
+  const todayOrders =
+    k.todayOrders ??
+    (stats?.ordersPerDay ? stats.ordersPerDay[todayKey] ?? 0 : 0);
+
+  const monthOrders =
+    k.monthOrders ??
+    (stats?.ordersPerDay
+      ? Object.entries(stats.ordersPerDay).reduce((acc, [d, v]) => (d.startsWith(ym) ? acc + (v || 0) : acc), 0)
+      : 0);
+
+  const monthAvgFulfillment =
+    k.monthAvgFulfillment ??
+    (stats?.avgFulfillmentTime
+      ? (() => {
+          const arr = Object.entries(stats.avgFulfillmentTime).filter(([d]) => d.startsWith(ym));
+          if (!arr.length) return undefined;
+          const sum = arr.reduce((s, [, v]) => s + (v || 0), 0);
+          return Math.round(sum / arr.length);
+        })()
+      : undefined);
+
+  const todayRevenue = k.todayRevenue;
+  const monthRevenue = k.monthRevenue;
+  const todayReservations = k.todayReservations;
+
+  // Karty górne — liczniki i procenty (skalowane względem max, żeby nie szacować planu)
+  const newOrders = k.newOrders ?? 0;
+  const currentOrders = k.currentOrders ?? 0;
+  const reservations = k.reservations ?? 0;
+  const maxTop = Math.max(1, newOrders, currentOrders, reservations);
+  const pct = (x: number) => Math.min(100, Math.round((x / maxTop) * 100));
 
   const topCards = [
     {
       label: "Nowe Zamówienia",
-      radialValue: 72,
+      value: newOrders,
+      radialValue: pct(newOrders),
       color: "bg-lime-100",
       textColor: "text-lime-800",
-      description: "Sprawdź nowe zamówienia",
+      description: `Dzisiaj: ${todayOrders}`,
       onClick: () => router.push("/admin/current-orders"),
     },
     {
       label: "Bieżące Zamówienia",
-      radialValue: 45,
+      value: currentOrders,
+      radialValue: pct(currentOrders),
       color: "bg-sky-100",
       textColor: "text-sky-800",
-      description: "Podgląd bieżących zamówień",
+      description: `W tym miesiącu: ${monthOrders}`,
       onClick: () => router.push("/admin/current-orders"),
     },
     {
       label: "Historia",
-      radialValue: 83,
+      value: monthOrders,
+      radialValue: pct(monthOrders),
       color: "bg-yellow-100",
       textColor: "text-yellow-800",
       description: "Archiwalne zamówienia",
@@ -111,116 +154,111 @@ export default function DashboardPage() {
     },
     {
       label: "Rezerwacje",
-      radialValue: 25,
+      value: reservations,
+      radialValue: pct(reservations),
       color: "bg-pink-100",
       textColor: "text-pink-800",
-      description: "Kalendarz rezerwacji",
-      onClick: openCalendar,
+      description: `Dzisiaj: ${todayReservations ?? "—"}`,
+      onClick: () => setShowCalendar(true),
     },
   ];
 
   return (
     <div className="min-h-screen bg-gray-50 p-6">
-      <h1 className="text-3xl font-bold mb-8 text-gray-800">Dashboard</h1>
+      <h1 className="mb-8 text-3xl font-bold text-gray-800">Dashboard</h1>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+      {/* GÓRNE KARTY */}
+      <div className="mb-8 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
         {topCards.map((card, idx) => (
           <button
             key={idx}
             onClick={card.onClick}
-            className={`cursor-pointer flex items-center p-4 gap-3 rounded-lg border shadow-sm hover:shadow-md transition ${card.color}`}
+            className={`flex cursor-pointer items-center gap-3 rounded-lg border bg-white/70 p-4 shadow-sm transition hover:shadow-md ${card.color}`}
           >
             <RadialIcon percentage={card.radialValue} size={40} />
             <div className="text-left">
               <h2 className={`text-lg font-semibold ${card.textColor}`}>{card.label}</h2>
-              <p className={`text-sm mt-1 ${card.textColor}`}>{card.description}</p>
+              <p className={`mt-0.5 text-sm ${card.textColor}`}>
+                {card.description} • <span className="font-bold">{card.value}</span>
+              </p>
             </div>
           </button>
         ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-        <div className="bg-white rounded-lg p-5 shadow border">
-          <h2 className="text-xl font-semibold mb-4 text-gray-700">Statystyki dzienne</h2>
+      {/* WYKRESY */}
+      <div className="mb-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <div className="rounded-lg border bg-white p-5 shadow">
+          <h2 className="mb-4 text-xl font-semibold text-gray-700">Statystyki dzienne</h2>
 
-          <div className="flex flex-col gap-2 mb-4 text-sm text-gray-500">
+          <div className="mb-4 flex flex-col gap-1.5 text-sm text-gray-600">
             <p>
-              Dzisiejsze zamówienia: <span className="font-bold">—</span>
+              Dzisiejsze zamówienia: <span className="font-bold">{todayOrders}</span>
             </p>
             <p>
-              Dzisiejszy obrót: <span className="font-bold">—</span>
+              Dzisiejszy obrót: <span className="font-bold">{toPln(todayRevenue)}</span>
             </p>
             <p>
-              Dzisiejsze rezerwacje: <span className="font-bold">—</span>
+              Dzisiejsze rezerwacje:{" "}
+              <span className="font-bold">{todayReservations ?? "—"}</span>
             </p>
           </div>
 
-          <div className="flex gap-3 mb-4">
-            <div className="text-center">
-              <RadialIcon percentage={24} size={60} />
-              <p className="text-xs text-gray-500 mt-1">Zamówienia</p>
-            </div>
-            <div className="text-center">
-              <RadialIcon percentage={50} size={60} />
-              <p className="text-xs text-gray-500 mt-1">Obrót % planu</p>
-            </div>
-            <div className="text-center">
-              <RadialIcon percentage={70} size={60} />
-              <p className="text-xs text-gray-500 mt-1">Rezerwacje</p>
-            </div>
-          </div>
-
-          <div className="border border-gray-100 p-2 rounded">
+          <div className="rounded border border-gray-100 p-2">
             {loading ? (
-              <p className="text-sm text-gray-400 text-center py-10">Ładowanie wykresu...</p>
+              <p className="py-10 text-center text-sm text-gray-400">Ładowanie wykresu…</p>
             ) : dailyOrdersData.length === 0 ? (
-              <p className="text-sm text-gray-400 text-center py-10">Brak danych do wyświetlenia</p>
+              <p className="py-10 text-center text-sm text-gray-400">Brak danych do wyświetlenia</p>
             ) : (
               <Chart type="line" data={dailyOrdersData} />
             )}
           </div>
         </div>
 
-        <div className="bg-white rounded-lg p-5 shadow border">
-          <h2 className="text-xl font-semibold mb-4 text-gray-700">Statystyki miesięczne</h2>
+        <div className="rounded-lg border bg-white p-5 shadow">
+          <h2 className="mb-4 text-xl font-semibold text-gray-700">Statystyki miesięczne</h2>
 
-          <div className="flex flex-col gap-2 mb-4 text-sm text-gray-500">
+          <div className="mb-4 flex flex-col gap-1.5 text-sm text-gray-600">
             <p>
-              Zamówienia w tym miesiącu: <span className="font-bold">—</span>
+              Zamówienia w tym miesiącu: <span className="font-bold">{monthOrders}</span>
             </p>
             <p>
-              Obrót w tym miesiącu: <span className="font-bold">—</span>
+              Obrót w tym miesiącu: <span className="font-bold">{toPln(monthRevenue)}</span>
             </p>
             <p>
-              Średni czas realizacji: <span className="font-bold">—</span>
+              Średni czas realizacji:{" "}
+              <span className="font-bold">
+                {monthAvgFulfillment != null ? `${monthAvgFulfillment} min` : "—"}
+              </span>
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="border border-gray-100 p-2 rounded">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div className="rounded border border-gray-100 p-2">
               {loading ? (
-                <p className="text-sm text-gray-400 text-center py-10">Ładowanie…</p>
+                <p className="py-10 text-center text-sm text-gray-400">Ładowanie…</p>
               ) : fulfillmentTimeData.length === 0 ? (
-                <p className="text-sm text-gray-400 text-center py-10">Brak danych</p>
+                <p className="py-10 text-center text-sm text-gray-400">Brak danych</p>
               ) : (
                 <Chart type="bar" data={fulfillmentTimeData} />
               )}
             </div>
 
             <div className="flex flex-col items-center justify-center">
-              <RadialIcon percentage={60} size={40} />
-              <p className="text-xs text-gray-500 mt-1 text-center">
-                Wypełnienie planu <br /> (60%)
+              <RadialIcon percentage={Math.min(100, pct(monthOrders))} size={40} />
+              <p className="mt-1 text-center text-xs text-gray-500">
+                Wypełnienie miesiąca (relatywne)
               </p>
             </div>
           </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-        <div className="bg-white rounded-lg p-5 shadow border lg:col-span-3">
-          <h2 className="text-xl font-semibold mb-1 text-gray-700">Top Dishes</h2>
-          <p className="text-sm text-gray-500 mb-4">Najbardziej zamawiane dania</p>
+      {/* TOP DISHES + USTAWIENIA */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-4">
+        <div className="lg:col-span-3 rounded-lg border bg-white p-5 shadow">
+          <h2 className="text-xl font-semibold text-gray-700">Top Dishes</h2>
+          <p className="mb-4 text-sm text-gray-500">Najbardziej zamawiane dania</p>
 
           {loading ? (
             <p className="text-sm text-gray-400">Ładowanie listy…</p>
@@ -229,7 +267,7 @@ export default function DashboardPage() {
           ) : (
             <ul className="space-y-2 text-sm text-gray-600">
               {topDishesData.map((d, i) => (
-                <li key={i} className="border-b border-gray-200 pb-1 flex justify-between">
+                <li key={i} className="flex justify-between border-b border-gray-200 pb-1">
                   <span>{d.dish}</span>
                   <span className="font-medium text-gray-700">{d.orders} zamówień</span>
                 </li>
@@ -238,36 +276,40 @@ export default function DashboardPage() {
           )}
         </div>
 
-        <div className="bg-red-100 rounded-lg p-5 shadow border relative flex flex-col">
-          <h2 className="text-xl font-semibold mb-4 text-red-800">Ustawienia</h2>
+        <div className="relative flex flex-col rounded-lg border bg-red-100 p-5 shadow">
+          <h2 className="mb-4 text-xl font-semibold text-red-800">Ustawienia</h2>
           <div className="absolute right-3 top-3">
             <Image src="/settings2.png" alt="Settings" width={32} height={32} />
           </div>
-          <p className="text-sm text-red-700 mb-4">Panel konfiguracyjny systemu</p>
+          <p className="mb-4 text-sm text-red-700">Panel konfiguracyjny systemu</p>
           <button
             onClick={() => router.push("/admin/settings")}
-            className="mt-auto px-4 py-2 bg-red-200 text-sm text-red-800 rounded hover:bg-red-300"
+            className="mt-auto rounded bg-red-200 px-4 py-2 text-sm text-red-800 hover:bg-red-300"
           >
             Przejdź do ustawień
           </button>
         </div>
       </div>
 
+      {/* Kalendarz */}
       {showCalendar && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-          <div className="bg-white text-black p-6 rounded shadow-lg max-w-md w-full">
-            <h3 className="text-xl font-bold mb-4">Wybierz datę rezerwacji</h3>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="w-full max-w-md rounded bg-white p-6 text-black shadow-lg">
+            <h3 className="mb-4 text-xl font-bold">Wybierz datę rezerwacji</h3>
             <Calendar onChange={(date) => setSelectedDate(date as Date)} value={selectedDate} />
             <div className="mt-4 flex justify-between">
-              <button onClick={closeCalendar} className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-400">
+              <button
+                onClick={() => setShowCalendar(false)}
+                className="rounded bg-red-500 px-4 py-2 text-white hover:bg-red-400"
+              >
                 Zamknij
               </button>
               <button
                 onClick={() => {
                   router.push("/admin/reservations");
-                  closeCalendar();
+                  setShowCalendar(false);
                 }}
-                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-500"
+                className="rounded bg-blue-600 px-4 py-2 text-white hover:bg-blue-500"
               >
                 Przejdź do rezerwacji
               </button>
