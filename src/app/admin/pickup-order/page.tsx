@@ -243,7 +243,6 @@ export default function PickupOrdersPage() {
     try { if (newOrderAudio.current) { newOrderAudio.current.currentTime = 0; await newOrderAudio.current.play(); } } catch {}
   }, []);
 
-  // nowe ID
   const prevIdsRef = useRef<Set<string>>(new Set());
   const initializedRef = useRef(false);
 
@@ -309,7 +308,6 @@ export default function PickupOrdersPage() {
     return () => { void supabase.removeChannel(ch); };
   }, [fetchOrders, supabase]);
 
-  // szybki polling gdy Online->pending
   useEffect(() => {
     const hasPending = orders.some((o) => o.payment_method === "Online" && o.payment_status === "pending");
     if (!hasPending || editingOrderId) return;
@@ -317,7 +315,6 @@ export default function PickupOrdersPage() {
     return () => clearInterval(iv);
   }, [orders, editingOrderId, fetchOrders]);
 
-  // odświeżanie statusu z P24 co 15s
   const lastRefreshRef = useRef<Map<string, number>>(new Map());
   const refreshPaymentStatus = async (id: string) => {
     try {
