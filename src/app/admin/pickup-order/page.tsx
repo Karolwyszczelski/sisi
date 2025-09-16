@@ -28,7 +28,7 @@ interface Order {
   order_items?: any;
   selected_option?: "local" | "takeaway" | "delivery";
   payment_method?: PaymentMethod;
-  payment_status?: PaymentStatus; // 'pending' | 'paid' | 'failed'
+  payment_status?: PaymentStatus;
 }
 
 /* =============== Utils danych + parsery =============== */
@@ -104,14 +104,14 @@ const deepFindName = (root: Any): string | undefined => {
 };
 
 const normalizeProduct = (raw: Any) => {
-  const shallowCandidates = [
+  const shallow = [
     raw.name, raw.product_name, raw.productName, raw.title, raw.label, raw.menu_item_name, raw.item_name,
     raw.nazwa, raw.nazwa_pl, typeof raw.product === "string" ? raw.product : undefined,
     raw.product?.name, raw.item?.name, raw.product?.title,
   ].filter((x) => typeof x === "string" && x.trim()) as string[];
 
   const deep = deepFindName(raw);
-  const name = (shallowCandidates[0] || deep || "(bez nazwy)") as string;
+  const name = (shallow[0] || deep || "(bez nazwy)") as string;
 
   const price = toNumber(raw.price ?? raw.unit_price ?? raw.total_price ?? raw.amount_price ?? raw.item?.price ?? 0);
   const quantity = toNumber(raw.quantity ?? raw.qty ?? raw.amount ?? 1, 1) || 1;
@@ -173,61 +173,6 @@ const InlineCountdown: React.FC<{ targetTime: string; onComplete?: () => void }>
   return <span className="rounded-md bg-slate-900 px-2 py-0.5 font-mono text-xs text-white">{mm}:{ss}</span>;
 };
 
-/* ===================== Produkt + modal ===================== */
-const ProductItem: React.FC<{ raw: any; onDetails?: (p: any) => void }> = ({ raw, onDetails }) => {
-  const p = normalizeProduct(raw);
-  return (
-    <div className="rounded-md border bg-white p-3 shadow-sm">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="truncate text-sm font-semibold">{p.name}</div>
-          <div className="mt-0.5 text-[12px] text-slate-600">
-            Ilość: <b>{p.quantity}</b>
-            {p.addons.length > 0 && <> <span className="text-slate-400"> · </span> Dodatki: {p.addons.join(", ")}</>}
-          </div>
-          {p.ingredients.length > 0 && (
-            <div className="mt-0.5 text-[12px] text-slate-600">Skład: {p.ingredients.join(", ")}</div>
-          )}
-          {p.note && <div className="mt-0.5 text-[12px] italic text-slate-700">Notatka: {p.note}</div>}
-          {onDetails && (
-            <button onClick={() => onDetails(p)} className="mt-2 text-xs font-medium text-blue-700 underline">
-              Szczegóły
-            </button>
-          )}
-        </div>
-        <div className="whitespace-nowrap text-sm font-semibold text-amber-700">{p.price.toFixed(2)} zł</div>
-      </div>
-    </div>
-  );
-};
-
-const ProductDetailsModal: React.FC<{ product: any; onClose(): void }> = ({ product, onClose }) => {
-  const p = normalizeProduct(product);
-  const title = p.quantity > 1 ? `${p.name} x${p.quantity}` : p.name;
-  return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-4 sm:items-center">
-      <div className="w-full max-w-lg rounded-md border bg-white p-5 shadow-2xl">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-lg font-bold">{title}</h2>
-          <button onClick={onClose} className="rounded-md border px-3 py-1 text-sm hover:bg-slate-50">Zamknij</button>
-        </div>
-        <div className="space-y-2 text-sm">
-          <div><b>Cena:</b> {p.price.toFixed(2)} zł</div>
-          {p.description && <div><b>Opis:</b> {p.description}</div>}
-          {p.ingredients.length > 0 && (
-            <div>
-              <b>Składniki:</b>
-              <ul className="ml-5 list-disc">{p.ingredients.map((x: string, i: number) => <li key={i}>{x}</li>)}</ul>
-            </div>
-          )}
-          {p.addons.length > 0 && <div><b>Dodatki:</b> {p.addons.join(", ")}</div>}
-          {p.note && <div className="italic text-slate-700">Notatka: {p.note}</div>}
-        </div>
-      </div>
-    </div>
-  );
-};
-
 /* ===================== Accept dropdown ===================== */
 const AcceptButton: React.FC<{
   order: Order;
@@ -287,8 +232,34 @@ export default function PickupOrdersPage() {
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
+
+  /* ======= AUDIO: nowy order ======= */
   const newOrderAudio = useRef<HTMLAudioElement | null>(null);
-  useEffect(() => { newOrderAudio.current = new Audio("/new-order.mp3"); }, []);
+  const [needsUnlock, setNeedsUnlock] = useState(false);
+  useEffect(() => {
+    const a = new Audio("/new-order.mp3");
+    a.preload = "auto";
+    a.volume = 1;
+    newOrderAudio.current = a;
+  }, []);
+  const playDing = useCallback(async () => {
+    const a = newOrderAudio.current;
+    if (!a) return;
+    try {
+      a.currentTime = 0;
+      await a.play();
+      setNeedsUnlock(false);
+    } catch {
+      // przeglądarka wymaga interakcji użytkownika
+      setNeedsUnlock(true);
+    }
+  }, []);
+  const [audioEnabled, setAudioEnabled] = useState(false);
+  const enableAudio = async () => { setAudioEnabled(true); await playDing(); };
+
+  /* ======= detekcja nowych ID, żeby nie dzwonić w kółko ======= */
+  const prevIdsRef = useRef<Set<string>>(new Set());
+  const initializedRef = useRef(false);
 
   const fetchOrders = useCallback(async () => {
     try {
@@ -296,6 +267,7 @@ export default function PickupOrdersPage() {
       const offset = (page - 1) * perPage;
       const res = await fetch(`/api/orders/current?limit=${perPage}&offset=${offset}`);
       if (!res.ok) return;
+
       const { orders: raw, totalCount } = await res.json();
       const mapped: Order[] = raw.map((o: any) => ({
         id: o.id,
@@ -319,18 +291,32 @@ export default function PickupOrdersPage() {
         payment_method: (o.payment_method as PaymentMethod) ?? "Gotówka",
         payment_status: (o.payment_status as PaymentStatus) ?? null,
       }));
+
       setTotal(totalCount ?? 0);
-      setOrders(
-        mapped.sort((a, b) => {
-          const ta = +new Date(a.created_at);
-          const tb = +new Date(b.created_at);
-          return sortOrder === "desc" ? tb - ta : ta - tb;
-        })
+
+      // sortowanie wg czasu
+      mapped.sort((a, b) => {
+        const ta = +new Date(a.created_at);
+        const tb = +new Date(b.created_at);
+        return sortOrder === "desc" ? tb - ta : ta - tb;
+      });
+
+      // dźwięk jeśli pojawiły się NOWE zamówienia (new/placed), których wcześniej nie było
+      const prev = prevIdsRef.current;
+      const newOnes = mapped.filter(
+        (o) => (o.status === "new" || o.status === "placed") && !prev.has(o.id)
       );
+      if (initializedRef.current && newOnes.length > 0 && audioEnabled) {
+        void playDing();
+      }
+      prevIdsRef.current = new Set(mapped.map((o) => o.id));
+      initializedRef.current = true;
+
+      setOrders(mapped);
     } finally {
       if (!editingOrderId) setLoading(false);
     }
-  }, [page, perPage, sortOrder, editingOrderId]);
+  }, [page, perPage, sortOrder, editingOrderId, playDing, audioEnabled]);
 
   useEffect(() => {
     fetchOrders();
@@ -341,15 +327,42 @@ export default function PickupOrdersPage() {
     return () => { void supabase.removeChannel(ch); };
   }, [fetchOrders, supabase]);
 
-  // szybki polling gdy są zamówienia Online->pending
+  // szybki polling listy, gdy są zamówienia Online->pending
   useEffect(() => {
-    const hasPending = orders.some(
-      (o) => o.payment_method === "Online" && o.payment_status === "pending"
-    );
+    const hasPending = orders.some((o) => o.payment_method === "Online" && o.payment_status === "pending");
     if (!hasPending || editingOrderId) return;
     const iv = setInterval(() => fetchOrders(), 3000);
     return () => clearInterval(iv);
   }, [orders, editingOrderId, fetchOrders]);
+
+  // co 15s dopytujemy Przelewy24 o realny status (tylko dla pending Online) – z cooldownem per ID
+  const lastRefreshRef = useRef<Map<string, number>>(new Map());
+  const refreshPaymentStatus = async (id: string) => {
+    try {
+      setEditingOrderId(id);
+      const res = await fetch(`/api/payments/p24/refresh?id=${id}`, { method: "POST" });
+      if (!res.ok) return;
+      const { payment_status } = await res.json();
+      setOrders((prev) => prev.map((o) => (o.id === id ? { ...o, payment_status: payment_status as PaymentStatus } : o)));
+    } finally {
+      setEditingOrderId(null);
+    }
+  };
+  useEffect(() => {
+    const iv = setInterval(() => {
+      const now = Date.now();
+      orders.forEach((o) => {
+        if (o.payment_method === "Online" && o.payment_status === "pending") {
+          const last = lastRefreshRef.current.get(o.id) ?? 0;
+          if (now - last >= 15000) {
+            lastRefreshRef.current.set(o.id, now);
+            void refreshPaymentStatus(o.id);
+          }
+        }
+      });
+    }, 15000);
+    return () => clearInterval(iv);
+  }, [orders]);
 
   const updateLocal = (id: string, upd: Partial<Order>) =>
     setOrders((prev) => prev.map((o) => (o.id === id ? { ...o, ...upd } : o)));
@@ -406,7 +419,7 @@ export default function PickupOrdersPage() {
     }
   };
 
-  // === PŁATNOŚCI: UI + aktualizacja ===
+  // === PŁATNOŚCI: UI + ręczne aktualizacje ===
   const paymentBadge = (o: Order) => {
     if (o.payment_method === "Online") {
       if (o.payment_status === "paid") return <Badge tone="green">OPŁACONE ONLINE</Badge>;
@@ -465,18 +478,6 @@ export default function PickupOrdersPage() {
     }
   };
 
-  const refreshPaymentStatus = async (id: string) => {
-  try {
-    setEditingOrderId(id);
-    const res = await fetch(`/api/payments/p24/refresh?id=${id}`, { method: "POST" });
-    if (!res.ok) return;
-    const { payment_status } = await res.json();
-    updateLocal(id, { payment_status: payment_status as PaymentStatus });
-  } finally {
-    setEditingOrderId(null);
-  }
-};
-
   const filtered = useMemo(
     () =>
       orders
@@ -485,9 +486,63 @@ export default function PickupOrdersPage() {
     [orders, filterStatus, filterOption]
   );
 
-  const newList = filtered.filter((o) => o.status === "new" || o.status === "placed");
+  const newList = filtered.filter((o) => o.status === "new" || o.status === "placed"]);
   const currList = filtered.filter((o) => o.status === "accepted");
   const histList = filtered.filter((o) => o.status === "cancelled" || o.status === "completed");
+
+  const ProductItem: React.FC<{ raw: any; onDetails?: (p: any) => void }> = ({ raw, onDetails }) => {
+    const p = normalizeProduct(raw);
+    return (
+      <div className="rounded-md border bg-white p-3 shadow-sm">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="truncate text-sm font-semibold">{p.name}</div>
+            <div className="mt-0.5 text-[12px] text-slate-600">
+              Ilość: <b>{p.quantity}</b>
+              {p.addons.length > 0 && <> <span className="text-slate-400"> · </span> Dodatki: {p.addons.join(", ")}</>}
+            </div>
+            {p.ingredients.length > 0 && (
+              <div className="mt-0.5 text-[12px] text-slate-600">Skład: {p.ingredients.join(", ")}</div>
+            )}
+            {p.note && <div className="mt-0.5 text-[12px] italic text-slate-700">Notatka: {p.note}</div>}
+            {onDetails && (
+              <button onClick={() => onDetails(p)} className="mt-2 text-xs font-medium text-blue-700 underline">
+                Szczegóły
+              </button>
+            )}
+          </div>
+          <div className="whitespace-nowrap text-sm font-semibold text-amber-700">{p.price.toFixed(2)} zł</div>
+        </div>
+      </div>
+    );
+  };
+
+  const ProductDetailsModal: React.FC<{ product: any; onClose(): void }> = ({ product, onClose }) => {
+    const p = normalizeProduct(product);
+    const title = p.quantity > 1 ? `${p.name} x${p.quantity}` : p.name;
+    return (
+      <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-4 sm:items-center">
+        <div className="w-full max-w-lg rounded-md border bg-white p-5 shadow-2xl">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-lg font-bold">{title}</h2>
+            <button onClick={onClose} className="rounded-md border px-3 py-1 text-sm hover:bg-slate-50">Zamknij</button>
+          </div>
+          <div className="space-y-2 text-sm">
+            <div><b>Cena:</b> {p.price.toFixed(2)} zł</div>
+            {p.description && <div><b>Opis:</b> {p.description}</div>}
+            {p.ingredients.length > 0 && (
+              <div>
+                <b>Składniki:</b>
+                <ul className="ml-5 list-disc">{p.ingredients.map((x: string, i: number) => <li key={i}>{x}</li>)}</ul>
+              </div>
+            )}
+            {p.addons.length > 0 && <div><b>Dodatki:</b> {p.addons.join(", ")}</div>}
+            {p.note && <div className="italic text-slate-700">Notatka: {p.note}</div>}
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   const ProductList = ({ list, title }: { list: Order[]; title: string }) => (
     <section className="space-y-3">
@@ -598,7 +653,7 @@ export default function PickupOrdersPage() {
                       <AcceptButton order={o} onAccept={(m) => acceptAndSetTime(o, m)} />
                       <EditOrderButton
                         orderId={o.id}
-                        currentProducts={prods.map(normalizeProduct)}
+                        currentProducts={parseProducts(o.items).map(normalizeProduct)}
                         currentSelectedOption={o.selected_option || "local"}
                         onOrderUpdated={(id, data) => (data ? updateLocal(id, data) : fetchOrders())}
                         onEditStart={() => setEditingOrderId(o.id)}
@@ -622,7 +677,7 @@ export default function PickupOrdersPage() {
                       ))}
                       <EditOrderButton
                         orderId={o.id}
-                        currentProducts={prods.map(normalizeProduct)}
+                        currentProducts={parseProducts(o.items).map(normalizeProduct)}
                         currentSelectedOption={o.selected_option || "local"}
                         onOrderUpdated={(id, data) => (data ? updateLocal(id, data) : fetchOrders())}
                         onEditStart={() => setEditingOrderId(o.id)}
@@ -656,6 +711,17 @@ export default function PickupOrdersPage() {
 
   return (
     <div className="mx-auto max-w-6xl p-4 sm:p-6">
+      {/* przycisk do odblokowania dźwięku jeśli autoplay został zablokowany */}
+      {(!audioEnabled || needsUnlock) && (
+        <button
+          onClick={enableAudio}
+          className="fixed bottom-4 right-4 z-50 rounded-full bg-amber-500 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-amber-400"
+          title="Włącz dźwięk powiadomień"
+        >
+          🔔 Włącz dźwięk
+        </button>
+      )}
+
       <div className="sticky top-0 z-20 -mx-4 mb-5 bg-white/85 p-4 backdrop-blur sm:mx-0 sm:rounded-md sm:border">
         <div className="flex flex-wrap items-center gap-2">
           <select className="h-10 rounded-md border px-3 text-sm" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value as any)}>
