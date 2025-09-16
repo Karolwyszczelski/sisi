@@ -4,22 +4,14 @@ const csp = [
   "default-src 'self'",
   "base-uri 'self'",
   "block-all-mixed-content",
-
   "font-src 'self' https://fonts.gstatic.com data:",
   "img-src 'self' blob: data: https://*.googleusercontent.com https://*.ggpht.com https://maps.gstatic.com https://maps.googleapis.com",
   "media-src 'self'",
   "object-src 'none'",
-
-  // UWAGA: dodano 'unsafe-eval' (potrzebne m.in. dla niektórych loaderów WASM)
   "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://maps.googleapis.com https://maps.gstatic.com https://www.googletagmanager.com https://challenges.cloudflare.com",
   "script-src-elem 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://maps.googleapis.com https://maps.gstatic.com https://www.googletagmanager.com https://challenges.cloudflare.com",
-
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-
-  // CDN-y do pobierania .wasm i innych assetów
   "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://maps.googleapis.com https://*.googleapis.com https://*.google.com https://secure.przelewy24.pl https://sandbox.przelewy24.pl https://challenges.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com",
-
-  // dodano P24 do frame-src (na przyszłość, jeśli coś będzie osadzane)
   "frame-src 'self' https://*.google.com https://*.gstatic.com https://challenges.cloudflare.com https://secure.przelewy24.pl https://sandbox.przelewy24.pl",
   "form-action 'self' https://secure.przelewy24.pl https://sandbox.przelewy24.pl",
   "manifest-src 'self'",
@@ -47,7 +39,6 @@ const nextConfig: NextConfig = {
 
   async headers() {
     return [
-      // Global security headers + CSP
       {
         source: "/(.*)",
         headers: [
@@ -68,18 +59,17 @@ const nextConfig: NextConfig = {
           { key: "Cross-Origin-Resource-Policy", value: "same-origin" },
         ],
       },
-      // Noindex dla starych ścieżek WP (dodatkowe zabezpieczenie SEO)
-      {
-        source: "/wp-:slug*(.*)",
-        headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }],
-      },
+      // noindex dla ścieżek wrażliwych
+      { source: "/order/:path*", headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }] },
+      { source: "/admin/:path*", headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }] },
+      // dodatkowo stare WP
+      { source: "/wp-:slug*(.*)", headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }] },
       { source: "/xmlrpc.php", headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }] },
       { source: "/category/:path*", headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }] },
       { source: "/tag/:path*", headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }] },
     ];
   },
 
-  // Twarde przekierowanie ścieżek WordPress do /gone (tam zwróć 410 w route handlerze)
   async rewrites() {
     return [
       { source: "/wp-admin/:path*", destination: "/gone" },
