@@ -1,8 +1,10 @@
+// src/app/api/orders/[orderId]/route.ts
 export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
+import { createClient } from "@supabase/supabase-js"; // ⇦ A. admin client
 import { getSessionAndRole } from "@/lib/serverAuth";
 import { sendSms } from "@/lib/sms";
 import { getTransport } from "@/lib/mailer";
@@ -14,6 +16,18 @@ const TERMS_VERSION = process.env.TERMS_VERSION || "2025-01";
 const PRIVACY_VERSION = process.env.PRIVACY_VERSION || "2025-01";
 const TERMS_URL = process.env.TERMS_URL || "https://www.sisiciechanow.pl/regulamin";
 const PRIVACY_URL = process.env.PRIVACY_URL || "https://www.sisiciechanow.pl/polityka-prywatnosci";
+
+/** Admin Supabase (do pobrania e-maila użytkownika, jeśli brak w zamówieniu) */
+const admin = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  { auth: { persistSession: false } }
+);
+
+/** Bezpieczny nadawca dla Resend/SMTP (usuwa przypadkowe cudzysłowy/spacje) */
+const EMAIL_FROM =
+  (process.env.EMAIL_FROM || process.env.RESEND_FROM || "SISI Burger <no-reply@sisiciechanow.pl>")
+    .replace(/^['"\s]+|['"\s]+$/g, "");
 
 function normalizePhone(phone?: string | null) {
   if (!phone) return null;
@@ -84,7 +98,7 @@ export async function PATCH(
   const updated = data as any;
   const when: string | null = updated.deliveryTime ?? updated.client_delivery_time ?? null;
 
-  // SMS
+  // ===== SMS =====
   const onlyTimeUpdate = !!employeeTime && updated.status === "accepted" && body.status !== "accepted";
   let smsBody = "";
   if (onlyTimeUpdate) {
@@ -112,9 +126,25 @@ export async function PATCH(
     if (to) { try { await sendSms(to, smsBody); } catch (e) { console.error("[orders.patch] sms error:", e); } }
   }
 
-  // E-MAIL
+  // ===== E-MAIL =====
   try {
-    const toEmail: string | undefined = updated.contact_email || updated.email || undefined;
+    // 1) weź e-mail z zamówienia…
+    let toEmail: string | undefined =
+      updated.contact_email || updated.email || undefined;
+
+    // 2) …albo dociągnij z auth (admin) po user_id
+    const userId: string | undefined =
+      updated.user_id || updated.user || updated.userId || undefined;
+
+    if (!toEmail && userId) {
+      try {
+        const { data: userRes } = await admin.auth.admin.getUserById(userId);
+        toEmail = userRes?.user?.email || toEmail;
+      } catch (e) {
+        console.warn("[orders.patch] getUserById failed:", e);
+      }
+    }
+
     if (toEmail) {
       const tr = getTransport();
       const origin =
@@ -167,7 +197,7 @@ export async function PATCH(
 
       if (headline) {
         await tr.sendMail({
-          from: process.env.EMAIL_FROM!,
+          from: EMAIL_FROM, // ⇦ użyj oczyszczonego nadawcy
           to: toEmail,
           subject,
           html: `
