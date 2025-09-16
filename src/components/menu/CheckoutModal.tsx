@@ -496,7 +496,7 @@ export default function CheckoutModal() {
     removeWholeItem,
   };
 
-  const buildOrderPayload = (isOnline: boolean) => {
+  const buildOrderPayload = () => {
     const client_delivery_time = buildClientDeliveryTime(selectedOption, deliveryTimeOption, scheduledTime);
     const payload: any = {
       selected_option: selectedOption,
@@ -510,7 +510,7 @@ export default function CheckoutModal() {
       discount_amount: discount || 0,
       promo_code: promo?.code || null,
       legal_accept: { terms: true, privacy: true, version: TERMS_VERSION, ts: new Date().toISOString() },
-      status: isOnline ? "pending" : paymentMethod === "Online" ? "pending" : "placed",
+      status: "placed",
     };
     if (selectedOption === "delivery") {
       payload.street = street || null;
@@ -632,7 +632,7 @@ export default function CheckoutModal() {
     if (!guardEmail()) return;
 
     try {
-      const orderPayload = buildOrderPayload(false);
+      const orderPayload = buildOrderPayload();
       const itemsPayload = buildItemsPayload();
 
       await safeFetch("/api/orders/create", {
@@ -658,7 +658,7 @@ export default function CheckoutModal() {
     if (!guardEmail()) return;
 
     try {
-      const orderPayload = buildOrderPayload(true);
+      const orderPayload = buildOrderPayload();
       const itemsPayload = buildItemsPayload();
 
       const data = await safeFetch("/api/orders/create", {
