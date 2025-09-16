@@ -1,4 +1,3 @@
-// src/app/layout.tsx
 import "./globals.css";
 import type { Metadata } from "next";
 import {
@@ -6,7 +5,6 @@ import {
   Covered_By_Your_Grace,
   Smooch,
   Anton,
-  Pinyon_Script,
 } from "next/font/google";
 import Image from "next/image";
 import ClientWrapper from "@/components/ClientWrapper";
@@ -15,11 +13,38 @@ import Footer from "@/components/Footer";
 import CookieBanner from "@/components/legal/CookieBanner";
 
 export const metadata: Metadata = {
-  title: "SISI Burger & Pancakes",
+  metadataBase: new URL("https://www.sisiciechanow.pl"),
+  title: {
+    default: "SISI Burger & Pancakes",
+    template: "%s | SISI Burger & Pancakes",
+  },
   description: "Zamów najlepsze burgery i pancakes w Ciechanowie!",
+  alternates: { canonical: "/" },
   icons: {
     icon: "/favicon.ico",
     apple: "/hamburger.png",
+  },
+  openGraph: {
+    type: "website",
+    url: "https://www.sisiciechanow.pl",
+    siteName: "SISI Burger & Pancakes",
+    title: "SISI Burger & Pancakes",
+    description: "Zamów najlepsze burgery i pancakes w Ciechanowie!",
+    images: [{ url: "/og-cover.jpg" }],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "SISI Burger & Pancakes",
+    description: "Zamów najlepsze burgery i pancakes w Ciechanowie!",
+    images: ["/og-cover.jpg"],
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: { index: true, follow: true },
+  },
+  verification: {
+    google: "oR0w6Flg2I5VDVAjQlECqUmuTE2wFCPEzo9lW37XFDE",
   },
 };
 
@@ -67,11 +92,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           aria-hidden="true"
         />
 
-        {/* Tło desktop jak było */}
+        {/* Tło desktop */}
         <Image
           src="/grafittiburger2.jpg"
           alt=""
           fill
+          priority
           className="hidden md:block object-cover opacity-20 pointer-events-none select-none -z-10"
         />
 
