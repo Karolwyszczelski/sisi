@@ -8,6 +8,14 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
+function extractOrderId(sessionId: unknown): string | null {
+  if (!sessionId) return null;
+  const raw = String(sessionId);
+  const withoutPrefix = raw.startsWith("sisi-") ? raw.slice(5) : raw;
+  const trimmed = withoutPrefix.trim();
+  return trimmed.length ? trimmed : null;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const payload = await req.json();
@@ -47,15 +55,20 @@ export async function POST(req: NextRequest) {
     }
 
     // wyciągnij orderId z sessionId w formie tekstowej
-    const sessionIdText = String(d.sessionId ?? "");
-    const orderId = sessionIdText.startsWith("sisi-")
-      ? sessionIdText.slice("sisi-".length)
-      : sessionIdText;
+   const orderId = extractOrderId(d.sessionId);
+    if (!orderId) {
+      console.error("P24 callback: unable to derive order id", d.sessionId);
+      return NextResponse.json({ error: "Invalid sessionId" }, { status: 400 });
+    }
 
-    await supabase
+    const { error } = await supabase
       .from("orders")
       .update({ payment_status: "paid", paid_at: new Date().toISOString() })
       .eq("id", orderId);
+    if (error) {
+      console.error("P24 callback: Supabase update failed", error);
+      return NextResponse.json({ error: "Update failed" }, { status: 500 });
+    }
 
     return NextResponse.json({ ok: true });
   } catch (e: any) {
