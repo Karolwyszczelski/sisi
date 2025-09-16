@@ -13,8 +13,8 @@ const API_URL =
     : "https://sandbox.przelewy24.pl/api/v1";
 
 const MERCHANT_ID = process.env.P24_MERCHANT_ID!;
-const POS_ID      = process.env.P24_POS_ID!;
-const API_KEY     = process.env.P24_API_KEY!;
+const POS_ID = process.env.P24_POS_ID!;
+const API_KEY = process.env.P24_API_KEY!;
 
 export async function POST(request: Request) {
   const { session, role } = await getSessionAndRole(request);
@@ -42,52 +42,66 @@ export async function POST(request: Request) {
   }
 
   const sessionId = (order as any).p24_session_id || order.id;
-  const orderId   = (order as any).p24_order_id ? Number((order as any).p24_order_id) : undefined;
-
+  const orderId = (order as any).p24_order_id || null;
   const auth = Buffer.from(`${MERCHANT_ID}:${API_KEY}`).toString("base64");
-  const body: Record<string, any> = {
-    merchantId: Number(MERCHANT_ID),
-    posId: Number(POS_ID),
-    sessionId,
-    amount: Math.round(Number(order.total_price || 0) * 100),
-    currency: (order as any).currency || "PLN",
-  };
-  if (orderId) body.orderId = orderId;
 
-  let newStatus: "paid" | "failed" | "pending" = (order.payment_status ?? "pending") as any;
+  let newStatus: "paid" | "failed" | "pending" = order.payment_status ?? "pending";
 
+  // 1) Spróbuj odpytać po sessionId (działa bez CRC)
   try {
-    const r = await fetch(`${API_URL}/transaction/verify`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Basic ${auth}`,
-      },
-      body: JSON.stringify(body),
+    const r = await fetch(`${API_URL}/transaction/by/sessionId/${encodeURIComponent(sessionId)}`, {
+      method: "GET",
+      headers: { Authorization: `Basic ${auth}` },
     });
-
-    const safeJson = await r.json().catch(() => null as any);
-
     if (r.ok) {
-      const st = safeJson?.data?.status ?? safeJson?.status;
-      if (!st || st === "success" || st === true) newStatus = "paid";
-      else if (st === "failed") newStatus = "failed";
-      else newStatus = "pending";
-    } else {
-      const msg = (safeJson?.error?.message || safeJson?.message || "").toString().toLowerCase();
-      const code = (safeJson?.error?.code || "").toString().toLowerCase();
-      if (msg.includes("already") || code.includes("already")) {
-        newStatus = "paid";
-      } else if (r.status === 400 || r.status === 422) {
-        newStatus = "pending";
-      }
+      const j = await r.json().catch(() => ({} as any));
+      // możliwe kształty: {data:{status}} lub {data:[{status:...}]}
+      const ds = (j?.data && Array.isArray(j.data)) ? j.data[0] : j?.data;
+      const st = ds?.status as string | undefined;
+      if (st === "success") newStatus = "paid";
+      else if (st === "cancelled" || st === "rejected" || st === "error") newStatus = "failed";
+      else if (st === "pending" || st === "waiting") newStatus = "pending";
     }
   } catch {
-    // sieć padła – zostaw bez zmian
+    // cicho
+  }
+
+  // 2) (fallback) weryfikacja /transaction/verify
+  if (newStatus === "pending") {
+    try {
+      const body = {
+        merchantId: Number(MERCHANT_ID),
+        posId: Number(POS_ID),
+        sessionId,
+        amount: Math.round(Number(order.total_price || 0) * 100),
+        currency: (order as any).currency || "PLN",
+        // dla niektórych kont wymagany jest orderId — jeśli masz, wyślij
+        ...(orderId ? { orderId: Number(orderId) } : {}),
+      };
+      const vr = await fetch(`${API_URL}/transaction/verify`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Basic ${auth}`,
+        },
+        body: JSON.stringify(body),
+      });
+      if (vr.ok) {
+        const vj = await vr.json().catch(() => ({} as any));
+        const st = vj?.data?.status ?? vj?.status;
+        if (st === "success") newStatus = "paid";
+        else if (st === "failed") newStatus = "failed";
+      }
+    } catch {
+      // cicho
+    }
   }
 
   if (newStatus !== order.payment_status) {
-    await supabase.from("orders").update({ payment_status: newStatus }).eq("id", id);
+    await supabase
+      .from("orders")
+      .update({ payment_status: newStatus, ...(newStatus === "paid" ? { paid_at: new Date().toISOString() } : {}) })
+      .eq("id", id);
   }
 
   return NextResponse.json({ payment_status: newStatus });
