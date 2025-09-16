@@ -16,7 +16,6 @@ const supabaseAdmin = createClient<Database>(
 
 export async function GET(request: Request) {
   try {
-    // PRZEKAŻ request
     const { session, role } = await getSessionAndRole(request);
     if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -24,10 +23,11 @@ export async function GET(request: Request) {
     const limit = Math.min(parseInt(searchParams.get("limit") || "10", 10), 50);
     const offset = Math.max(parseInt(searchParams.get("offset") || "0", 10), 0);
 
+    // Widok admin/employee – prosto i szybko (bez joinów)
     if (role === "admin" || role === "employee") {
       const { data, count, error } = await supabaseAdmin
         .from("orders")
-        .select("*, order_items(*, products(*))", { count: "exact" })
+        .select("*", { count: "exact" })
         .order("created_at", { ascending: false })
         .range(offset, offset + limit - 1);
 
@@ -35,13 +35,13 @@ export async function GET(request: Request) {
       return NextResponse.json({ orders: data ?? [], totalCount: count ?? 0 });
     }
 
-    // widok klienta – dodaj 'pending'
+    // Widok klienta – pokazujemy bieżące
     const supabaseUser = createRouteHandlerClient<Database>({ cookies });
     const { data, count, error } = await supabaseUser
       .from("orders")
       .select("*", { count: "exact" })
       .eq("user_id", session.user.id)
-      .in("status", ["pending","new","placed","accepted"])
+      .in("status", ["pending", "new", "placed", "accepted"])
       .order("created_at", { ascending: false })
       .range(offset, offset + limit - 1);
 
