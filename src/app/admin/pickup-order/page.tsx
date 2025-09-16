@@ -15,7 +15,7 @@ interface Order {
   total_price: number;
   delivery_cost?: number | null;
   created_at: string;
-  status: "new" | "placed" | "accepted" | "cancelled" | "completed";
+  status: "new" | "pending" | "placed" | "accepted" | "cancelled" | "completed";
   clientDelivery?: string;
   deliveryTime?: string;
   address?: string;
@@ -287,7 +287,7 @@ export default function PickupOrdersPage() {
 
       const prev = prevIdsRef.current;
       const newOnes = mapped.filter(
-        (o) => (o.status === "new" || o.status === "placed") && !prev.has(o.id)
+        (o) => (o.status === "new" || o.status === "pending" || o.status === "placed") && !prev.has(o.id)
       );
       if (initializedRef.current && newOnes.length > 0) void playDing();
       prevIdsRef.current = new Set(mapped.map((o) => o.id));
@@ -428,7 +428,9 @@ export default function PickupOrdersPage() {
     [orders, filterStatus, filterOption]
   );
 
-  const newList = filtered.filter((o) => o.status === "new" || o.status === "placed");
+  const newList = filtered.filter((o) =>
+    o.status === "new" || o.status === "pending" || o.status === "placed"
+  );
   const currList = filtered.filter((o) => o.status === "accepted");
   const histList = filtered.filter((o) => o.status === "cancelled" || o.status === "completed");
 
@@ -577,7 +579,7 @@ export default function PickupOrdersPage() {
                 </div>
 
                 <footer className="mt-4 flex flex-wrap items-center gap-2">
-                  {(o.status === "new" || o.status === "placed") && (
+                  {(o.status === "new" || o.status === "pending" || o.status === "placed") && (
                     <>
                       <AcceptButton order={o} onAccept={(m) => acceptAndSetTime(o, m)} />
                       <EditOrderButton

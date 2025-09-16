@@ -1,7 +1,7 @@
 // src/app/api/payments/p24/callback/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { p24, p24Base, signVerify } from "@/lib/p24";
+import { P24_BASE, p24SignVerifyMD5 } from "@/lib/p24";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -12,8 +12,8 @@ function extractOrderId(sessionId: unknown): string | null {
   if (!sessionId) return null;
   const raw = String(sessionId);
   const withoutPrefix = raw.startsWith("sisi-") ? raw.slice(5) : raw;
-  const trimmed = withoutPrefix.trim();
-  return trimmed.length ? trimmed : null;
+  const firstSegment = withoutPrefix.split("-").find((part) => part.trim().length > 0);
+  return firstSegment ?? null;
 }
 
 export async function POST(req: NextRequest) {
@@ -25,25 +25,56 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Bad callback" }, { status: 400 });
     }
 
+    const P24_MERCHANT_ID = process.env.P24_MERCHANT_ID;
+    const P24_POS_ID = process.env.P24_POS_ID;
+    const P24_CRC_KEY = process.env.P24_CRC_KEY;
+    if (!P24_MERCHANT_ID || !P24_POS_ID || !P24_CRC_KEY) {
+      console.error("P24 callback: missing configuration");
+      return NextResponse.json({ error: "Server error" }, { status: 500 });
+    }
+
+    const merchantId = Number(P24_MERCHANT_ID);
+    const posId = Number(P24_POS_ID);
+    if (!Number.isFinite(merchantId) || !Number.isFinite(posId)) {
+      console.error("P24 callback: invalid merchant configuration");
+      return NextResponse.json({ error: "Server error" }, { status: 500 });
+    }
+
+    const sessionId = String(d.sessionId);
+    const currency = String(d.currency);
+    const orderIdRaw = d.orderId;
+    const amount = Number(d.amount);
+    if (!Number.isFinite(amount)) {
+      return NextResponse.json({ error: "Invalid amount" }, { status: 400 });
+    }
+
+
     // weryfikacja podpisu notyfikacji
-    const expected = signVerify(d.sessionId, d.amount, d.currency, d.orderId);
-    if (expected !== d.sign) {
+    const expected = p24SignVerifyMD5(
+      sessionId,
+      String(orderIdRaw),
+      amount,
+      currency,
+      P24_CRC_KEY,
+    );
+    if (expected !== String(d.sign)) {
       console.error("P24 sign mismatch");
       return NextResponse.json({ error: "Invalid sign" }, { status: 400 });
     }
 
     // verify call (wymagane przez P24)
+    const orderIdNumber = Number(orderIdRaw);
     const verifyBody = {
-      merchantId: p24.merchantId,
-      posId: p24.posId,
-      sessionId: d.sessionId,
-      amount: d.amount,
-      currency: d.currency,
-      orderId: d.orderId,
+      merchantId,
+      posId,
+      sessionId,
+      amount,
+      currency,
+      orderId: Number.isFinite(orderIdNumber) ? orderIdNumber : String(orderIdRaw),
       sign: expected,
     };
 
-    const res = await fetch(`${p24Base}/api/v1/transaction/verify`, {
+    const res = await fetch(`${P24_BASE}/api/v1/transaction/verify`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(verifyBody),
@@ -55,7 +86,7 @@ export async function POST(req: NextRequest) {
     }
 
     // wyciągnij orderId z sessionId w formie tekstowej
-   const orderId = extractOrderId(d.sessionId);
+   const orderId = extractOrderId(sessionId);
     if (!orderId) {
       console.error("P24 callback: unable to derive order id", d.sessionId);
       return NextResponse.json({ error: "Invalid sessionId" }, { status: 400 });
@@ -71,8 +102,8 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json({ ok: true });
-  } catch (e: any) {
-    console.error("P24 callback error:", e);
+  } catch (error: unknown) {
+    console.error("P24 callback error:", error);
     return NextResponse.json({ error: "Server error" }, { status: 500 });
   }
 }
