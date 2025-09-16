@@ -1,4 +1,3 @@
-// src/app/api/payments/p24/callback/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import {
@@ -24,35 +23,7 @@ export async function POST(req: NextRequest) {
     const rawAmount = data.amount ?? data.p24_amount;
     const currency = data.currency ?? data.p24_currency ?? "PLN";
     const orderIdFromGateway = data.orderId ?? data.p24_order_id;
-    const sign = data.sign ?? data.p24_sign;
-
-    if (!sessionId || orderIdFromGateway == null || rawAmount == null || !sign) {
-      return NextResponse.json({ error: "Bad callback" }, { status: 400 });
-    }
-
-    const amountGr = parseP24Amount(rawAmount);
-    if (amountGr === null) {
-      return NextResponse.json({ error: "Invalid amount" }, { status: 400 });
-    }
-
-    const P24_MERCHANT_ID = process.env.P24_MERCHANT_ID!;
-    const P24_POS_ID = process.env.P24_POS_ID!;
-    const P24_CRC_KEY = process.env.P24_CRC_KEY!;
-    if (!P24_MERCHANT_ID || !P24_POS_ID || !P24_CRC_KEY) {
-      throw new Error("Brak konfiguracji P24");
-    }
-
-    // weryfikacja podpisu notyfikacji
-    const expected = p24SignVerifyMD5(
-      sessionId,
-      orderIdFromGateway,
-      amountGr,
-      currency,
-      P24_CRC_KEY
-    );
-    if (expected !== String(sign)) {
-      console.error("P24 sign mismatch");
-      return NextResponse.json({ error: "Invalid sign" }, { status: 400 });
+@@ -56,59 +55,128 @@ export async function POST(req: NextRequest) {
     }
 
     // verify call (wymagane przez P24)

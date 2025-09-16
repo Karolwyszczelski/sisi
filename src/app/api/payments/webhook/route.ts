@@ -91,8 +91,8 @@ export async function POST(req: Request) {
       (vr.ok && /error=0/.test(vtxt)) ||
       (vr.ok && (() => { try { const j = JSON.parse(vtxt); return j?.data?.status === "success"; } catch { return false; } })());
 
-    // z sessionId wyciągamy id zamówienia w formie tekstowej
-    const orderIdFromSession = extractOrderIdFromSession(sessionId);
+    // z sessionId wyciągamy id zamówienia w formie tekstowe
+
     if (!orderIdFromSession) {
       console.warn("P24 webhook: unable to derive order id", { sessionId });
     }
@@ -108,7 +108,7 @@ export async function POST(req: Request) {
         .select()
         .maybeSingle();
 
-        if (error) {
+      if (error) {
         console.error(
           `P24 webhook: ${statusLabel} status update by session id failed`,
           error
@@ -190,7 +190,7 @@ export async function POST(req: Request) {
     }
 
     return NextResponse.json({ ok: false }, { status: 400 });
-  } catch (e: unknown) {
+  } catch (e: any) {
     console.error("[P24_WEBHOOK_ERROR]", e);
     return NextResponse.json({ error: "Server error" }, { status: 500 });
   }

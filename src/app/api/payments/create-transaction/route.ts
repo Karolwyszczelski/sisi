@@ -50,11 +50,12 @@ export async function POST(request: Request) {
       normalizedBaseUrl = normalizedBaseUrl.slice(0, -1);
     }
 
-    // UWAGA: masz stronę /orders/success
-    const signature = sign(String(orderId));
-    const p24_url_return = `${normalizedBaseUrl}/orders/success?orderId=${encodeURIComponent(
-      orderId
-    )}&t=${encodeURIComponent(signature)}`;
+    const token = sign(String(orderId));
+    const returnUrl = new URL("/orders/success", baseUrl);
+    returnUrl.searchParams.set("orderId", String(orderId));
+    returnUrl.searchParams.set("t", token);
+
+    const p24_url_return = returnUrl.toString();
 
     const p24_sign = p24SignRegisterMD5(
       sessionId,
@@ -88,15 +89,15 @@ export async function POST(request: Request) {
     });
 
     const text = await res.text();
-    let token = "";
+    let p24Token = "";
     try {
       const j = JSON.parse(text);
-      token = j?.data?.token || j?.token || "";
+      p24Token = j?.data?.token || j?.token || "";
     } catch {
       const qs = new URLSearchParams(text);
-      token = qs.get("token") || "";
+      p24Token = qs.get("token") || "";
     }
-    if (!res.ok || !token) {
+    if (!res.ok || !p24Token) {
       console.error("P24 trnRegister error:", text);
       throw new Error("Rejestracja transakcji nie powiodła się.");
     }
@@ -111,8 +112,8 @@ export async function POST(request: Request) {
       })
       .eq("id", orderId);
 
-    const paymentUrl = `https://${host}/trnRequest/${token}`;
-    return NextResponse.json({ paymentUrl });
+    const paymentUrl = `https://${host}/trnRequest/${p24Token}`;
+    return NextResponse.json({ paymentUrl, returnUrl: p24_url_return, token: p24Token });
   } catch (e: any) {
     console.error("[P24_CREATE_TRANSACTION_ERROR]", e);
     return NextResponse.json({ error: e.message }, { status: 500 });
