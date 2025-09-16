@@ -1,22 +1,14 @@
+// app/robots.ts
 import type { MetadataRoute } from "next";
 
+const BASE = process.env.NEXT_PUBLIC_BASE_URL ?? "https://www.sisiciechanow.pl";
+
 export default function robots(): MetadataRoute.Robots {
-  const host = "https://www.sisiciechanow.pl";
   return {
-    host,
-    sitemap: `${host}/sitemap.xml`,
     rules: [
-      {
-        userAgent: "*",
-        disallow: [
-          "/wp-admin/",
-          "/wp-content/",
-          "/wp-includes/",
-          "/wp-json/",
-          "/xmlrpc.php",
-          "/?*",
-        ],
-      },
+      { userAgent: "*", allow: "/" , disallow: ["/api/", "/wp-admin", "/wp-content", "/wp-includes", "/wp-json", "/xmlrpc.php"] }
     ],
+    sitemap: `${BASE}/sitemap.xml`,
+    host: BASE,
   };
 }
