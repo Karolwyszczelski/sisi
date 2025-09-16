@@ -96,7 +96,6 @@ export async function POST(request: Request) {
     await supabaseAdmin
       .from("orders")
       .update({
-        status: "pending",
         payment_status: "pending",
         payment_method: "Online",
         p24_session_id: sessionId,

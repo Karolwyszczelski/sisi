@@ -85,7 +85,7 @@ export async function POST(req: Request) {
     if (ok && oId) {
       await supabaseAdmin
         .from("orders")
-        .update({ status: "paid", payment_status: "paid", paid_at: new Date().toISOString() })
+        .update({ payment_status: "paid", paid_at: new Date().toISOString() })
         .eq("id", oId);
       return NextResponse.json({ ok: true });
     }
