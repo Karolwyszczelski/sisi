@@ -486,7 +486,7 @@ export default function PickupOrdersPage() {
     [orders, filterStatus, filterOption]
   );
 
-  const newList = filtered.filter((o) => o.status === "new" || o.status === "placed"]);
+  const newList = filtered.filter((o) => o.status === "new" || o.status === "placed");
   const currList = filtered.filter((o) => o.status === "accepted");
   const histList = filtered.filter((o) => o.status === "cancelled" || o.status === "completed");
 
