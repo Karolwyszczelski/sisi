@@ -7,6 +7,7 @@ import {
   hostFromEnv,
   p24SignRegisterMD5,
 } from "@/lib/p24";
+import { sign } from "@/lib/orderLink";
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -44,9 +45,16 @@ export async function POST(request: Request) {
       process.env.APP_BASE_URL ||
       process.env.NEXT_PUBLIC_BASE_URL ||
       "https://www.sisiciechanow.pl";
+      let normalizedBaseUrl = baseUrl;
+    while (normalizedBaseUrl.endsWith("/")) {
+      normalizedBaseUrl = normalizedBaseUrl.slice(0, -1);
+    }
 
     // UWAGA: masz stronę /orders/success
-    const p24_url_return = `${baseUrl}/orders/success?orderId=${orderId}`;
+    const signature = sign(String(orderId));
+    const p24_url_return = `${normalizedBaseUrl}/orders/success?orderId=${encodeURIComponent(
+      orderId
+    )}&t=${encodeURIComponent(signature)}`;
 
     const p24_sign = p24SignRegisterMD5(
       sessionId,
