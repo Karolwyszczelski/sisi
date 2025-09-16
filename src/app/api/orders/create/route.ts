@@ -201,6 +201,16 @@ function buildItemFromDbAndOptions(dbRow: ProductRow | undefined, raw: Any): Nor
   };
 }
 
+const ALLOWED_ORDER_STATUSES = ["new", "placed", "accepted", "cancelled", "completed"] as const;
+type AllowedOrderStatus = (typeof ALLOWED_ORDER_STATUSES)[number];
+
+function sanitizeOrderStatus(raw: unknown): AllowedOrderStatus {
+  const value = typeof raw === "string" ? raw.trim().toLowerCase() : "";
+  return (ALLOWED_ORDER_STATUSES as readonly string[]).includes(value)
+    ? (value as AllowedOrderStatus)
+    : "placed";
+}
+
 /* ============== Normalizacja BODY ============== */
 function normalizeBody(raw: any, req: Request) {
   const base = raw?.orderPayload ? raw.orderPayload : raw;
@@ -269,7 +279,7 @@ function normalizeBody(raw: any, req: Request) {
     promo_code: base?.promo_code ?? null,
     discount_amount: num(base?.discount_amount, 0) ?? 0,
     delivery_cost: num(base?.delivery_cost, null),
-    status: (base?.status as any) ?? "placed",
+    status: sanitizeOrderStatus(base?.status),
     client_delivery_time: base?.client_delivery_time ?? base?.delivery_time ?? null,
     deliveryTime: null,
     eta: base?.eta ?? null,
