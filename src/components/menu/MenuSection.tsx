@@ -175,7 +175,7 @@ export default function MenuSection() {
 
   return (
     <>
-      {/* === MOBILE === */}
+      {/* === MOBILE (kafelki 2 kolumny, bez slidera) === */}
       <section id="menu" className="block md:hidden relative pt-16 pb-14 px-4 bg-transparent text-white overflow-hidden">
         <div className="relative z-10 max-w-md mx-auto text-center">
           <h2 className="text-3xl font-bold uppercase mb-3 inline-block border-b-4 border-yellow-400">
@@ -204,23 +204,16 @@ export default function MenuSection() {
 
           {(loading && !products.length) && <p className="text-center mt-6">Ładowanie…</p>}
 
-          {/* poziomy slider z równą wysokością kart */}
-          <div className="mt-5 -mx-4 px-4">
-            <div className="flex gap-4 overflow-x-auto snap-x snap-mandatory items-stretch pb-2">
-              {products.map((product, index) => (
-                <div
-                  key={index}
-                  className="snap-center shrink-0 w-[80%] max-w-[300px] h-[380px] [&>*]:h-full"
-                >
-                  <ProductCard product={product} index={index} />
-                </div>
-              ))}
-              {!loading && products.length === 0 && (
-                <div className="snap-center shrink-0 w-full max-w-[250px] text-center py-8">
-                  Brak produktów w tej kategorii.
-                </div>
-              )}
-            </div>
+          {/* siatka kafelków: 2 kolumny (małe karty) */}
+          <div className="mt-5 grid grid-cols-2 gap-3">
+            {products.map((product, index) => (
+              <div key={index} className="h-full [&>*]:h-full">
+                <ProductCard product={product} index={index} />
+              </div>
+            ))}
+            {!loading && products.length === 0 && (
+              <div className="col-span-2 text-center py-8">Brak produktów w tej kategorii.</div>
+            )}
           </div>
         </div>
       </section>
@@ -263,7 +256,6 @@ export default function MenuSection() {
             </p>
           )}
 
-          {/* siatka z równą wysokością kart */}
           <div className="grid gap-6 mt-8 sm:grid-cols-2 lg:grid-cols-4 justify-items-center auto-rows-[1fr]">
             {products.map((product, index) => (
               <div key={index} className="h-full [&>*]:h-full w-full">
