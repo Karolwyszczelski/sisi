@@ -99,8 +99,8 @@ export default function Header() {
         {/* Linki w szufladzie */}
         <nav className="flex flex-col gap-1 px-4 py-4 text-base">
           <a href="#menu" className="rounded px-3 py-2 hover:bg-black/5" onClick={() => setOpen(false)}>Menu</a>
-          <a href="#polityka" className="rounded px-3 py-2 hover:bg-black/5" onClick={() => setOpen(false)}>Polityka Prywatności</a>
-          <a href="#regulamin" className="rounded px-3 py-2 hover:bg-black/5" onClick={() => setOpen(false)}>Regulamin</a>
+          <a href="/polityka" className="rounded px-3 py-2 hover:bg-black/5" onClick={() => setOpen(false)}>Polityka Prywatności</a>
+          <a href="/regulamin" className="rounded px-3 py-2 hover:bg-black/5" onClick={() => setOpen(false)}>Regulamin</a>
           <a
             href="tel:+48515433488"
             className="mt-2 w-fit rounded bg-black px-3 py-2 font-bold text-yellow-400 hover:opacity-90"
