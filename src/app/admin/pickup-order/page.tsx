@@ -241,10 +241,7 @@ export default function PickupOrdersPage() {
     a.preload = "auto";
     a.volume = 1;
     newOrderAudio.current = a;
-
-    const unlock = async () => {
-      try { a.currentTime = 0; await a.play(); a.pause(); } catch {}
-    };
+    const unlock = async () => { try { a.currentTime = 0; await a.play(); a.pause(); } catch {} };
     window.addEventListener("pointerdown", unlock, { once: true });
     return () => window.removeEventListener("pointerdown", unlock);
   }, []);
@@ -297,7 +294,6 @@ export default function PickupOrdersPage() {
         return sortOrder === "desc" ? tb - ta : ta - tb;
       });
 
-      // dźwięk dla nowych/pending/placed
       const prev = prevIdsRef.current;
       const newOnes = mapped.filter(
         (o) => (o.status === "new" || o.status === "placed" || o.status === "pending") && !prev.has(o.id)
@@ -422,7 +418,6 @@ export default function PickupOrdersPage() {
     return <Badge tone="amber">GOTÓWKA</Badge>;
   };
 
-  // zmiana metody płatności
   const setPaymentMethod = async (o: Order, method: PaymentMethod) => {
     try {
       setEditingOrderId(o.id);
@@ -438,7 +433,7 @@ export default function PickupOrdersPage() {
     } finally { setEditingOrderId(null); }
   };
 
-  // (opcjonalny) ręczny override tylko dla Online
+  // ręczny override tylko dla Online
   const setPaymentStatus = async (o: Order, status: Exclude<PaymentStatus, null>) => {
     if (o.payment_method !== "Online") return;
     try {
@@ -476,7 +471,7 @@ export default function PickupOrdersPage() {
             <div className="truncate text-sm font-semibold">{p.name}</div>
             <div className="mt-0.5 text-[12px] text-slate-600">
               Ilość: <b>{p.quantity}</b>
-              {p.addons.length > 0 && <> <span className="text-slate-400"> · </span> Dodatki: {p.addons.join(", ")}</>}
+              {p.addons.length > 0 && <> <span className="text-slate-400"> · </span> Dodatki: {p.addons.join(", ")}</>
             </div>
             {p.ingredients.length > 0 && (
               <div className="mt-0.5 text-[12px] text-slate-600">Skład: {p.ingredients.join(", ")}</div>
