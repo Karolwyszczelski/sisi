@@ -39,3 +39,25 @@ export function p24SignVerifyMD5(
 export function amountToGrosze(amountPln: number) {
   return Math.max(1, Math.round(Number(amountPln) * 100));
 }
+
+export function extractOrderIdFromSession(sessionId: unknown) {
+  if (!sessionId) return null;
+  const raw = String(sessionId).trim();
+  if (!raw.length) return null;
+  const prefix = "sisi-";
+  const withoutPrefix = raw.startsWith(prefix) ? raw.slice(prefix.length) : raw;
+  const normalized = withoutPrefix.trim();
+  return normalized.length ? normalized : null;
+}
+
+export function parseP24Amount(value: unknown) {
+  if (value === null || value === undefined) return null;
+  const raw = String(value).replace(",", ".").trim();
+  if (!raw.length) return null;
+  const numeric = Number(raw);
+  if (!Number.isFinite(numeric)) return null;
+  if (raw.includes(".") || raw.includes(",")) {
+    return Math.round(numeric * 100);
+  }
+  return Math.round(numeric);
+}
