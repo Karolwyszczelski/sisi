@@ -29,7 +29,7 @@ export const metadata: Metadata = {
     description: "Zamów najlepsze burgery i pancakes w Ciechanowie!",
     images: ["/og-cover.jpg"],
   },
-  robots: { index: true, follow: true, googleBot: { index: true, follow: true } },
+  robots: { index: true, follow: true, googleBot: { index: true, follow: true, notranslate: true } },
   verification: { google: "oR0w6Flg2I5VDVAjQlECqUmuTE2wFCPEzo9lW37XFDE" },
 };
 
@@ -42,10 +42,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="pl">
       <body
-        className={`
-          ${montserrat.className} ${covered.variable} ${smooch.variable} ${anton.variable}
-          bg-[#fff800] text-black relative overflow-x-hidden
-        `}
+        className={`${montserrat.className} ${covered.variable} ${smooch.variable} ${anton.variable} bg-[#fff800] text-black relative overflow-x-hidden`}
       >
         {/* Mobile tło */}
         <div className="md:hidden fixed inset-0 -z-10 bg-[url('/backgroundsisi.jpg')] bg-center bg-cover" aria-hidden="true" />
@@ -57,6 +54,30 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           fill
           priority
           className="hidden md:block object-cover opacity-20 pointer-events-none select-none -z-10"
+        />
+
+        {/* JSON-LD: Restaurant/LocalBusiness – doprecyzowanie typu witryny */}
+        <script
+          type="application/ld+json"
+          // nic nie usuwam – tylko dokładam schema.org
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify({
+              "@context": "https://schema.org",
+              "@type": "Restaurant",
+              name: "SISI Burger & Pancakes",
+              url: "https://www.sisiciechanow.pl/",
+              telephone: "+48515433488",
+              address: {
+                "@type": "PostalAddress",
+                streetAddress: "ul. Spółdzielcza 7",
+                postalCode: "06-400",
+                addressLocality: "Ciechanów",
+                addressCountry: "PL",
+              },
+              servesCuisine: ["Burgers", "Pancakes"],
+              acceptsReservations: true,
+            }),
+          }}
         />
 
         <ClientProvider>
