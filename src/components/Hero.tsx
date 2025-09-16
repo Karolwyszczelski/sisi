@@ -159,7 +159,7 @@ export default function Hero() {
           {/* SLIDE 1: BURGER */}
           <div className="w-1/2 h-full flex items-start justify-center">
             <div className="relative w-full max-w-sm mx-auto">
-              <span className="block text-center text-[clamp(44px,18vw,68px)] font-extrabold leading-none z-0 mt-[80px]">
+              <span className="block text-center text-[clamp(44px,18vw,68px)] font-extrabold leading-none z-0 mt-[100px]">
                 Burger
               </span>
               <Image
@@ -167,7 +167,7 @@ export default function Hero() {
                 alt="Burger"
                 width={250}
                 height={250}
-                className="absolute left-1/2 -translate-x-1/2 top-[90px] z-10 pointer-events-none select-none drop-shadow"
+                className="absolute left-1/2 -translate-x-1/2 top-[100px] z-10 pointer-events-none select-none drop-shadow"
                 priority
               />
             </div>
@@ -176,7 +176,7 @@ export default function Hero() {
           {/* SLIDE 2: PANCAKE */}
           <div className="w-1/2 h-full flex items-start justify-center">
             <div className="relative w-full max-w-sm mx-auto">
-              <span className="block text-center text-[clamp(44px,18vw,68px)] font-extrabold leading-none z-0 mt-[80px]">
+              <span className="block text-center text-[clamp(44px,18vw,68px)] font-extrabold leading-none z-0 mt-[100px]">
                 Pancake
               </span>
               <Image
@@ -209,7 +209,7 @@ export default function Hero() {
   </div>
 
   {/* CTA nad opisem */}
-  <div className="mt-6 px-6 text-center">
+  <div className="mt-8 px-6 text-center">
     <div className="flex gap-3 justify-center">
       <a href="#menu" className="px-4 py-2 bg-white text-black rounded-md font-semibold text-sm">
         Zamów teraz
@@ -221,7 +221,7 @@ export default function Hero() {
         Zadzwoń
       </a>
     </div>
-    <p className="mt-3 text-sm leading-snug">
+    <p className="mt-5 text-sm leading-snug">
       Najlepsze burgery i pancake w Ciechanowie i nie tylko!
     </p>
   </div>
