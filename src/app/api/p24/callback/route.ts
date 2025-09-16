@@ -1,3 +1,4 @@
+// src/app/api/p24/callback/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import {
@@ -7,24 +8,50 @@ import {
   parseP24Amount,
 } from "@/lib/p24";
 
+const {
+  NEXT_PUBLIC_SUPABASE_URL,
+  SUPABASE_SERVICE_ROLE_KEY,
+  P24_MERCHANT_ID,
+  P24_POS_ID,
+} = process.env;
+
 const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  NEXT_PUBLIC_SUPABASE_URL!,
+  SUPABASE_SERVICE_ROLE_KEY!,
   { auth: { persistSession: false } }
 );
 
 export async function POST(req: NextRequest) {
   try {
     const payload = await req.json();
-
     const data = payload?.data ?? payload ?? {};
 
-    const sessionId = data.sessionId ?? data.p24_session_id;
-    const rawAmount = data.amount ?? data.p24_amount;
-    const currency = data.currency ?? data.p24_currency ?? "PLN";
-    const orderIdFromGateway = data.orderId ?? data.p24_order_id;
-@@ -56,59 +55,128 @@ export async function POST(req: NextRequest) {
+    const sessionId: string | undefined = data.sessionId ?? data.p24_session_id;
+    const rawAmount: string | number | undefined = data.amount ?? data.p24_amount;
+    const currency: string = data.currency ?? data.p24_currency ?? "PLN";
+    const orderIdFromGateway: string | number | undefined =
+      data.orderId ?? data.p24_order_id;
+
+    if (!sessionId || !rawAmount || !orderIdFromGateway) {
+      return NextResponse.json(
+        { error: "Missing required fields" },
+        { status: 400 }
+      );
     }
+    if (!P24_MERCHANT_ID || !P24_POS_ID) {
+      console.error("P24 env missing: P24_MERCHANT_ID or P24_POS_ID");
+      return NextResponse.json({ error: "Server misconfigured" }, { status: 500 });
+    }
+
+    const amountGr = parseP24Amount(rawAmount, currency);
+
+    // podpis do /trnVerify
+    const expected = p24SignVerifyMD5({
+      sessionId,
+      orderId: String(orderIdFromGateway),
+      amount: amountGr,
+      currency,
+    });
 
     // verify call (wymagane przez P24)
     const host = hostFromEnv();
@@ -35,7 +62,7 @@ export async function POST(req: NextRequest) {
       p24_amount: String(amountGr),
       p24_currency: String(currency),
       p24_order_id: String(orderIdFromGateway),
-      p24_sign: expected,
+      p24_sign: String(expected),
     });
 
     const res = await fetch(`https://${host}/trnVerify`, {
@@ -47,9 +74,17 @@ export async function POST(req: NextRequest) {
 
     const ok =
       (res.ok && /error=0/.test(text)) ||
-      (res.ok && (() => { try { const j = JSON.parse(text); return j?.data?.status === "success"; } catch { return false; } })());
+      (res.ok &&
+        (() => {
+          try {
+            const j = JSON.parse(text);
+            return j?.data?.status === "success";
+          } catch {
+            return false;
+          }
+        })());
 
-    // wyciągnij orderId z sessionId
+    // wyciągnij orderId z sessionId jako fallback
     const orderIdFromSession = extractOrderIdFromSession(sessionId);
     if (!orderIdFromSession) {
       console.warn("P24 callback: unable to derive order id", { sessionId });
@@ -73,19 +108,14 @@ export async function POST(req: NextRequest) {
         );
         return "error";
       }
-
-      if (data) {
-        return "success";
-      }
+      if (data) return "success";
 
       console.warn(
         `P24 callback: no order matched session id for ${statusLabel} update`,
         { sessionId }
       );
 
-      if (!orderIdFromSession) {
-        return "not-found";
-      }
+      if (!orderIdFromSession) return "not-found";
 
       const { data: fallbackData, error: fallbackError } = await supabase
         .from("orders")
@@ -101,10 +131,7 @@ export async function POST(req: NextRequest) {
         );
         return "error";
       }
-
-      if (fallbackData) {
-        return "success";
-      }
+      if (fallbackData) return "success";
 
       console.warn(
         `P24 callback: no order matched fallback order id for ${statusLabel} update`,
@@ -123,11 +150,9 @@ export async function POST(req: NextRequest) {
       if (updateResult === "error") {
         return NextResponse.json({ error: "Update failed" }, { status: 500 });
       }
-
       if (updateResult === "not-found") {
         return NextResponse.json({ error: "Order not found" }, { status: 400 });
       }
-
       return NextResponse.json({ ok: true });
     }
 
@@ -139,7 +164,6 @@ export async function POST(req: NextRequest) {
     if (failedResult === "error") {
       return NextResponse.json({ error: "Update failed" }, { status: 500 });
     }
-
     if (failedResult === "not-found") {
       return NextResponse.json(
         { ok: false, error: "Order not found" },
