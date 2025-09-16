@@ -210,7 +210,7 @@ export default function MenuSection() {
               {products.map((product, index) => (
                 <div
                   key={index}
-                  className="snap-center shrink-0 w-[80%] max-w-[440px] h-[380px] [&>*]:h-full"
+                  className="snap-center shrink-0 w-[80%] max-w-[300px] h-[380px] [&>*]:h-full"
                 >
                   <ProductCard product={product} index={index} />
                 </div>
