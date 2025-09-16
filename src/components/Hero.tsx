@@ -20,19 +20,26 @@ export default function Hero() {
     return () => clearInterval(id);
   }, []);
 
+  // === INTRO (mniejsze przerwy) ===
   if (showIntro) {
     return (
-      <section className="fixed inset-0 bg-black flex flex-col items-center justify-center z-50 space-y-6">
-        <div className="w-64 h-64 sm:w-80 sm:h-80">
-          <DotLottieReact
-            src="https://lottie.host/94a05476-cced-433a-b1ed-ec400e6ac153/3H4yjKz5rT.lottie"
-            loop
-            autoplay
-            className="w-full h-full"
-          />
+      <section className="fixed inset-0 z-50 flex items-center justify-center bg-black">
+        <div className="flex flex-col items-center -mt-4"> {/* lekko podniesione */}
+          <div className="w-56 h-56 sm:w-72 sm:h-72"> {/* mniejsza animacja */}
+            <DotLottieReact
+              src="https://lottie.host/94a05476-cced-433a-b1ed-ec400e6ac153/3H4yjKz5rT.lottie"
+              loop
+              autoplay
+              className="w-full h-full"
+            />
+          </div>
+          <h1 className="mt-2 text-[28px] sm:text-3xl font-bold leading-tight text-white">
+            Cześć!
+          </h1>
+          <p className="mt-1 text-base sm:text-xl leading-tight text-white">
+            co dziś zamawiamy?
+          </p>
         </div>
-        <h1 className="text-white text-3xl font-bold">Cześć!</h1>
-        <p className="text-white text-xl">co dziś zamawiamy?</p>
       </section>
     );
   }
