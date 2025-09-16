@@ -6,10 +6,10 @@ import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import "react-calendar/dist/Calendar.css";
-import { RadialIcon } from "./RadialIcon";
+import { RadialIcon } from "../dashboard/RadialIcon";
 
 const Calendar = dynamic(() => import("react-calendar"), { ssr: false });
-const Chart = dynamic(() => import("./Chart"), { ssr: false });
+const Chart = dynamic(() => import("../dashboard/Chart"), { ssr: false });
 
 type StatsResponse = {
   ordersPerDay?: Record<string, number>;
