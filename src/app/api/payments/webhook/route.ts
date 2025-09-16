@@ -2,7 +2,12 @@ export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { amountToGrosze, hostFromEnv, p24SignVerifyMD5 } from "@/lib/p24";
+import {
+  extractOrderIdFromSession,
+  hostFromEnv,
+  p24SignVerifyMD5,
+  parseP24Amount,
+} from "@/lib/p24";
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -41,11 +46,12 @@ export async function POST(req: Request) {
     // nazewnictwo wg v3.2
     const sessionId = b.p24_session_id || b.sessionId;
     const orderIdFromGateway = b.p24_order_id || b.orderId;
-    const amount = Number(b.p24_amount ?? b.amount);
+    const rawAmount = b.p24_amount ?? b.amount;
+    const amountGr = parseP24Amount(rawAmount);
     const currency = b.p24_currency || b.currency || "PLN";
     const sign = b.p24_sign || b.sign;
 
-    if (!sessionId || !orderIdFromGateway || !amount || !sign) {
+    if (!sessionId || !orderIdFromGateway || amountGr === null || !sign) {
       return NextResponse.json({ error: "Bad payload" }, { status: 400 });
     }
 
@@ -53,7 +59,7 @@ export async function POST(req: Request) {
    const expected = p24SignVerifyMD5(
       sessionId,
       orderIdFromGateway,
-      Number(amount),
+      amountGr,
       currency,
       P24_CRC_KEY
     );
@@ -68,7 +74,7 @@ export async function POST(req: Request) {
       p24_merchant_id: String(P24_MERCHANT_ID),
       p24_pos_id: String(P24_POS_ID),
       p24_session_id: String(sessionId),
-      p24_amount: String(amount),
+      p24_amount: String(amountGr),
       p24_currency: String(currency),
       p24_order_id: String(orderIdFromGateway),
       p24_sign: expected,
@@ -86,27 +92,28 @@ export async function POST(req: Request) {
       (vr.ok && (() => { try { const j = JSON.parse(vtxt); return j?.data?.status === "success"; } catch { return false; } })());
 
     // z sessionId wyciągamy id zamówienia w formie tekstowej
-    const oId = Number(String(sessionId).replace("sisi-", "").split("-")[0]) || null;
-    const orderIdFromSession = (() => {
-      const raw = String(sessionId);
-      const withoutPrefix = raw.startsWith("sisi-") ? raw.slice(5) : raw;
-      const trimmed = withoutPrefix.trim();
-      return trimmed.length ? trimmed : null;
-    })();
+    const orderIdFromSession = extractOrderIdFromSession(sessionId);
 
     if (ok && orderIdFromSession) {
-      await supabaseAdmin
+      const { error } = await supabaseAdmin
         .from("orders")
         .update({ payment_status: "paid", paid_at: new Date().toISOString() })
         .eq("id", orderIdFromSession);
+      if (error) {
+        console.error("P24 webhook: Supabase update failed", error);
+        return NextResponse.json({ error: "Update failed" }, { status: 500 });
+      }
       return NextResponse.json({ ok: true });
     }
 
     if (orderIdFromSession) {
-      await supabaseAdmin
+      const { error } = await supabaseAdmin
         .from("orders")
         .update({ payment_status: "failed" })
         .eq("id", orderIdFromSession);
+      if (error) {
+        console.error("P24 webhook: failed status update errored", error);
+      }
     }
     return NextResponse.json({ ok: false }, { status: 400 });
   } catch (e: any) {
