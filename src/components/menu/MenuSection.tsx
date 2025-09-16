@@ -216,7 +216,7 @@ export default function MenuSection() {
                 </div>
               ))}
               {!loading && products.length === 0 && (
-                <div className="snap-center shrink-0 w-full max-w-[440px] text-center py-8">
+                <div className="snap-center shrink-0 w-full max-w-[250px] text-center py-8">
                   Brak produktów w tej kategorii.
                 </div>
               )}
