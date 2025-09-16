@@ -1,4 +1,3 @@
-// src/app/api/orders/current/route.ts
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -17,14 +16,14 @@ const supabaseAdmin = createClient<Database>(
 
 export async function GET(request: Request) {
   try {
-    const { session, role } = await getSessionAndRole();
+    // PRZEKAŻ request
+    const { session, role } = await getSessionAndRole(request);
     if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const { searchParams } = new URL(request.url);
     const limit = Math.min(parseInt(searchParams.get("limit") || "10", 10), 50);
     const offset = Math.max(parseInt(searchParams.get("offset") || "0", 10), 0);
 
-    // Admin/employee: pełne dane + relacje (bez RLS)
     if (role === "admin" || role === "employee") {
       const { data, count, error } = await supabaseAdmin
         .from("orders")
@@ -36,13 +35,13 @@ export async function GET(request: Request) {
       return NextResponse.json({ orders: data ?? [], totalCount: count ?? 0 });
     }
 
-    // Klient: prosty widok (RLS), bez joinów żeby nie blokowały
+    // widok klienta – dodaj 'pending'
     const supabaseUser = createRouteHandlerClient<Database>({ cookies });
     const { data, count, error } = await supabaseUser
       .from("orders")
       .select("*", { count: "exact" })
       .eq("user_id", session.user.id)
-      .in("status", ["new", "placed", "accepted"])
+      .in("status", ["pending","new","placed","accepted"])
       .order("created_at", { ascending: false })
       .range(offset, offset + limit - 1);
 
