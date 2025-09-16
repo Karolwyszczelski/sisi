@@ -60,7 +60,7 @@ export default function Footer() {
           <h4 className="font-bold text-lg mb-4">Zamów online</h4>
           <div className="flex items-center justify-center md:justify-start space-x-4 mb-6">
             <Link
-              href="/order"
+              href="/#menu"
               aria-label="Przejdź do zamówienia online"
               className="group relative inline-flex items-center justify-center w-10 h-10 bg-primary rounded-full hover:bg-primary-light transition"
             >
