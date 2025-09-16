@@ -46,10 +46,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "verify failed" }, { status: 400 });
     }
 
-    // wyciągnij orderId z sessionId
-    const orderId = Number(String(d.sessionId).replace("sisi-", ""));
+    // wyciągnij orderId z sessionId w formie tekstowej
+    const sessionIdText = String(d.sessionId ?? "");
+    const orderId = sessionIdText.startsWith("sisi-")
+      ? sessionIdText.slice("sisi-".length)
+      : sessionIdText;
 
-    await supabase.from("orders").update({ status: "paid", paid_at: new Date().toISOString() }).eq("id", orderId);
+    await supabase
+      .from("orders")
+      .update({ payment_status: "paid", paid_at: new Date().toISOString() })
+      .eq("id", orderId);
 
     return NextResponse.json({ ok: true });
   } catch (e: any) {
