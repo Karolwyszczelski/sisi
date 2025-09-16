@@ -1,20 +1,20 @@
 "use client";
 
-import React, {
-  useState,
-  useEffect,
-  useRef,
-  useCallback,
-  useMemo,
-} from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 import EditOrderButton from "@/components/EditOrderButton";
 import CancelButton from "@/components/CancelButton";
 
+/* ===================== Typy ===================== */
+type Any = Record<string, any>;
+type PaymentMethod = "Gotówka" | "Terminal" | "Online";
+type PaymentStatus = "pending" | "paid" | "failed" | null;
+
 interface Order {
   id: string;
-  customer_name?: string;
+  name?: string;
   total_price: number;
+  delivery_cost?: number | null;
   created_at: string;
   status: "new" | "placed" | "accepted" | "cancelled" | "completed";
   clientDelivery?: string;
@@ -27,271 +27,242 @@ interface Order {
   items?: any;
   order_items?: any;
   selected_option?: "local" | "takeaway" | "delivery";
+  payment_method?: PaymentMethod;
+  payment_status?: PaymentStatus; // 'pending' | 'paid' | 'failed'
 }
 
-const getOptionLabel = (opt?: Order["selected_option"]) => {
-  if (opt === "local") return "NA MIEJSCU";
-  if (opt === "takeaway") return "NA WYNOS";
-  if (opt === "delivery") return "DOSTAWA";
-  return "BRAK";
-};
+/* =============== Utils danych + parsery =============== */
+const getOptionLabel = (opt?: Order["selected_option"]) =>
+  opt === "delivery" ? "DOSTAWA" : opt === "takeaway" ? "NA WYNOS" : opt === "local" ? "NA MIEJSCU" : "BRAK";
 
-const getBorderClass = (status: Order["status"]) => {
-  switch (status) {
-    case "new":
-    case "placed":
-      return "ring-2 ring-yellow-400";
-    case "accepted":
-      return "ring-2 ring-blue-500";
-    case "cancelled":
-      return "ring-2 ring-red-500";
-    case "completed":
-      return "ring-2 ring-gray-300";
-    default:
-      return "ring-2 ring-gray-300";
-  }
+const statusTone = (s: Order["status"]) =>
+  s === "accepted" ? "ring-blue-200 bg-blue-50"
+  : s === "cancelled" ? "ring-rose-200 bg-rose-50"
+  : s === "completed" ? "ring-slate-200 bg-slate-50"
+  : "ring-amber-200 bg-amber-50";
+
+const toNumber = (x: any, d = 0) => {
+  if (typeof x === "number" && !isNaN(x)) return x;
+  const n = Number(x);
+  return isFinite(n) ? n : d;
 };
 
 const parseProducts = (itemsData: any): any[] => {
   if (!itemsData) return [];
+  if (typeof itemsData === "string") {
+    try { return parseProducts(JSON.parse(itemsData)); }
+    catch { return itemsData.split(",").map((n) => ({ name: n.trim(), quantity: 1, price: 0 })); }
+  }
   if (Array.isArray(itemsData)) return itemsData;
   if (typeof itemsData === "object") {
-    if (Array.isArray(itemsData.order_items)) return itemsData.order_items;
-    if (Array.isArray(itemsData.items)) return itemsData.items;
+    const keys = ["items", "order_items", "cart", "positions", "products", "lines"];
+    for (const k of keys) if (Array.isArray((itemsData as any)[k])) return (itemsData as any)[k];
     return [itemsData];
-  }
-  if (typeof itemsData === "string") {
-    try {
-      const parsed = JSON.parse(itemsData);
-      if (Array.isArray(parsed)) return parsed;
-    } catch {}
-    return itemsData
-      .split(",")
-      .map((n: string) => ({ name: n.trim(), quantity: 1, price: 0 }));
   }
   return [];
 };
 
-const ProductItem: React.FC<{ prod: any }> = ({ prod }) => (
-  <div className="border p-3 rounded-lg mb-2 bg-gray-50">
-    <div className="flex justify-between">
-      <div className="font-semibold truncate">
-        {prod.name} –{" "}
-        {typeof prod.price === "number"
-          ? prod.price.toFixed(2)
-          : prod.price ?? prod.unit_price}{" "}
-        zł
-      </div>
-      <div className="text-sm">Ilość: {prod.quantity}</div>
-    </div>
-    {prod.addons && (
-      <div className="mt-1 text-xs">
-        <strong>Dodatki:</strong>{" "}
-        {Array.isArray(prod.addons) ? prod.addons.join(", ") : prod.addons}
-      </div>
-    )}
-    {prod.extraMeatCount && (
-      <div className="mt-1 text-xs">
-        <strong>Dodatkowe mięso:</strong> {prod.extraMeatCount} por.
-      </div>
-    )}
-    {prod.note && (
-      <div className="mt-1 text-xs italic">Notatka: {prod.note}</div>
-    )}
-  </div>
-);
+const collectStrings = (val: any): string[] => {
+  if (!val) return [];
+  if (typeof val === "string") return [val];
+  if (Array.isArray(val)) return val.flatMap((v) => collectStrings(v)).filter(Boolean);
+  if (typeof val === "object") {
+    const truthy = Object.entries(val)
+      .filter(([, v]) => v === true || v === 1 || v === "1")
+      .map(([k]) => k);
+    if (truthy.length) return truthy;
+    if (Array.isArray((val as any).items)) return collectStrings((val as any).items);
+    const preferred = ["name", "title", "label", "value", "option", "variant"]
+      .map((k) => (typeof (val as any)[k] === "string" ? (val as any)[k] : undefined))
+      .filter(Boolean) as string[];
+    if (preferred.length) return preferred;
+  }
+  return [];
+};
 
-const ProductDetailsModal: React.FC<{ product: any; onClose(): void }> = ({
-  product,
-  onClose,
-}) => {
-  const title =
-    product.quantity && product.quantity > 1
-      ? `${product.name} x${product.quantity}`
-      : product.name;
+const deepFindName = (root: Any): string | undefined => {
+  const skipKeys = new Set(["addons","extras","toppings","ingredients","options","selected_addons"]);
+  const nameMatchers = [
+    /^name$/i, /^title$/i, /^label$/i,
+    /product.*name/i, /menu.*name/i, /item.*name/i,
+    /^menu_item_name$/i, /^item_name$/i, /^nazwa(_pl)?$/i,
+  ];
+  const q: Array<{node:any}> = [{ node: root }];
+  const seen = new Set<any>();
+  while (q.length) {
+    const { node } = q.shift()!;
+    if (!node || typeof node !== "object" || seen.has(node)) continue;
+    seen.add(node);
+    if (Array.isArray(node)) { q.push(...node.map((n) => ({ node: n }))); continue; }
+    for (const [k, v] of Object.entries(node)) {
+      if (skipKeys.has(k)) continue;
+      if (typeof v === "string" && nameMatchers.some((r) => r.test(k)) && v.trim()) return v.trim();
+      if (typeof v === "object") q.push({ node: v });
+    }
+  }
+  return undefined;
+};
+
+const normalizeProduct = (raw: Any) => {
+  const shallowCandidates = [
+    raw.name, raw.product_name, raw.productName, raw.title, raw.label, raw.menu_item_name, raw.item_name,
+    raw.nazwa, raw.nazwa_pl, typeof raw.product === "string" ? raw.product : undefined,
+    raw.product?.name, raw.item?.name, raw.product?.title,
+  ].filter((x) => typeof x === "string" && x.trim()) as string[];
+
+  const deep = deepFindName(raw);
+  const name = (shallowCandidates[0] || deep || "(bez nazwy)") as string;
+
+  const price = toNumber(raw.price ?? raw.unit_price ?? raw.total_price ?? raw.amount_price ?? raw.item?.price ?? 0);
+  const quantity = toNumber(raw.quantity ?? raw.qty ?? raw.amount ?? 1, 1) || 1;
+
+  const addons = [
+    ...collectStrings(raw.addons),
+    ...collectStrings(raw.extras),
+    ...collectStrings(raw.options),
+    ...collectStrings(raw.selected_addons),
+    ...collectStrings(raw.toppings),
+  ].filter((s) => s && s !== "0");
+
+  const ingredients =
+    collectStrings(raw.ingredients).length
+      ? collectStrings(raw.ingredients)
+      : collectStrings(
+          raw.components ?? raw.composition ?? raw.sklad ?? raw.skladniki ?? raw.ingredients_list ?? raw.product?.ingredients
+        );
+
+  const description =
+    (typeof raw.description === "string" && raw.description) ||
+    (typeof raw.opis === "string" && raw.opis) ||
+    (typeof raw.product?.description === "string" && raw.product.description) ||
+    undefined;
+
+  const note =
+    (typeof raw.note === "string" && raw.note) ||
+    (typeof raw.comment === "string" && raw.comment) ||
+    undefined;
+
+  return { name, price, quantity, addons, ingredients, description, note, _raw: raw };
+};
+
+/* ===================== UI helpers ===================== */
+const Badge: React.FC<{ tone: "amber" | "blue" | "rose" | "slate" | "green" | "yellow"; children: React.ReactNode }> = ({ tone, children }) => {
+  const cls =
+    tone === "amber" ? "bg-amber-100 text-amber-700 ring-amber-200"
+    : tone === "blue" ? "bg-blue-100 text-blue-700 ring-blue-200"
+    : tone === "rose" ? "bg-rose-100 text-rose-700 ring-rose-200"
+    : tone === "green" ? "bg-emerald-100 text-emerald-700 ring-emerald-200"
+    : tone === "yellow" ? "bg-yellow-100 text-yellow-800 ring-yellow-200"
+    : "bg-slate-100 text-slate-700 ring-slate-200";
+  return <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-semibold ring-1 ${cls}`}>{children}</span>;
+};
+
+const InlineCountdown: React.FC<{ targetTime: string; onComplete?: () => void }> = ({ targetTime, onComplete }) => {
+  const [ms, setMs] = useState(() => Math.max(0, new Date(targetTime).getTime() - Date.now()));
+  useEffect(() => {
+    const iv = setInterval(() => {
+      const left = new Date(targetTime).getTime() - Date.now();
+      setMs(Math.max(0, left));
+      if (left <= 0) onComplete?.();
+    }, 1000);
+    return () => clearInterval(iv);
+  }, [targetTime, onComplete]);
+  const sec = Math.floor(ms / 1000);
+  const mm = String(Math.floor(sec / 60)).padStart(2, "0");
+  const ss = String(sec % 60).padStart(2, "0");
+  return <span className="rounded-md bg-slate-900 px-2 py-0.5 font-mono text-xs text-white">{mm}:{ss}</span>;
+};
+
+/* ===================== Produkt + modal ===================== */
+const ProductItem: React.FC<{ raw: any; onDetails?: (p: any) => void }> = ({ raw, onDetails }) => {
+  const p = normalizeProduct(raw);
   return (
-    <div className="fixed inset-0 flex items-center justify-center bg-black/60 z-50 px-4">
-      <div className="bg-white p-6 rounded-xl max-w-md w-full border shadow-lg">
-        <h2 className="text-2xl font-bold mb-4">{title}</h2>
-        {product.description && (
-          <p className="mb-2">
-            <strong>Opis:</strong> {product.description}
-          </p>
-        )}
-        {product.ingredients && product.ingredients.length > 0 && (
-          <div>
-            <strong>Składniki:</strong>
-            <ul className="list-disc list-inside mt-2">
-              {product.ingredients.map((ing: string, i: number) => (
-                <li key={i}>{ing}</li>
-              ))}
-            </ul>
+    <div className="rounded-md border bg-white p-3 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="truncate text-sm font-semibold">{p.name}</div>
+          <div className="mt-0.5 text-[12px] text-slate-600">
+            Ilość: <b>{p.quantity}</b>
+            {p.addons.length > 0 && <> <span className="text-slate-400"> · </span> Dodatki: {p.addons.join(", ")}</>}
           </div>
-        )}
-        {product.addons && product.addons.length > 0 && (
-          <div className="mt-4">
-            <strong>Dodatki:</strong>
-            <ul className="list-disc list-inside mt-2">
-              {product.addons.map((a: string, i: number) => (
-                <li key={i}>{a}</li>
-              ))}
-            </ul>
-          </div>
-        )}
-        <div className="flex justify-end mt-6">
-          <button
-            type="button"
-            onClick={onClose}
-            className="bg-red-600 hover:bg-red-500 text-white py-2 px-6 rounded-full font-medium"
-          >
-            Zamknij
-          </button>
+          {p.ingredients.length > 0 && (
+            <div className="mt-0.5 text-[12px] text-slate-600">Skład: {p.ingredients.join(", ")}</div>
+          )}
+          {p.note && <div className="mt-0.5 text-[12px] italic text-slate-700">Notatka: {p.note}</div>}
+          {onDetails && (
+            <button onClick={() => onDetails(p)} className="mt-2 text-xs font-medium text-blue-700 underline">
+              Szczegóły
+            </button>
+          )}
+        </div>
+        <div className="whitespace-nowrap text-sm font-semibold text-amber-700">{p.price.toFixed(2)} zł</div>
+      </div>
+    </div>
+  );
+};
+
+const ProductDetailsModal: React.FC<{ product: any; onClose(): void }> = ({ product, onClose }) => {
+  const p = normalizeProduct(product);
+  const title = p.quantity > 1 ? `${p.name} x${p.quantity}` : p.name;
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-4 sm:items-center">
+      <div className="w-full max-w-lg rounded-md border bg-white p-5 shadow-2xl">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-lg font-bold">{title}</h2>
+          <button onClick={onClose} className="rounded-md border px-3 py-1 text-sm hover:bg-slate-50">Zamknij</button>
+        </div>
+        <div className="space-y-2 text-sm">
+          <div><b>Cena:</b> {p.price.toFixed(2)} zł</div>
+          {p.description && <div><b>Opis:</b> {p.description}</div>}
+          {p.ingredients.length > 0 && (
+            <div>
+              <b>Składniki:</b>
+              <ul className="ml-5 list-disc">{p.ingredients.map((x: string, i: number) => <li key={i}>{x}</li>)}</ul>
+            </div>
+          )}
+          {p.addons.length > 0 && <div><b>Dodatki:</b> {p.addons.join(", ")}</div>}
+          {p.note && <div className="italic text-slate-700">Notatka: {p.note}</div>}
         </div>
       </div>
     </div>
   );
 };
 
-// prosty licznik odliczający do targetTime
-const InlineCountdown: React.FC<{
-  targetTime: string;
-  onComplete?: () => void;
-}> = ({ targetTime, onComplete }) => {
-  const [remaining, setRemaining] = useState<number>(() => {
-    const diff = new Date(targetTime).getTime() - Date.now();
-    return Math.max(0, diff);
-  });
-
-  useEffect(() => {
-    const update = () => {
-      const diff = new Date(targetTime).getTime() - Date.now();
-      setRemaining(Math.max(0, diff));
-      if (diff <= 0) {
-        onComplete?.();
-      }
-    };
-    update();
-    const iv = setInterval(update, 1000);
-    return () => clearInterval(iv);
-  }, [targetTime, onComplete]);
-
-  const fmt = () => {
-    if (remaining <= 0) return "00:00";
-    const totalSec = Math.floor(remaining / 1000);
-    const mins = Math.floor(totalSec / 60);
-    const secs = totalSec % 60;
-    return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
-  };
-
-  return (
-    <div className="inline-flex items-center gap-1 bg-gray-800 text-white text-xs px-2 py-1 rounded-full font-mono">
-      <span className="font-semibold">{fmt()}</span>
-    </div>
-  );
-};
-
-// === AcceptButtonCustom ===
-interface AcceptButtonCustomProps {
+/* ===================== Accept dropdown ===================== */
+const AcceptButton: React.FC<{
   order: Order;
-  onAccept: (minutes: number) => void;
-  onEditStart?: () => void;
-  onEditEnd?: () => void;
-}
-
-const AcceptButtonCustom: React.FC<AcceptButtonCustomProps> = ({
-  order,
-  onAccept,
-  onEditStart,
-  onEditEnd,
-}) => {
+  onAccept: (minutes: number) => Promise<void> | void;
+}> = ({ order, onAccept }) => {
   const isDelivery = order.selected_option === "delivery";
-  const pickupOptions = [15, 30, 45, 60];
-  const deliveryOptions = [30, 60, 90, 120];
-  const options = isDelivery ? deliveryOptions : pickupOptions;
-
+  const options = isDelivery ? [30, 60, 90, 120] : [15, 30, 45, 60];
   const [open, setOpen] = useState(false);
-  const [selectedMinutes, setSelectedMinutes] = useState<number>(options[0]);
-  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [minutes, setMinutes] = useState(options[0]);
+  const ref = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    if (order.deliveryTime && order.deliveryTime !== "asap") {
-      const diff = Math.round(
-        (new Date(order.deliveryTime).getTime() - Date.now()) / 60000
-      );
-      if (diff > 0) {
-        let candidate = options.reduce((prev, curr) =>
-          Math.abs(curr - diff) < Math.abs(prev - diff) ? curr : prev
-        );
-        if (candidate < 0) candidate = options[0];
-        setSelectedMinutes(candidate);
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [order.deliveryTime]);
-
-  useEffect(() => {
-    const onClick = (e: MouseEvent) => {
-      if (
-        containerRef.current &&
-        !containerRef.current.contains(e.target as Node)
-      ) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", onClick);
-    return () => document.removeEventListener("mousedown", onClick);
+    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
   }, []);
 
-  const handleAccept = async (mins: number) => {
-    onEditStart?.();
-    await onAccept(mins);
-    setSelectedMinutes(mins);
-    setOpen(false);
-    onEditEnd?.();
-  };
-
   return (
-    <div className="relative inline-block" ref={(el) => (containerRef.current = el)}>
+    <div className="relative" ref={ref}>
       <button
-        type="button"
+        className="h-10 rounded-md bg-emerald-600 px-4 text-sm font-semibold text-white shadow hover:bg-emerald-500"
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-2 bg-green-600 hover:bg-green-500 text-white rounded-full px-4 py-2 font-semibold relative shadow"
-        aria-label="Akceptuj zamówienie"
       >
-        <span>
-          Akceptuj (
-          {selectedMinutes >= 60
-            ? `${selectedMinutes / 60}h`
-            : `${selectedMinutes} min`}
-          )
-        </span>
-        <svg
-          width="12"
-          height="12"
-          viewBox="0 0 20 20"
-          fill="none"
-          xmlns="http://www.w3.org/2000/svg"
-          className={`transition-transform duration-150 ${open ? "rotate-180" : "rotate-0"}`}
-        >
-          <path
-            d="M5 7L10 12L15 7"
-            stroke="white"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
+        Akceptuj ({minutes >= 60 ? `${minutes / 60} h` : `${minutes} min`})
       </button>
       {open && (
-        <div className="absolute right-0 mt-2 w-max bg-white border rounded shadow-lg z-50 min-w-[150px]">
+        <div className="absolute left-0 top-11 z-10 w-44 overflow-hidden rounded-md border bg-white shadow-lg">
           {options.map((m) => (
             <button
               key={m}
-              onClick={() => handleAccept(m)}
-              className="w-full text-left px-4 py-2 hover:bg-gray-100 text-sm flex justify-between"
+              onClick={async () => { setMinutes(m); setOpen(false); await onAccept(m); }}
+              className="flex w-full items-center justify-between px-3 py-2 text-sm hover:bg-slate-50"
             >
-              <span>{m >= 60 ? `${m / 60}h` : `${m} min`}</span>
-              {selectedMinutes === m && <span className="text-green-600 font-bold">✓</span>}
+              <span>{m >= 60 ? `${m / 60} h` : `${m} min`}</span>
+              {minutes === m && <span className="text-emerald-600">✓</span>}
             </button>
           ))}
         </div>
@@ -299,48 +270,42 @@ const AcceptButtonCustom: React.FC<AcceptButtonCustomProps> = ({
     </div>
   );
 };
-// === koniec AcceptButtonCustom ===
 
-export default function EmployeeClient() {
+/* ===================== Główna strona ===================== */
+export default function PickupOrdersPage() {
   const supabase = createClientComponentClient();
   const [orders, setOrders] = useState<Order[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [loading, setLoading] = useState(true);
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
 
-  const [currentPage, setCurrentPage] = useState<number>(1);
-  const ordersPerPage = 10;
-  const [totalCount, setTotalCount] = useState<number>(0);
+  const [page, setPage] = useState(1);
+  const perPage = 10;
+  const [total, setTotal] = useState(0);
 
   const [filterStatus, setFilterStatus] = useState<"all" | Order["status"]>("all");
   const [filterOption, setFilterOption] = useState<"all" | Order["selected_option"]>("all");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
-  const prevNewCount = useRef<number>(0);
   const newOrderAudio = useRef<HTMLAudioElement | null>(null);
-  useEffect(() => {
-    newOrderAudio.current = new Audio("/new-order.mp3");
-  }, []);
+  useEffect(() => { newOrderAudio.current = new Audio("/new-order.mp3"); }, []);
 
   const fetchOrders = useCallback(async () => {
     try {
       if (!editingOrderId) setLoading(true);
-      const offset = (currentPage - 1) * ordersPerPage;
-      const res = await fetch(`/api/orders/current?limit=${ordersPerPage}&offset=${offset}`);
-      if (!res.ok) {
-        if (res.status === 401) return;
-        console.error("Błąd pobierania zamówień:", res.statusText);
-        return;
-      }
-      const { orders: raw, totalCount: tc } = await res.json();
+      const offset = (page - 1) * perPage;
+      const res = await fetch(`/api/orders/current?limit=${perPage}&offset=${offset}`);
+      if (!res.ok) return;
+      const { orders: raw, totalCount } = await res.json();
       const mapped: Order[] = raw.map((o: any) => ({
         id: o.id,
-        customer_name: o.customer_name,
-        total_price: o.total_price,
+        name: o.name ?? o.customer_name ?? o.client_name ?? undefined,
+        total_price: toNumber(o.total_price),
+        delivery_cost: o.delivery_cost ?? null,
         created_at: o.created_at,
         status: o.status,
-        clientDelivery: o.delivery_time ?? o.clientDelivery,
-        deliveryTime: o.employee_delivery_time ?? o.deliveryTime,
+        clientDelivery: o.client_delivery_time ?? o.delivery_time ?? o.clientDelivery,
+        deliveryTime: o.deliveryTime,
         address:
           o.selected_option === "delivery"
             ? `${o.street || ""}${o.flat_number ? `, nr ${o.flat_number}` : ""}${o.city ? `, ${o.city}` : ""}`
@@ -351,225 +316,349 @@ export default function EmployeeClient() {
         phone: o.phone,
         items: o.items ?? o.order_items ?? [],
         selected_option: o.selected_option,
+        payment_method: (o.payment_method as PaymentMethod) ?? "Gotówka",
+        payment_status: (o.payment_status as PaymentStatus) ?? null,
       }));
-
-      setTotalCount(tc ?? 0);
-      setOrders((prev) => {
-        const byId = new Map(prev.map((o) => [o.id, o]));
-        mapped.forEach((o) => {
-          byId.set(o.id, o);
-        });
-        return Array.from(byId.values()).sort((a, b) => {
-          const ta = new Date(a.created_at).getTime();
-          const tb = new Date(b.created_at).getTime();
+      setTotal(totalCount ?? 0);
+      setOrders(
+        mapped.sort((a, b) => {
+          const ta = +new Date(a.created_at);
+          const tb = +new Date(b.created_at);
           return sortOrder === "desc" ? tb - ta : ta - tb;
-        });
-      });
-
-      const newCount = mapped.filter((o) => o.status === "new" || o.status === "placed").length;
-      if (newCount > prevNewCount.current && newOrderAudio.current) {
-        newOrderAudio.current.play().catch(() => {});
-      }
-      prevNewCount.current = newCount;
-    } catch (e) {
-      console.error("Fetch error:", e);
+        })
+      );
     } finally {
       if (!editingOrderId) setLoading(false);
     }
-  }, [currentPage, editingOrderId, sortOrder]);
+  }, [page, perPage, sortOrder, editingOrderId]);
 
   useEffect(() => {
     fetchOrders();
-    const channel = supabase
+    const ch = supabase
       .channel("orders-realtime")
-      .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, (payload) => {
-        const updatedRaw = payload.new as any;
-        const updated: Order = {
-          id: updatedRaw.id,
-          customer_name: updatedRaw.customer_name,
-          total_price: updatedRaw.total_price,
-          created_at: updatedRaw.created_at,
-          status: updatedRaw.status,
-          clientDelivery: updatedRaw.delivery_time ?? updatedRaw.clientDelivery,
-          deliveryTime: updatedRaw.employee_delivery_time ?? updatedRaw.deliveryTime,
-          address:
-            updatedRaw.selected_option === "delivery"
-              ? `${updatedRaw.street || ""}${updatedRaw.flat_number ? `, nr ${updatedRaw.flat_number}` : ""}${updatedRaw.city ? `, ${updatedRaw.city}` : ""}`
-              : updatedRaw.address || "",
-          street: updatedRaw.street,
-          flat_number: updatedRaw.flat_number,
-          city: updatedRaw.city,
-          phone: updatedRaw.phone,
-          items: updatedRaw.items ?? updatedRaw.order_items ?? [],
-          selected_option: updatedRaw.selected_option,
-        };
-        setOrders((prev) => {
-          const idx = prev.findIndex((o) => o.id === updated.id);
-          if (idx === -1) return [updated, ...prev];
-          if (editingOrderId === updated.id) {
-            return prev.map((o) => (o.id === updated.id ? { ...o, ...updated } : o));
-          }
-          return prev.map((o) => (o.id === updated.id ? updated : o));
-        });
-        if ((updated.status === "new" || updated.status === "placed") && newOrderAudio.current) {
-          newOrderAudio.current.play().catch(() => {});
-        }
-      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, () => fetchOrders())
       .subscribe();
+    return () => { void supabase.removeChannel(ch); };
+  }, [fetchOrders, supabase]);
 
-    return () => {
-      void supabase.removeChannel(channel);
-    };
-  }, [fetchOrders, supabase, editingOrderId]);
-
+  // szybki polling gdy są zamówienia Online->pending
   useEffect(() => {
-    if (editingOrderId) return;
-    const iv = setInterval(() => {
-      fetchOrders();
-    }, 5000);
+    const hasPending = orders.some(
+      (o) => o.payment_method === "Online" && o.payment_status === "pending"
+    );
+    if (!hasPending || editingOrderId) return;
+    const iv = setInterval(() => fetchOrders(), 3000);
     return () => clearInterval(iv);
-  }, [fetchOrders, editingOrderId]);
+  }, [orders, editingOrderId, fetchOrders]);
 
-  const updateOrderLocal = (id: string, upd: Partial<Order>) => {
+  const updateLocal = (id: string, upd: Partial<Order>) =>
     setOrders((prev) => prev.map((o) => (o.id === id ? { ...o, ...upd } : o)));
-  };
 
   const completeOrder = async (id: string) => {
-    try {
-      const res = await fetch(`/api/orders/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "completed" }),
-      });
-      if (res.ok) {
-        updateOrderLocal(id, { status: "completed" });
-      } else {
-        console.error("Nie udało się zakończyć zamówienia");
-      }
-    } catch (e) {
-      console.error("Błąd completeOrder:", e);
-    }
+    const res = await fetch(`/api/orders/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "completed" }),
+    });
+    if (res.ok) updateLocal(id, { status: "completed" });
   };
 
-  const acceptAndSend = async (order: Order, minutes: number) => {
+  const acceptAndSetTime = async (order: Order, minutes: number) => {
     const dt = new Date(Date.now() + minutes * 60000).toISOString();
     try {
       setEditingOrderId(order.id);
       const res = await fetch(`/api/orders/${order.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          status: "accepted",
-          employee_delivery_time: dt,
-        }),
+        body: JSON.stringify({ status: "accepted", deliveryTime: dt }),
       });
       if (!res.ok) return;
-      updateOrderLocal(order.id, { status: "accepted", deliveryTime: dt });
-
-      const humanTime = new Date(dt).toLocaleTimeString(undefined, {
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-
-      await fetch("/api/twilio/send-accept", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          order_id: order.id,
-          delivery_time: dt,
-          friendly_time: humanTime,
-        }),
-      });
-
-      await fetch("/api/dotykacka/send-order", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ order_id: order.id }),
-      });
-
+      updateLocal(order.id, { status: "accepted", deliveryTime: dt });
       fetchOrders();
-    } catch (e) {
-      console.error("acceptAndSend error:", e);
-    } finally {
-      setEditingOrderId(null);
-    }
+    } finally { setEditingOrderId(null); }
   };
 
   const extendTime = async (order: Order, minutes: number) => {
-    const base =
-      order.deliveryTime && !isNaN(Date.parse(order.deliveryTime))
-        ? new Date(order.deliveryTime)
-        : new Date();
+    const base = order.deliveryTime && !isNaN(Date.parse(order.deliveryTime)) ? new Date(order.deliveryTime) : new Date();
     const dt = new Date(base.getTime() + minutes * 60000).toISOString();
     try {
       setEditingOrderId(order.id);
       const res = await fetch(`/api/orders/${order.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ employee_delivery_time: dt }),
+        body: JSON.stringify({ deliveryTime: dt }),
       });
       if (!res.ok) return;
-      updateOrderLocal(order.id, { deliveryTime: dt });
-
-      const humanTime = new Date(dt).toLocaleTimeString(undefined, {
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-
-      await fetch("/api/twilio/send-time-update", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          order_id: order.id,
-          delivery_time: dt,
-          friendly_time: humanTime,
-        }),
-      });
-
+      updateLocal(order.id, { deliveryTime: dt });
       fetchOrders();
-    } catch (e) {
-      console.error("extendTime error:", e);
+    } finally { setEditingOrderId(null); }
+  };
+
+  const restoreOrder = async (id: string) => {
+    const res = await fetch(`/api/orders/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "new" }),
+    });
+    if (res.ok) {
+      updateLocal(id, { status: "new" });
+      fetchOrders();
+    }
+  };
+
+  // === PŁATNOŚCI: UI + aktualizacja ===
+  const paymentBadge = (o: Order) => {
+    if (o.payment_method === "Online") {
+      if (o.payment_status === "paid") return <Badge tone="green">OPŁACONE ONLINE</Badge>;
+      if (o.payment_status === "pending") return <Badge tone="yellow">ONLINE – OCZEKUJE</Badge>;
+      if (o.payment_status === "failed") return <Badge tone="rose">ONLINE – BŁĄD</Badge>;
+      return <Badge tone="yellow">ONLINE</Badge>;
+    }
+    if (o.payment_method === "Terminal") return <Badge tone="blue">TERMINAL</Badge>;
+    return <Badge tone="amber">GOTÓWKA</Badge>;
+  };
+
+  const setPaymentMethod = async (o: Order, method: PaymentMethod) => {
+    try {
+      setEditingOrderId(o.id);
+      const patch: any = { payment_method: method };
+      if (method !== "Online") patch.payment_status = null;
+      const res = await fetch(`/api/orders/${o.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      if (!res.ok) return;
+      updateLocal(o.id, { payment_method: method, payment_status: patch.payment_status ?? o.payment_status });
     } finally {
       setEditingOrderId(null);
     }
   };
 
-  const filtered = useMemo(() => {
-    return orders
-      .filter((o) => (filterStatus === "all" ? true : o.status === filterStatus))
-      .filter((o) => (filterOption === "all" ? true : o.selected_option === filterOption))
-      .sort((a, b) => {
-        const ta = new Date(a.created_at).getTime();
-        const tb = new Date(b.created_at).getTime();
-        return sortOrder === "desc" ? tb - ta : ta - tb;
+  const setPaymentStatus = async (o: Order, status: Exclude<PaymentStatus, null>) => {
+    try {
+      setEditingOrderId(o.id);
+      const res = await fetch(`/api/orders/${o.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ payment_status: status }),
       });
-  }, [orders, filterStatus, filterOption, sortOrder]);
-
-  const newList = useMemo(() => filtered.filter((o) => o.status === "new" || o.status === "placed"), [filtered]);
-  const currList = useMemo(() => filtered.filter((o) => o.status === "accepted"), [filtered]);
-  const histList = useMemo(
-    () => filtered.filter((o) => o.status === "cancelled" || o.status === "completed"),
-    [filtered]
-  );
-
-  const handleOrderUpdated = (orderId: string, updatedData?: Partial<Order>) => {
-    if (updatedData) {
-      updateOrderLocal(orderId, updatedData);
-    } else {
-      fetchOrders();
+      if (!res.ok) return;
+      updateLocal(o.id, { payment_status: status });
+    } finally {
+      setEditingOrderId(null);
     }
   };
 
+  const markPaidQuick = async (o: Order) => {
+    try {
+      setEditingOrderId(o.id);
+      const res = await fetch(`/api/orders/${o.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ payment_status: "paid" }),
+      });
+      if (!res.ok) return;
+      updateLocal(o.id, { payment_status: "paid" });
+    } finally {
+      setEditingOrderId(null);
+    }
+  };
+
+  const refreshPaymentStatus = async (id: string) => {
+  try {
+    setEditingOrderId(id);
+    const res = await fetch(`/api/payments/p24/refresh?id=${id}`, { method: "POST" });
+    if (!res.ok) return;
+    const { payment_status } = await res.json();
+    updateLocal(id, { payment_status: payment_status as PaymentStatus });
+  } finally {
+    setEditingOrderId(null);
+  }
+};
+
+  const filtered = useMemo(
+    () =>
+      orders
+        .filter((o) => (filterStatus === "all" ? true : o.status === filterStatus))
+        .filter((o) => (filterOption === "all" ? true : o.selected_option === filterOption)),
+    [orders, filterStatus, filterOption]
+  );
+
+  const newList = filtered.filter((o) => o.status === "new" || o.status === "placed");
+  const currList = filtered.filter((o) => o.status === "accepted");
+  const histList = filtered.filter((o) => o.status === "cancelled" || o.status === "completed");
+
+  const ProductList = ({ list, title }: { list: Order[]; title: string }) => (
+    <section className="space-y-3">
+      <h2 className="text-xl font-semibold">{title}</h2>
+      {loading && list === newList && <p className="text-center text-slate-500">Ładowanie…</p>}
+      {list.length === 0 ? (
+        <p className="text-center text-slate-500">Brak pozycji.</p>
+      ) : (
+        <div className="grid grid-cols-1 gap-4">
+          {list.map((o) => {
+            const prods = parseProducts(o.items);
+            return (
+              <article key={o.id} className={`rounded-md border p-4 shadow-sm ring-1 ${statusTone(o.status)}`}>
+                <header className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="text-lg font-bold tracking-tight">{getOptionLabel(o.selected_option)}</h3>
+                      <Badge tone={o.status === "accepted" ? "blue" : o.status === "cancelled" ? "rose" : o.status === "completed" ? "slate" : "amber"}>
+                        {o.status.toUpperCase()}
+                      </Badge>
+                      {paymentBadge(o)}
+                    </div>
+                    <div className="text-sm text-slate-700">
+                      <b>Klient:</b> {o.name || "—"}
+                      <span className="ml-3">
+                        <b>Czas (klient):</b>{" "}
+                        {o.clientDelivery === "asap" ? "Jak najszybciej" : o.clientDelivery ? new Date(o.clientDelivery).toLocaleTimeString() : "-"}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 text-sm">
+                    {o.status === "accepted" && o.deliveryTime && <InlineCountdown targetTime={o.deliveryTime} onComplete={() => completeOrder(o.id)} />}
+                    <span className="text-slate-600">{new Date(o.created_at).toLocaleString()}</span>
+                  </div>
+                </header>
+
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                  <div className="space-y-1 text-sm">
+                    <div><b>Kwota:</b> {o.total_price.toFixed(2)} zł</div>
+                    {o.selected_option === "delivery" && typeof o.delivery_cost === "number" && <div><b>Dostawa:</b> {o.delivery_cost.toFixed(2)} zł</div>}
+                    {o.selected_option === "delivery" && o.address && <div><b>Adres:</b> {o.address}</div>}
+                    {o.phone && <div><b>Telefon:</b> {o.phone}</div>}
+                    <div className="mt-1">
+                      <b>Płatność:</b>{" "}
+                      <span className="inline-flex items-center gap-2">
+                        <select
+                          value={o.payment_method || "Gotówka"}
+                          onChange={(e) => setPaymentMethod(o, e.target.value as PaymentMethod)}
+                          className="h-8 rounded border px-2 text-xs"
+                          disabled={editingOrderId === o.id}
+                        >
+                          <option>Gotówka</option>
+                          <option>Terminal</option>
+                          <option>Online</option>
+                        </select>
+                        {o.payment_method === "Online" && (
+                          <>
+                            <select
+                              value={o.payment_status || "pending"}
+                              onChange={(e) => setPaymentStatus(o, e.target.value as Exclude<PaymentStatus, null>)}
+                              className="h-8 rounded border px-2 text-xs"
+                              disabled={editingOrderId === o.id}
+                            >
+                              <option value="pending">oczekuje</option>
+                              <option value="paid">opłacone</option>
+                              <option value="failed">błąd</option>
+                            </select>
+                            {o.payment_status === "pending" && (
+                              <button
+                                onClick={() => refreshPaymentStatus(o.id)}
+                                className="h-8 rounded bg-sky-600 px-2 text-xs font-semibold text-white hover:bg-sky-500"
+                                disabled={editingOrderId === o.id}
+                              >
+                                Odśwież status
+                              </button>
+                            )}
+                          </>
+                        )}
+                        {o.payment_method !== "Online" && o.payment_status !== "paid" && (
+                          <button
+                            onClick={() => markPaidQuick(o)}
+                            className="h-8 rounded bg-emerald-600 px-2 text-xs font-semibold text-white hover:bg-emerald-500"
+                            disabled={editingOrderId === o.id}
+                          >
+                            Oznacz jako opłacone
+                          </button>
+                        )}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="sm:col-span-2">
+                    <div className="mb-1 text-sm font-semibold">Produkty</div>
+                    {prods.length === 0 ? (
+                      <div className="rounded-md border bg-white p-3 text-sm text-slate-500">brak</div>
+                    ) : (
+                      <ul className="space-y-2">
+                        {prods.map((p: any, i: number) => (
+                          <li key={i}><ProductItem raw={p} onDetails={(np) => setSelectedProduct(np)} /></li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </div>
+
+                <footer className="mt-4 flex flex-wrap items-center gap-2">
+                  {(o.status === "new" || o.status === "placed") && (
+                    <>
+                      <AcceptButton order={o} onAccept={(m) => acceptAndSetTime(o, m)} />
+                      <EditOrderButton
+                        orderId={o.id}
+                        currentProducts={prods.map(normalizeProduct)}
+                        currentSelectedOption={o.selected_option || "local"}
+                        onOrderUpdated={(id, data) => (data ? updateLocal(id, data) : fetchOrders())}
+                        onEditStart={() => setEditingOrderId(o.id)}
+                        onEditEnd={() => setEditingOrderId(null)}
+                      />
+                      <CancelButton orderId={o.id} onOrderUpdated={() => fetchOrders()} />
+                    </>
+                  )}
+
+                  {o.status === "accepted" && (
+                    <>
+                      <CancelButton orderId={o.id} onOrderUpdated={() => fetchOrders()} />
+                      {[15, 30, 45, 60].map((m) => (
+                        <button
+                          key={m}
+                          onClick={() => extendTime(o, m)}
+                          className="h-10 rounded-md bg-emerald-600 px-4 text-sm font-semibold text-white hover:bg-emerald-500"
+                        >
+                          +{m >= 60 ? `${m / 60} h` : `${m} min`}
+                        </button>
+                      ))}
+                      <EditOrderButton
+                        orderId={o.id}
+                        currentProducts={prods.map(normalizeProduct)}
+                        currentSelectedOption={o.selected_option || "local"}
+                        onOrderUpdated={(id, data) => (data ? updateLocal(id, data) : fetchOrders())}
+                        onEditStart={() => setEditingOrderId(o.id)}
+                        onEditEnd={() => setEditingOrderId(null)}
+                      />
+                      <button
+                        onClick={() => completeOrder(o.id)}
+                        className="h-10 rounded-md bg-sky-600 px-4 text-sm font-semibold text-white hover:bg-sky-500"
+                      >
+                        Zrealizowany
+                      </button>
+                    </>
+                  )}
+
+                  {o.status === "cancelled" && (
+                    <button
+                      onClick={() => restoreOrder(o.id)}
+                      className="h-10 rounded-md bg-sky-600 px-4 text-sm font-semibold text-white hover:bg-sky-500"
+                    >
+                      Przywróć
+                    </button>
+                  )}
+                </footer>
+              </article>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+
   return (
-    <div className="min-h-screen p-4 space-y-6 bg-white text-black">
-      {/* FILTRY */}
-      <div className="flex flex-wrap gap-4 items-center">
-        <div className="flex gap-2 flex-wrap">
-          <select
-            className="border p-2 rounded shadow-sm"
-            value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value as "all" | Order["status"])}
-          >
+    <div className="mx-auto max-w-6xl p-4 sm:p-6">
+      <div className="sticky top-0 z-20 -mx-4 mb-5 bg-white/85 p-4 backdrop-blur sm:mx-0 sm:rounded-md sm:border">
+        <div className="flex flex-wrap items-center gap-2">
+          <select className="h-10 rounded-md border px-3 text-sm" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value as any)}>
             <option value="all">Wszystkie statusy</option>
             <option value="new">Nowe</option>
             <option value="placed">Złożone</option>
@@ -577,28 +666,17 @@ export default function EmployeeClient() {
             <option value="cancelled">Anulowane</option>
             <option value="completed">Zrealizowane</option>
           </select>
-          <select
-            className="border p-2 rounded shadow-sm"
-            value={filterOption}
-            onChange={(e) => setFilterOption(e.target.value as "all" | Order["selected_option"])}
-          >
+          <select className="h-10 rounded-md border px-3 text-sm" value={filterOption} onChange={(e) => setFilterOption(e.target.value as any)}>
             <option value="all">Wszystkie opcje</option>
             <option value="local">Na miejscu</option>
             <option value="takeaway">Na wynos</option>
             <option value="delivery">Dostawa</option>
           </select>
-          <button
-            type="button"
-            className="border p-2 rounded shadow-sm"
-            onClick={() => setSortOrder((o) => (o === "desc" ? "asc" : "desc"))}
-          >
+          <button className="h-10 rounded-md border px-3 text-sm" onClick={() => setSortOrder((o) => (o === "desc" ? "asc" : "desc"))}>
             {sortOrder === "desc" ? "Najnowsze" : "Najstarsze"}
           </button>
-        </div>
-        <div className="ml-auto">
           <button
-            type="button"
-            className="bg-green-600 text-white px-4 py-2 rounded shadow"
+            className="ml-auto h-10 rounded-md bg-emerald-600 px-4 text-sm font-semibold text-white hover:bg-emerald-500"
             onClick={() => fetchOrders()}
             disabled={loading}
           >
@@ -607,331 +685,23 @@ export default function EmployeeClient() {
         </div>
       </div>
 
-      {/* NOWE */}
-      <section>
-        <h2 className="text-2xl font-semibold mb-4 border-b pb-2">Nowe zamówienia</h2>
-        {loading && !editingOrderId && <p className="text-center text-gray-600">Ładowanie...</p>}
-        <ul className="space-y-4">
-          {newList.length === 0 && (
-            <li>
-              <p className="text-center text-gray-600">Brak nowych zamówień.</p>
-            </li>
-          )}
-          {newList.map((o) => (
-            <li key={o.id} className={`p-6 rounded-xl shadow-md relative ${getBorderClass(o.status)} bg-white`}>
-              <div className="flex flex-col md:flex-row items-start justify-between mb-4 border-b pb-2 gap-4">
-                <div className="space-y-1 flex-1 min-w-0">
-                  <div className="flex flex-wrap gap-2 items-center">
-                    <h3 className="text-xl font-bold">{getOptionLabel(o.selected_option)}</h3>
-                    <span className="text-xs px-2 py-1 rounded-full bg-yellow-100 text-yellow-700 font-medium">
-                      {o.status.toUpperCase()}
-                    </span>
-                  </div>
-                  <div className="text-sm flex flex-wrap gap-2">
-                    <div>
-                      <strong>Klient:</strong> {o.customer_name || "—"}
-                    </div>
-                    <div>
-                      <strong>Czas (klient):</strong>{" "}
-                      {o.clientDelivery === "asap"
-                        ? "Jak najszybciej"
-                        : o.clientDelivery
-                        ? new Date(o.clientDelivery).toLocaleTimeString()
-                        : "-"}
-                    </div>
-                  </div>
-                </div>
-                <div className="text-base text-gray-600 font-bold whitespace-nowrap flex flex-col items-end gap-1">
-                  <div>{new Date(o.created_at).toLocaleString()}</div>
-                  {o.deliveryTime && o.status === "accepted" && (
-                    <InlineCountdown targetTime={o.deliveryTime} onComplete={() => completeOrder(o.id)} />
-                  )}
-                </div>
-              </div>
+      <ProductList list={newList} title="Nowe zamówienia" />
+      <div className="mt-8" />
+      <ProductList list={currList} title="Zamówienia w realizacji" />
+      <div className="mt-8" />
+      <ProductList list={histList} title="Historia" />
 
-              <div className="mb-4 grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="space-y-1">
-                  <p className="text-sm">
-                    <strong>Kwota:</strong> {o.total_price.toFixed(2)} zł
-                  </p>
-                  {o.selected_option === "delivery" && o.address && (
-                    <p className="text-sm">
-                      <strong>Adres:</strong> {o.address}
-                    </p>
-                  )}
-                  {o.phone && (
-                    <p className="text-sm">
-                      <strong>Telefon:</strong> {o.phone}
-                    </p>
-                  )}
-                </div>
-                <div className="md:col-span-2">
-                  <strong>Produkty:</strong>
-                  {(!o.items || parseProducts(o.items).length === 0) ? (
-                    <span> brak</span>
-                  ) : (
-                    <ul className="space-y-2 mt-1">
-                      {parseProducts(o.items).map((p: any, i: number) => (
-                        <li key={i}>
-                          <ProductItem prod={p} />
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSelectedProduct({ ...p });
-                              setEditingOrderId(o.id);
-                            }}
-                            className="text-sm text-blue-600 underline hover:text-blue-500 mt-1"
-                          >
-                            Szczegóły
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              </div>
+      {selectedProduct && <ProductDetailsModal product={selectedProduct} onClose={() => setSelectedProduct(null)} />}
 
-              <div className="flex flex-wrap gap-2 mt-4">
-                <AcceptButtonCustom
-                  order={o}
-                  onAccept={(minutes) => {
-                    setEditingOrderId(o.id);
-                    acceptAndSend(o, minutes).finally(() => setEditingOrderId(null));
-                  }}
-                  onEditStart={() => setEditingOrderId(o.id)}
-                  onEditEnd={() => setEditingOrderId(null)}
-                />
-                <EditOrderButton
-                  orderId={o.id}
-                  currentProducts={parseProducts(o.items)}
-                  currentSelectedOption={o.selected_option || "local"}
-                  onOrderUpdated={handleOrderUpdated}
-                  onEditStart={() => setEditingOrderId(o.id)}
-                  onEditEnd={() => setEditingOrderId(null)}
-                />
-                <CancelButton orderId={o.id} onOrderUpdated={() => fetchOrders()} />
-              </div>
-            </li>
-          ))}
-        </ul>
-      </section>
-
-      {/* W REALIZACJI */}
-      <section>
-        <h2 className="text-2xl font-semibold mb-4 border-b pb-2">Zamówienia w realizacji</h2>
-        <ul className="space-y-4">
-          {currList.length === 0 && (
-            <li>
-              <p className="text-center text-gray-600">Brak zamówień w realizacji.</p>
-            </li>
-          )}
-          {currList.map((o) => (
-            <li key={o.id} className={`p-6 rounded-xl shadow-md relative ${getBorderClass(o.status)} bg-white`}>
-              <div className="flex flex-col md:flex-row items-start justify-between mb-4 border-b pb-2 gap-4">
-                <div className="space-y-1 flex-1 min-w-0">
-                  <div className="flex flex-wrap gap-2 items-center">
-                    <h3 className="text-xl font-bold">{getOptionLabel(o.selected_option)}</h3>
-                    <span className="text-sm px-2 py-1 rounded-full bg-green-100 text-green-700 font-medium">
-                      AKCEPTOWANE
-                    </span>
-                  </div>
-                  <div className="text-sm flex flex-wrap gap-2">
-                    <div>
-                      <strong>Klient:</strong> {o.customer_name || "—"}
-                    </div>
-                  </div>
-                </div>
-                <div className="mt-2 md:mt-0 flex flex-col items-end gap-2">
-                  {o.deliveryTime === "asap" ? (
-                    <div className="text-sm font-medium">Jak najszybciej</div>
-                  ) : (
-                    o.deliveryTime && (
-                      <InlineCountdown
-                        targetTime={o.deliveryTime}
-                        onComplete={() => completeOrder(o.id)}
-                      />
-                    )
-                  )}
-                  <div className="text-xs text-gray-500">{new Date(o.created_at).toLocaleString()}</div>
-                </div>
-              </div>
-              <div className="mb-4 grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="space-y-1">
-                  <p className="text-sm">
-                    <strong>Kwota:</strong> {o.total_price.toFixed(2)} zł
-                  </p>
-                  {o.selected_option === "delivery" && o.address && (
-                    <p className="text-sm">
-                      <strong>Adres:</strong> {o.address}
-                    </p>
-                  )}
-                  {o.phone && (
-                    <p className="text-sm">
-                      <strong>Telefon:</strong> {o.phone}
-                    </p>
-                  )}
-                </div>
-                <div className="md:col-span-2">
-                  <strong>Produkty:</strong>
-                  {(!o.items || parseProducts(o.items).length === 0) ? (
-                    <span> brak</span>
-                  ) : (
-                    <ul className="space-y-2 mt-1">
-                      {parseProducts(o.items).map((p: any, i: number) => (
-                        <li key={i}>
-                          <ProductItem prod={p} />
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-2 mt-4">
-                <CancelButton orderId={o.id} onOrderUpdated={() => fetchOrders()} />
-                {[15, 30, 45, 60].map((m) => (
-                  <button
-                    key={m}
-                    type="button"
-                    onClick={() => extendTime(o, m)}
-                    className="w-28 h-10 bg-green-600 hover:bg-green-500 text-white rounded-full font-semibold text-sm"
-                  >
-                    {m >= 60 ? `${m / 60} H` : `${m} MIN`}
-                  </button>
-                ))}
-                <EditOrderButton
-                  orderId={o.id}
-                  currentProducts={parseProducts(o.items)}
-                  currentSelectedOption={o.selected_option || "local"}
-                  onOrderUpdated={handleOrderUpdated}
-                  onEditStart={() => setEditingOrderId(o.id)}
-                  onEditEnd={() => setEditingOrderId(null)}
-                />
-                <button
-                  type="button"
-                  onClick={() => completeOrder(o.id)}
-                  className="w-32 h-10 bg-blue-600 hover:bg-blue-500 text-white rounded-full font-semibold text-sm"
-                >
-                  Zrealizowany
-                </button>
-              </div>
-            </li>
-          ))}
-        </ul>
-      </section>
-
-      {/* HISTORIA */}
-      <section>
-        <h2 className="text-2xl font-semibold mb-4 border-b border-gray-300 pb-2">Historia</h2>
-        <ul className="space-y-4">
-          {histList.length === 0 && (
-            <li>
-              <p className="text-center text-gray-600">Brak historii zamówień.</p>
-            </li>
-          )}
-          {histList.map((o) => (
-            <li key={o.id} className={`p-6 rounded-xl shadow-md relative ${getBorderClass(o.status)} bg-white`}>
-              <div className="flex flex-col md:flex-row items-start justify-between mb-4 border-b pb-2 gap-4">
-                <div>
-                  <h3 className="text-xl font-bold">{getOptionLabel(o.selected_option)}</h3>
-                  <p className="text-sm">
-                    Status:{" "}
-                    <span className={o.status === "completed" ? "text-green-600 font-semibold" : "text-red-600 font-semibold"}>
-                      {o.status.toUpperCase()}
-                    </span>
-                  </p>
-                </div>
-                <div className="text-base text-gray-600 font-bold whitespace-nowrap">
-                  {new Date(o.created_at).toLocaleString()}
-                </div>
-              </div>
-              <div className="mb-4 grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="space-y-1">
-                  <p className="text-sm">
-                    <strong>Kwota:</strong> {o.total_price.toFixed(2)} zł
-                  </p>
-                  {o.selected_option === "delivery" && o.address && (
-                    <p className="text-sm">
-                      <strong>Adres:</strong> {o.address}
-                    </p>
-                  )}
-                  {o.phone && (
-                    <p className="text-sm">
-                      <strong>Telefon:</strong> {o.phone}
-                    </p>
-                  )}
-                </div>
-                <div className="md:col-span-2">
-                  <strong>Produkty:</strong>
-                  {(!o.items || parseProducts(o.items).length === 0) ? (
-                    <span> brak</span>
-                  ) : (
-                    <ul className="space-y-2 mt-1">
-                      {parseProducts(o.items).map((p: any, i: number) => (
-                        <li key={i}>
-                          <ProductItem prod={p} />
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              </div>
-              {o.status === "cancelled" && (
-                <div className="flex justify-center mt-4">
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      await fetch(`/api/orders/${o.id}`, {
-                        method: "PATCH",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ status: "new" }),
-                      });
-                      updateOrderLocal(o.id, { status: "new" });
-                      fetchOrders();
-                    }}
-                    className="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-full text-sm"
-                  >
-                    Przywróć
-                  </button>
-                </div>
-              )}
-            </li>
-          ))}
-        </ul>
-      </section>
-
-      {/* MODAL SZCZEGÓŁY */}
-      {selectedProduct && (
-        <ProductDetailsModal
-          product={selectedProduct}
-          onClose={() => {
-            setSelectedProduct(null);
-            setEditingOrderId(null);
-          }}
-        />
-      )}
-
-      {/* PAGINACJA */}
-      <div className="flex flex-col sm:flex-row justify-center items-center gap-4 mt-6">
-        <button
-          type="button"
-          onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
-          disabled={currentPage === 1}
-          className="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded disabled:opacity-50"
-        >
+      <div className="mb-24 mt-6 flex flex-col items-center justify-center gap-3 sm:flex-row">
+        <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1} className="h-10 rounded-md border px-4 text-sm disabled:opacity-50">
           Poprzednia
         </button>
-        <span className="text-gray-600">
-          Strona {currentPage} z {Math.ceil(totalCount / ordersPerPage)}
-        </span>
+        <span className="text-sm text-slate-600">Strona {page} z {Math.max(1, Math.ceil(total / perPage))}</span>
         <button
-          type="button"
-          onClick={() =>
-            setCurrentPage((p) =>
-              p < Math.ceil(totalCount / ordersPerPage) ? p + 1 : p
-            )
-          }
-          disabled={currentPage >= Math.ceil(totalCount / ordersPerPage)}
-          className="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded disabled:opacity-50"
+          onClick={() => setPage((p) => (p < Math.ceil(total / perPage) ? p + 1 : p))}
+          disabled={page >= Math.ceil(total / perPage)}
+          className="h-10 rounded-md border px-4 text-sm disabled:opacity-50"
         >
           Następna
         </button>
