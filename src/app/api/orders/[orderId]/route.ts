@@ -4,7 +4,7 @@ export const runtime = "nodejs";
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
-import { createClient } from "@supabase/supabase-js"; // ⇦ A. admin client
+import { createClient } from "@supabase/supabase-js";
 import { getSessionAndRole } from "@/lib/serverAuth";
 import { sendSms } from "@/lib/sms";
 import { getTransport } from "@/lib/mailer";
@@ -28,6 +28,17 @@ const admin = createClient(
 const EMAIL_FROM =
   (process.env.EMAIL_FROM || process.env.RESEND_FROM || "SISI Burger <no-reply@sisiciechanow.pl>")
     .replace(/^['"\s]+|['"\s]+$/g, "");
+
+/** Wymuszona strefa czasowa – żeby maile/SMS miały lokalną godzinę */
+const APP_TZ = process.env.APP_TIMEZONE || "Europe/Warsaw";
+const timeFmt = new Intl.DateTimeFormat("pl-PL", {
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+  timeZone: APP_TZ,
+});
+const fmtTime = (iso?: string | null) =>
+  iso && !Number.isNaN(Date.parse(iso)) ? timeFmt.format(new Date(iso)) : null;
 
 function normalizePhone(phone?: string | null) {
   if (!phone) return null;
@@ -102,17 +113,13 @@ export async function PATCH(
   const onlyTimeUpdate = !!employeeTime && updated.status === "accepted" && body.status !== "accepted";
   let smsBody = "";
   if (onlyTimeUpdate) {
-    const t = when && !Number.isNaN(Date.parse(when))
-      ? new Date(when).toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" })
-      : null;
+    const t = fmtTime(when);
     smsBody = t ? `⏰ Aktualizacja: zamówienie ${orderId} będzie gotowe ok. ${t}.`
                 : `⏰ Zaktualizowano czas dla zamówienia ${orderId}.`;
   } else {
     switch (updated.status) {
       case "accepted": {
-        const t = when && !Number.isNaN(Date.parse(when))
-          ? new Date(when).toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" })
-          : null;
+        const t = fmtTime(when);
         smsBody = t ? `👍 Zamówienie ${orderId} przyjęte. Odbiór ok. ${t}.` : `👍 Zamówienie ${orderId} przyjęte.`;
         break;
       }
@@ -154,9 +161,7 @@ export async function PATCH(
         "";
       const trackUrl = origin ? trackingUrl(origin, String(orderId)) : null;
 
-      const timeStr = when && !Number.isNaN(Date.parse(when))
-        ? new Date(when).toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" })
-        : null;
+      const timeStr = fmtTime(when);
 
       const optionTxt = optLabel(updated.selected_option);
       const changingPaymentStatus = body.payment_status !== undefined;
@@ -197,7 +202,7 @@ export async function PATCH(
 
       if (headline) {
         await tr.sendMail({
-          from: EMAIL_FROM, // ⇦ użyj oczyszczonego nadawcy
+          from: EMAIL_FROM,
           to: toEmail,
           subject,
           html: `
