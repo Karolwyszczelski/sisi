@@ -13,11 +13,11 @@ const API_URL =
     : "https://sandbox.przelewy24.pl/api/v1";
 
 const MERCHANT_ID = process.env.P24_MERCHANT_ID!;
-const POS_ID = process.env.P24_POS_ID!;
-const API_KEY = process.env.P24_API_KEY!;
+const POS_ID      = process.env.P24_POS_ID!;
+const API_KEY     = process.env.P24_API_KEY!;
 
 export async function POST(request: Request) {
-  // autoryzacja
+  // autoryzacja – WAŻNE: przekaż request
   const { session, role } = await getSessionAndRole(request);
   if (!session || (role !== "admin" && role !== "employee")) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -29,7 +29,7 @@ export async function POST(request: Request) {
 
   const supabase = createRouteHandlerClient<Database>({ cookies });
 
-  // zamówienie
+  // pobierz zamówienie
   const { data: order, error: ordErr } = await supabase
     .from("orders")
     .select("id,total_price,payment_method,payment_status,p24_session_id,currency")
@@ -54,7 +54,7 @@ export async function POST(request: Request) {
     currency: (order as any).currency || "PLN",
   };
 
-  let newStatus: "paid" | "failed" | "pending" = order.payment_status ?? "pending";
+  let newStatus: "paid" | "failed" | "pending" = (order.payment_status ?? "pending") as any;
 
   try {
     const r = await fetch(`${API_URL}/transaction/verify`, {
@@ -67,17 +67,17 @@ export async function POST(request: Request) {
     });
 
     if (r.ok) {
+      // P24 może zwrócić 200 z {data:{status:"success"}} albo 200 bez body
       const j = await r.json().catch(() => ({} as any));
       const status = j?.data?.status ?? j?.status;
-      if (status === "success") newStatus = "paid";
+      if (status === "success" || r.status === 200 && !status) newStatus = "paid";
       else if (status === "failed") newStatus = "failed";
       else newStatus = "pending";
     } else if (r.status === 400 || r.status === 422) {
-      // negatywna weryfikacja → traktuj jako pending (albo failed, jeśli tak wolisz)
       newStatus = "pending";
     }
   } catch {
-    // błąd sieci – nie zmieniamy statusu
+    // błąd sieci – nie zmieniamy
   }
 
   if (newStatus !== order.payment_status) {
