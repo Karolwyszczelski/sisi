@@ -4,19 +4,17 @@
 import { useState, useMemo } from "react";
 import { Tab } from "@headlessui/react";
 import {
-  IconCashBanknote,
   IconCalendarEvent,
   IconMap,
   IconBrandGoogle,
 } from "@tabler/icons-react";
 
-import PaymentsForm from "@/components/admin/settings/PaymentSettingsForm";
 import TableLayoutForm from "@/components/admin/settings/TableLayoutForm";
 import DeliveryZonesForm from "@/components/admin/settings/DeliveryZonesForm";
 import IntegrationsForm from "@/components/admin/settings/IntegrationsForm";
 
+// Uwaga: karta "Płatności" została usunięta na Twoją prośbę.
 const tabs = [
-  { key: "payments", label: "Płatności", icon: IconCashBanknote, component: <PaymentsForm /> },
   { key: "tables", label: "Rezerwacje & Stoły", icon: IconCalendarEvent, component: <TableLayoutForm /> },
   { key: "delivery", label: "Strefy dostawy", icon: IconMap, component: <DeliveryZonesForm /> },
   { key: "integr", label: "Integracje", icon: IconBrandGoogle, component: <IntegrationsForm /> },
@@ -107,7 +105,7 @@ export default function SettingsPage() {
               </div>
             </div>
             <Tab.Panels className="p-6">
-              {tabs.map((t, idx) => (
+              {tabs.map((t) => (
                 <Tab.Panel key={t.key} className="space-y-6">
                   <div className="hidden md:flex items-center gap-3 mb-2">
                     <t.icon className="w-5 h-5 text-indigo-600" />
