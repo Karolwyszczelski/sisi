@@ -14,7 +14,10 @@ export const metadata: Metadata = {
   metadataBase: new URL(BASE),
   title: { default: "SISI Burger & Pancakes", template: "%s | SISI Burger & Pancakes" },
   description: "Zamów najlepsze burgery i pancakes w Ciechanowie!",
-  alternates: { canonical: "/" },
+  alternates: {
+    canonical: "/",
+    languages: { "pl-PL": "/" },
+  },
   icons: { icon: "/favicon.ico", apple: "/hamburger.png" },
   openGraph: {
     type: "website",
@@ -22,7 +25,8 @@ export const metadata: Metadata = {
     siteName: "SISI Burger & Pancakes",
     title: "SISI Burger & Pancakes",
     description: "Zamów najlepsze burgery i pancakes w Ciechanowie!",
-    images: [{ url: "/og-cover.jpg" }],
+    images: [{ url: "/og-cover.jpg", width: 1200, height: 630 }],
+    locale: "pl_PL",
   },
   twitter: {
     card: "summary_large_image",
@@ -74,10 +78,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="pl">
       <head>
-        <script
-          type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(restaurantLd) }}
-        />
+        <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(restaurantLd) }} />
       </head>
       <body className={`${montserrat.className} ${covered.variable} ${smooch.variable} ${anton.variable} bg-[#fff800] text-black relative overflow-x-hidden`}>
         {/* Mobile tło */}

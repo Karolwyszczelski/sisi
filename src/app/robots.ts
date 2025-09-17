@@ -10,6 +10,7 @@ export default function robots(): MetadataRoute.Robots {
         allow: "/",
         disallow: [
           "/order",
+          "/verify",
           "/admin",
           "/api/",
           "/wp-admin",
