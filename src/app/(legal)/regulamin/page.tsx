@@ -1,7 +1,10 @@
 import { LEGAL } from "@/config/legal";
+import type { Metadata } from "next";
 
-export const metadata = {
-  title: "Regulamin – " + LEGAL.shortBrand,
+export const metadata: Metadata = {
+  title: "Regulamin – SISI Burger & Pancakes",
+  description: "Regulamin korzystania z serwisu i składania zamówień w SISI Burger & Pancakes.",
+  alternates: { canonical: "/regulamin" },
   robots: { index: true, follow: true },
 };
 

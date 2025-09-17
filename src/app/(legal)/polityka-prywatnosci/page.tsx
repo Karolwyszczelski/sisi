@@ -1,7 +1,10 @@
 import { LEGAL } from "@/config/legal";
+import type { Metadata } from "next";
 
-export const metadata = {
-  title: "Polityka prywatności – " + LEGAL.shortBrand,
+export const metadata: Metadata = {
+  title: "Polityka prywatności – SISI Burger & Pancakes",
+  description: "Zasady przetwarzania danych osobowych w SISI Burger & Pancakes: administrator, cele, podstawy prawne i prawa użytkownika.",
+  alternates: { canonical: "/polityka-prywatnosci" },
   robots: { index: true, follow: true },
 };
 
