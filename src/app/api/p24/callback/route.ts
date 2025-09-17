@@ -6,9 +6,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import {
   extractOrderIdFromSession,
-  hostFromEnv,           // zwraca 'secure.przelewy24.pl' lub 'sandbox.przelewy24.pl'
-  p24SignVerifyMD5,     // md5(sessionId|orderId|amount|currency|crc)
-  parseP24Amount,       // zamienia 15.90 PLN -> 1590
+  hostFromEnv,
+  p24SignVerifyMD5,
+  parseP24Amount,
 } from "@/lib/p24";
 
 const {
@@ -16,6 +16,8 @@ const {
   SUPABASE_SERVICE_ROLE_KEY,
   P24_MERCHANT_ID,
   P24_POS_ID,
+  P24_CRC_KEY,            // potrzebne do podpisu
+  DEBUG_P24,
 } = process.env;
 
 const supabase = createClient(
@@ -24,29 +26,51 @@ const supabase = createClient(
   { auth: { persistSession: false } }
 );
 
+// czytaj każde możliwe body
+async function readBody(req: NextRequest) {
+  const ct = req.headers.get("content-type") || "";
+  if (ct.includes("application/x-www-form-urlencoded")) {
+    const txt = await req.text();
+    const params = new URLSearchParams(txt);
+    const o: Record<string, any> = {};
+    params.forEach((v, k) => (o[k] = v));
+    return o;
+  }
+  if (ct.includes("multipart/form-data")) {
+    const fd = await req.formData();
+    const o: Record<string, any> = {};
+    for (const [k, v] of fd.entries()) o[k] = typeof v === "string" ? v : await v.text();
+    return o;
+  }
+  try { return await req.json(); } catch { return {}; }
+}
+const pick = (v: any, ...keys: string[]) => keys.map(k => v?.[k]).find(x => x !== undefined && x !== null && String(x).length);
+
 export async function POST(req: NextRequest) {
   try {
-    const payload = await req.json();
+    if (!P24_MERCHANT_ID || !P24_POS_ID || !P24_CRC_KEY) {
+      return NextResponse.json({ error: "Server misconfigured" }, { status: 500 });
+    }
+
+    const payload = await readBody(req);
     const data = payload?.data ?? payload ?? {};
 
-    const sessionId: string | undefined = data.sessionId ?? data.p24_session_id;
-    const rawAmount: string | number | undefined = data.amount ?? data.p24_amount;
-    const currency: string = data.currency ?? data.p24_currency ?? "PLN";
-    const orderIdFromGateway: string | number | undefined =
-      data.orderId ?? data.p24_order_id;
+    const sessionId = String(pick(data, "sessionId", "p24_session_id") || "");
+    const rawAmount = pick(data, "amount", "p24_amount");
+    const currency = String(pick(data, "currency", "p24_currency") || "PLN");
+    const orderIdFromGateway = String(pick(data, "orderId", "p24_order_id") || "");
 
     if (!sessionId || !rawAmount || !orderIdFromGateway) {
+      if (DEBUG_P24 === "1") console.log("P24 cb missing fields", { sessionId, rawAmount, orderIdFromGateway, currency, data });
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
-    }
-    if (!P24_MERCHANT_ID || !P24_POS_ID) {
-      return NextResponse.json({ error: "Server misconfigured" }, { status: 500 });
     }
 
     const amountGr = parseP24Amount(rawAmount, currency);
 
+    // verify do P24
     const expected = p24SignVerifyMD5({
       sessionId,
-      orderId: String(orderIdFromGateway),
+      orderId: orderIdFromGateway,
       amount: amountGr,
       currency,
     });
@@ -55,10 +79,10 @@ export async function POST(req: NextRequest) {
     const verifyBody = new URLSearchParams({
       p24_merchant_id: String(P24_MERCHANT_ID),
       p24_pos_id: String(P24_POS_ID),
-      p24_session_id: String(sessionId),
+      p24_session_id: sessionId,
       p24_amount: String(amountGr),
-      p24_currency: String(currency),
-      p24_order_id: String(orderIdFromGateway),
+      p24_currency: currency,
+      p24_order_id: orderIdFromGateway,
       p24_sign: String(expected),
     });
 
@@ -68,66 +92,55 @@ export async function POST(req: NextRequest) {
       body: verifyBody.toString(),
     });
     const text = await res.text();
+    if (DEBUG_P24 === "1") console.log("P24 verify:", { status: res.status, text });
 
     const ok =
       (res.ok && /error=0/.test(text)) ||
-      (res.ok && (() => { try { const j = JSON.parse(text); return j?.data?.status === "success"; } catch { return false; } })());
+      (res.ok && (() => { try { return JSON.parse(text)?.data?.status === "success"; } catch { return false; } })());
 
+    // fallback id z session
     const orderIdFromSession = extractOrderIdFromSession(sessionId);
 
     const baseValues: Record<string, unknown> = {
-      p24_session_id: String(sessionId),
-      ...(orderIdFromGateway ? { p24_order_id: String(orderIdFromGateway) } : {}),
+      p24_session_id: sessionId,
+      p24_order_id: orderIdFromGateway,
     };
 
     const updateOrderWithFallback = async (
-      values: Record<string, unknown>,
-      statusLabel: "paid" | "failed"
+      values: Record<string, unknown>
     ): Promise<"success" | "not-found" | "error"> => {
-      const { data, error } = await supabase
+      const q1 = await supabase
         .from("orders")
         .update(values)
         .eq("p24_session_id", sessionId)
         .select()
         .maybeSingle();
-
-      if (error) return "error";
-      if (data) return "success";
+      if (q1.error) return "error";
+      if (q1.data) return "success";
 
       if (!orderIdFromSession) return "not-found";
 
-      const { data: d2, error: e2 } = await supabase
+      const q2 = await supabase
         .from("orders")
         .update(values)
         .eq("id", orderIdFromSession)
         .select()
         .maybeSingle();
-
-      if (e2) return "error";
-      return d2 ? "success" : "not-found";
+      if (q2.error) return "error";
+      return q2.data ? "success" : "not-found";
     };
 
     if (ok) {
-      const paidAt = new Date().toISOString();
-      const r = await updateOrderWithFallback(
-        { ...baseValues, payment_status: "paid", paid_at: paidAt },
-        "paid"
-      );
-      if (r === "error") return NextResponse.json({ error: "Update failed" }, { status: 500 });
-      if (r === "not-found") return NextResponse.json({ error: "Order not found" }, { status: 400 });
+      const r = await updateOrderWithFallback({ ...baseValues, payment_status: "paid", paid_at: new Date().toISOString() });
+      if (r !== "success") return NextResponse.json({ error: r }, { status: r === "error" ? 500 : 400 });
       return NextResponse.json({ ok: true });
     }
 
-    const rf = await updateOrderWithFallback(
-      { ...baseValues, payment_status: "failed" },
-      "failed"
-    );
-    if (rf === "error") return NextResponse.json({ error: "Update failed" }, { status: 500 });
-    if (rf === "not-found") {
-      return NextResponse.json({ ok: false, error: "Order not found" }, { status: 400 });
-    }
+    const rf = await updateOrderWithFallback({ ...baseValues, payment_status: "failed" });
+    if (rf !== "success") return NextResponse.json({ ok: false, error: rf }, { status: rf === "error" ? 500 : 400 });
     return NextResponse.json({ ok: false }, { status: 400 });
   } catch (e) {
+    if (DEBUG_P24 === "1") console.log("P24 callback exception:", e);
     return NextResponse.json({ error: "Server error" }, { status: 500 });
   }
 }
