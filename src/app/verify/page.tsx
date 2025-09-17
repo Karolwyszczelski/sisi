@@ -1,4 +1,4 @@
-// src/app/verify/page.tsx   ← (plik MUSI nazywać się page.tsx, nie paget.tsx)
+// src/app/verify/page.tsx  (plik musi nazywać się dokładnie page.tsx)
 import type { Metadata } from "next";
 import VerifyClient from "./Client";
 
