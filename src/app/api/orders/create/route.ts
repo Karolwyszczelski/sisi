@@ -1,3 +1,4 @@
+// src/app/api/orders/create/route.ts
 export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
@@ -211,6 +212,16 @@ function sanitizeOrderStatus(raw: unknown): AllowedOrderStatus {
     : "placed";
 }
 
+/* ===== Haversine ===== */
+const haversineKm = (a:{lat:number;lng:number}, b:{lat:number;lng:number}) => {
+  const R = 6371;
+  const dLat = (b.lat - a.lat) * Math.PI / 180;
+  const dLng = (b.lng - a.lng) * Math.PI / 180;
+  const s1 = Math.sin(dLat/2)**2 +
+             Math.cos(a.lat*Math.PI/180)*Math.cos(b.lat*Math.PI/180)*Math.sin(dLng/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(s1));
+};
+
 /* ============== Normalizacja BODY ============== */
 function normalizeBody(raw: any, req: Request) {
   const base = raw?.orderPayload ? raw.orderPayload : raw;
@@ -279,6 +290,8 @@ function normalizeBody(raw: any, req: Request) {
     promo_code: base?.promo_code ?? null,
     discount_amount: num(base?.discount_amount, 0) ?? 0,
     delivery_cost: num(base?.delivery_cost, null),
+    delivery_lat: num(base?.delivery_lat ?? base?.lat, null),
+    delivery_lng: num(base?.delivery_lng ?? base?.lng, null),
     status: sanitizeOrderStatus(base?.status),
     client_delivery_time: base?.client_delivery_time ?? base?.delivery_time ?? null,
     deliveryTime: null,
@@ -322,6 +335,55 @@ export async function POST(req: Request) {
       );
     }
 
+    // 2.1) Walidacja strefy dostawy (serwer jako źródło prawdy)
+    if (n.selected_option === "delivery") {
+      const { data: zones, error: zErr } = await supabaseAdmin
+        .from("delivery_zones")
+        .select("*")
+        .eq("active", true);
+      const { data: rest, error: rErr } = await supabaseAdmin
+        .from("restaurant_info")
+        .select("lat,lng")
+        .eq("id", 1)
+        .single();
+
+      if (zErr || rErr || !zones || !rest) {
+        return NextResponse.json({ error: "Brak konfiguracji stref dostawy." }, { status: 500 });
+      }
+      if (n.delivery_lat == null || n.delivery_lng == null) {
+        return NextResponse.json({ error: "Brak współrzędnych adresu dostawy." }, { status: 400 });
+      }
+
+      const distance_km = haversineKm(
+        { lat: Number(rest.lat), lng: Number(rest.lng) },
+        { lat: Number(n.delivery_lat), lng: Number(n.delivery_lng) }
+      );
+
+      const zone = (zones as any[]).find(z =>
+        distance_km >= Number(z.min_distance_km) && distance_km <= Number(z.max_distance_km)
+      );
+      if (!zone) {
+        return NextResponse.json({ error: "Adres poza zasięgiem dostawy." }, { status: 400 });
+      }
+
+      const perKm = (zone.pricing_type ?? "per_km") === "per_km";
+      let serverCost = perKm ? Number(zone.cost) * distance_km : Number(zone.cost);
+
+      const base = Math.max(0, Number(n.total_price || 0) - Number(n.delivery_cost || 0));
+      if (zone.free_over != null && base >= Number(zone.free_over)) serverCost = 0;
+
+      if (base < Number(zone.min_order_value || 0)) {
+        return NextResponse.json(
+          { error: `Minimalna wartość zamówienia to ${Number(zone.min_order_value).toFixed(2)} zł.` },
+          { status: 400 }
+        );
+      }
+
+      const rounded = Math.max(0, Math.round(serverCost * 100) / 100);
+      n.delivery_cost = rounded;
+      n.total_price = Math.max(0, Math.round((base + rounded) * 100) / 100);
+    }
+
     // 3) Dociągnij produkty po STRING id
     const productIds = n.itemsArray
       .map((it) => it.product_id ?? it.productId ?? it.id ?? null)
@@ -351,7 +413,7 @@ export async function POST(req: Request) {
         flat_number: n.flat_number,
         selected_option: n.selected_option,
         payment_method: n.payment_method,
-        payment_status: n.payment_status,            // ⬅️ zapis statusu płatności (pending dla Online)
+        payment_status: n.payment_status,
         items: itemsForOrdersColumn,
         total_price: n.total_price,
         delivery_cost: n.delivery_cost,
@@ -360,9 +422,9 @@ export async function POST(req: Request) {
         deliveryTime: n.deliveryTime,
         eta: n.eta,
         user: n.user,
-        promo_code: n.promo_code,                    // ⬅️ kod
-        discount_amount: n.discount_amount,          // ⬅️ kwota zniżki
-        legal_accept: n.legal_accept,                // ⬅️ akceptacja (IP/UA/wersje)
+        promo_code: n.promo_code,
+        discount_amount: n.discount_amount,
+        legal_accept: n.legal_accept,
       })
       .select("id, selected_option, total_price, name")
       .single();
@@ -377,7 +439,7 @@ export async function POST(req: Request) {
 
     const newOrderId = orderRow.id;
 
-    // 6) order_items – minimalny zestaw kolumn (bez 'addons')
+    // 6) order_items
     if (Array.isArray(n.itemsArray) && n.itemsArray.length > 0) {
       try {
         const shaped = n.itemsArray.map((rawIt: Any, i: number) => {
@@ -400,7 +462,7 @@ export async function POST(req: Request) {
       }
     }
 
-    // 6.1) E-mail do klienta z linkiem śledzenia + dopisek o wersjach
+    // 6.1) E-mail do klienta
     try {
       if (n.contact_email) {
         const origin = process.env.APP_BASE_URL || new URL(req.url).origin;
