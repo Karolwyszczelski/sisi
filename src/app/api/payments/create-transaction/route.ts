@@ -1,126 +1,156 @@
-// src/app/api/payments/create-transaction/route.ts
+// src/app/api/p24/callback/route.ts
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { amountToGrosze, hostFromEnv, p24SignRegisterMD5 } from "@/lib/p24";
+import {
+  extractOrderIdFromSession,
+  hostFromEnv,
+  p24SignVerifyMD5,
+  parseP24Amount,
+} from "@/lib/p24";
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+const {
+  NEXT_PUBLIC_SUPABASE_URL,
+  SUPABASE_SERVICE_ROLE_KEY,
+  P24_MERCHANT_ID,
+  P24_POS_ID,
+} = process.env;
+
+const supabase = createClient(
+  NEXT_PUBLIC_SUPABASE_URL!,
+  SUPABASE_SERVICE_ROLE_KEY!,
   { auth: { persistSession: false } }
 );
 
-export async function POST(request: Request) {
+function pick(v: any, ...keys: string[]) {
+  for (const k of keys) {
+    const x = v?.[k];
+    if (x !== undefined && x !== null && String(x).length) return x;
+  }
+  return undefined;
+}
+
+async function readBody(req: NextRequest) {
+  const ct = req.headers.get("content-type") || "";
+  if (ct.includes("application/x-www-form-urlencoded")) {
+    const txt = await req.text();
+    const params = new URLSearchParams(txt);
+    const obj: Record<string, any> = {};
+    params.forEach((val, key) => (obj[key] = val));
+    return obj;
+  }
+  if (ct.includes("multipart/form-data")) {
+    const fd = await req.formData();
+    const obj: Record<string, any> = {};
+    for (const [k, v] of fd.entries()) obj[k] = typeof v === "string" ? v : await v.text();
+    return obj;
+  }
+  try { return await req.json(); } catch { return {}; }
+}
+
+export async function POST(req: NextRequest) {
   try {
-    const { orderId, email, customerName } = await request.json();
-    if (!orderId) {
-      return NextResponse.json({ error: "Brak orderId." }, { status: 400 });
+    const payload = await readBody(req);
+    const data = payload?.data ?? payload ?? {};
+
+    const sessionId = pick(data, "sessionId", "p24_session_id");
+    const rawAmount = pick(data, "amount", "p24_amount");
+    const currency = pick(data, "currency", "p24_currency") ?? "PLN";
+    const orderIdFromGateway = pick(data, "orderId", "p24_order_id");
+
+    if (!sessionId || !rawAmount || !orderIdFromGateway) {
+      return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
+    }
+    if (!P24_MERCHANT_ID || !P24_POS_ID) {
+      return NextResponse.json({ error: "Server misconfigured" }, { status: 500 });
     }
 
-    const { data: order, error: ordErr } = await supabaseAdmin
-      .from("orders")
-      .select("id,total_price")
-      .eq("id", orderId)
-      .single();
-    if (ordErr || !order) {
-      return NextResponse.json({ error: "Nie znaleziono zamówienia." }, { status: 404 });
-    }
+    const amountGr = parseP24Amount(rawAmount, currency);
 
-    const amountGr = amountToGrosze(order.total_price || 0);
+    // podpis do /trnVerify
+    const expected = p24SignVerifyMD5({
+      sessionId: String(sessionId),
+      orderId: String(orderIdFromGateway),
+      amount: amountGr,
+      currency,
+    });
 
-    const P24_MERCHANT_ID = process.env.P24_MERCHANT_ID!;
-    const P24_POS_ID = process.env.P24_POS_ID!;
-    const P24_CRC_KEY = process.env.P24_CRC_KEY!;
-    if (!P24_MERCHANT_ID || !P24_POS_ID || !P24_CRC_KEY) {
-      return NextResponse.json(
-        { error: "Brak P24_MERCHANT_ID/P24_POS_ID/P24_CRC_KEY." },
-        { status: 500 }
-      );
-    }
-
-    const host = hostFromEnv(); // secure.przelewy24.pl lub sandbox.przelewy24.pl
-    const sessionId = `sisi-${orderId}`;
-
-    const baseUrlRaw =
-      process.env.APP_BASE_URL ||
-      process.env.NEXT_PUBLIC_BASE_URL ||
-      "https://www.sisiciechanow.pl";
-    const baseUrl = baseUrlRaw.replace(/\/+$/, "");
-
-    const returnUrl = new URL("/pickup-order", baseUrl);
-    returnUrl.searchParams.set("id", String(orderId));
-    const p24_url_return = returnUrl.toString();
-    const p24_url_status = `${baseUrl}/api/p24/callback`;
-
-    const p24_sign = p24SignRegisterMD5(
-      sessionId,
-      P24_MERCHANT_ID,
-      amountGr,
-      "PLN",
-      P24_CRC_KEY
-    );
-
-    const payload = new URLSearchParams({
+    // verify
+    const host = hostFromEnv();
+    const verifyBody = new URLSearchParams({
       p24_merchant_id: String(P24_MERCHANT_ID),
       p24_pos_id: String(P24_POS_ID),
-      p24_session_id: sessionId,
+      p24_session_id: String(sessionId),
       p24_amount: String(amountGr),
-      p24_currency: "PLN",
-      p24_description: `Zamówienie #${orderId}`,
-      p24_email: email || "",
-      p24_client: customerName || "",
-      p24_country: "PL",
-      p24_language: "pl",
-      p24_url_return,
-      p24_url_status,
-      p24_api_version: "3.2",
-      p24_sign,
+      p24_currency: String(currency),
+      p24_order_id: String(orderIdFromGateway),
+      p24_sign: String(expected),
     });
 
-    const res = await fetch(`https://${host}/trnRegister`, {
+    const res = await fetch(`https://${host}/trnVerify`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: payload.toString(),
+      body: verifyBody.toString(),
     });
-
     const text = await res.text();
-    let p24Token = "";
-    try {
-      const j = JSON.parse(text);
-      p24Token = j?.data?.token || j?.token || "";
-    } catch {
-      const qs = new URLSearchParams(text);
-      p24Token = qs.get("token") || "";
-    }
-    if (!res.ok || !p24Token) {
-      console.error("P24 trnRegister error:", text);
-      return NextResponse.json(
-        { error: "Rejestracja transakcji nie powiodła się." },
-        { status: 502 }
+    const ok =
+      (res.ok && /error=0/.test(text)) ||
+      (res.ok && (() => { try { return JSON.parse(text)?.data?.status === "success"; } catch { return false; } })());
+
+    // fallback: id z sessionId
+    const orderIdFromSession = extractOrderIdFromSession(String(sessionId));
+
+    const baseValues: Record<string, unknown> = {
+      p24_session_id: String(sessionId),
+      p24_order_id: String(orderIdFromGateway),
+    };
+
+    const updateOrderWithFallback = async (
+      values: Record<string, unknown>,
+      _label: "paid" | "failed"
+    ): Promise<"success" | "not-found" | "error"> => {
+      const { data: d1, error: e1 } = await supabase
+        .from("orders")
+        .update(values)
+        .eq("p24_session_id", sessionId)
+        .select()
+        .maybeSingle();
+      if (e1) return "error";
+      if (d1) return "success";
+
+      if (!orderIdFromSession) return "not-found";
+
+      const { data: d2, error: e2 } = await supabase
+        .from("orders")
+        .update(values)
+        .eq("id", orderIdFromSession)
+        .select()
+        .maybeSingle();
+      if (e2) return "error";
+      return d2 ? "success" : "not-found";
+    };
+
+    if (ok) {
+      const r = await updateOrderWithFallback(
+        { ...baseValues, payment_status: "paid", paid_at: new Date().toISOString() },
+        "paid"
       );
+      if (r === "error") return NextResponse.json({ error: "Update failed" }, { status: 500 });
+      if (r === "not-found") return NextResponse.json({ error: "Order not found" }, { status: 400 });
+      return NextResponse.json({ ok: true });
     }
 
-    await supabaseAdmin
-      .from("orders")
-      .update({
-        payment_status: "pending",
-        payment_method: "Online",
-        p24_session_id: sessionId,
-        p24_token: p24Token, // zapisujemy token z P24
-      })
-      .eq("id", orderId);
+    const rf = await updateOrderWithFallback(
+      { ...baseValues, payment_status: "failed" },
+      "failed"
+    );
+    if (rf === "error") return NextResponse.json({ error: "Update failed" }, { status: 500 });
+    if (rf === "not-found") return NextResponse.json({ ok: false, error: "Order not found" }, { status: 400 });
 
-    const paymentUrl = `https://${host}/trnRequest/${p24Token}`;
-    return NextResponse.json({
-      paymentUrl,
-      returnUrl: p24_url_return,
-      token: p24Token,
-    });
-  } catch (e: unknown) {
-    console.error("[P24_CREATE_TRANSACTION_ERROR]", e);
-    const msg = e instanceof Error ? e.message : "Server error";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return NextResponse.json({ ok: false }, { status: 400 });
+  } catch {
+    return NextResponse.json({ error: "Server error" }, { status: 500 });
   }
 }
