@@ -21,6 +21,9 @@ const PRIVACY_URL =
   process.env.NEXT_PUBLIC_PRIVACY_URL || "https://www.sisiciechanow.pl/polityka-prywatnosci";
 const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || "";
 
+// prosta, solidna walidacja
+const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 /* ------------------- utils ------------------- */
 function normalizePlPhone(input: string): string | null {
   const d = String(input).replace(/\D/g, "");
@@ -303,7 +306,7 @@ const OrdersHistory: React.FC<{ supabaseClient: ReturnType<typeof createClientCo
     supabaseClient
       .from("orders")
       .select("id, created_at, status, total_price, selected_option, items")
-      .eq("user", userId) // poprawione pole
+      .eq("user", userId)
       .order("created_at", { ascending: false })
       .limit(15)
       .then(({ data, error }) => {
@@ -402,9 +405,7 @@ const LoyaltyProgram: React.FC<{ supabaseClient: ReturnType<typeof createClientC
 export default function FloatingAuthButtons() {
   const router = useRouter();
   const session = useSession();
-  const supabase = createClientComponentClient({
-    options: { auth: { flowType: "implicit" } },
-  });
+  const supabase = createClientComponentClient(); // PKCE (domyślnie), bez 'implicit'
   const isLoggedIn = !!session?.user;
 
   const toggleCart = useCartStore(s => s.toggleCart);
@@ -457,6 +458,7 @@ export default function FloatingAuthButtons() {
     async (e: React.FormEvent) => {
       e.preventDefault();
 
+      if (!emailRegex.test(email)) return alert("Podaj poprawny adres e-mail.");
       if (!acceptTerms) return alert("Musisz zaakceptować regulamin i politykę prywatności.");
       if (!captchaToken && TURNSTILE_SITE_KEY) return alert("Potwierdź proszę captcha.");
       if (password !== confirmPassword) return alert("Hasła muszą być identyczne.");
@@ -473,11 +475,7 @@ export default function FloatingAuthButtons() {
             role: "client",
             full_name: fullName,
             phone: normalizedPhone,
-            legal_accept: {
-              terms: true,
-              privacy: true,
-              at: new Date().toISOString(),
-            },
+            legal_accept: { terms: true, privacy: true, at: new Date().toISOString() },
           },
         },
       });
@@ -487,7 +485,7 @@ export default function FloatingAuthButtons() {
       alert("Zarejestrowano! Sprawdź skrzynkę i potwierdź adres e-mail.");
       setShowModal(false);
     },
-    [acceptTerms, captchaToken, email, password, confirmPassword, fullName, phone, supabase]
+    [email, password, confirmPassword, acceptTerms, captchaToken, phone, fullName, supabase]
   );
 
   const handleLogout = useCallback(async () => {
@@ -695,14 +693,12 @@ const ClientPanelWithTabsWrapper: React.FC<{
                 required
               />
 
-              {/* Autocomplete adresu – zgodnie z API komponentu */}
               <AddressAutocomplete
-                onAddressSelect={(addr/*, lat, lng */) => setLocalAddress(addr)}
+                onAddressSelect={(addr /*, lat, lng */) => setLocalAddress(addr)}
                 setCity={() => {}}
                 setPostalCode={() => {}}
                 setFlatNumber={() => {}}
               />
-              {/* Podgląd wybranego adresu */}
               {localAddress && (
                 <input
                   type="text"
