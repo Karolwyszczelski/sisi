@@ -1,25 +1,21 @@
-// src/components/ReservationCalendarModal.tsx
 "use client";
 
 import { useState, useEffect } from "react";
 import { X } from "lucide-react";
-import { createClient } from "@supabase/supabase-js";
 import { DayPicker } from "react-day-picker";
 import "react-day-picker/dist/style.css";
 import { format, startOfMonth, endOfMonth, isSameDay } from "date-fns";
 import { pl } from "date-fns/locale";
+import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-interface Props {
-  isOpen: boolean;
-  onClose(): void;
-}
+type Props = { isOpen: boolean; onClose: () => void; id?: string };
 
-export default function ReservationCalendarModal({ isOpen, onClose }: Props) {
+export default function ReservationModal({ isOpen, onClose, id }: Props) {
   // sloty 11:30–22:00 co 90 min
   const SLOT_DURATION_MIN = 90;
   const START_HOUR = 11;
@@ -33,11 +29,11 @@ export default function ReservationCalendarModal({ isOpen, onClose }: Props) {
   const [countsPerDay, setCountsPerDay] = useState<Record<string, number>>({});
   const [selectedDate, setSelectedDate] = useState<Date>();
   const [countsPerSlot, setCountsPerSlot] = useState<Record<string, number>>({});
-  const [selectedTime, setSelectedTime] = useState<string>("");
-  const [guestCount, setGuestCount] = useState<number>(1);
-  const [customerName, setCustomerName] = useState<string>("");
-  const [customerPhone, setCustomerPhone] = useState<string>("");
-  const [notes, setNotes] = useState<string>("");
+  const [selectedTime, setSelectedTime] = useState("");
+  const [guestCount, setGuestCount] = useState(1);
+  const [customerName, setCustomerName] = useState("");
+  const [customerPhone, setCustomerPhone] = useState("");
+  const [notes, setNotes] = useState("");
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -46,13 +42,11 @@ export default function ReservationCalendarModal({ isOpen, onClose }: Props) {
     (async () => {
       const from = startOfMonth(currentMonth).toISOString();
       const to = endOfMonth(currentMonth).toISOString();
-      const { data, error } = await supabase
+      const { data } = await supabase
         .from("reservations")
         .select("reservation_date")
         .gte("reservation_date", from)
         .lte("reservation_date", to);
-
-      if (error) return;
 
       const perDay: Record<string, number> = {};
       data?.forEach((r: any) => {
@@ -64,18 +58,13 @@ export default function ReservationCalendarModal({ isOpen, onClose }: Props) {
   }, [currentMonth]);
 
   useEffect(() => {
-    if (!selectedDate) {
-      setCountsPerSlot({});
-      return;
-    }
+    if (!selectedDate) { setCountsPerSlot({}); return; }
     (async () => {
       const day = format(selectedDate, "yyyy-MM-dd");
-      const { data, error } = await supabase
+      const { data } = await supabase
         .from("reservations")
         .select("reservation_time")
         .eq("reservation_date", day);
-
-      if (error) return;
 
       const perSlot: Record<string, number> = {};
       data?.forEach((r: any) => {
@@ -100,7 +89,6 @@ export default function ReservationCalendarModal({ isOpen, onClose }: Props) {
       list.push(format(d, "HH:mm"));
       d = new Date(d.getTime() + SLOT_DURATION_MIN * 60000);
     }
-    // jeśli dziś, ukryj minione godziny
     const now = new Date();
     if (isSameDay(now, selectedDate)) {
       const nowStr = format(now, "HH:mm");
@@ -114,16 +102,16 @@ export default function ReservationCalendarModal({ isOpen, onClose }: Props) {
     free: (day: Date) => {
       const key = format(day, "yyyy-MM-dd");
       const c = countsPerDay[key] || 0;
-      return c < SLOT_COUNT * MAX_PER_SLOT;
+      return c < MAX_PER_SLOT * SLOT_COUNT;
     },
     partial: (day: Date) => {
       const key = format(day, "yyyy-MM-dd");
       const c = countsPerDay[key] || 0;
-      return c > 0 && c < SLOT_COUNT * MAX_PER_SLOT;
+      return c > 0 && c < MAX_PER_SLOT * SLOT_COUNT;
     },
     full: (day: Date) => {
       const key = format(day, "yyyy-MM-dd");
-      return countsPerDay[key] >= SLOT_COUNT * MAX_PER_SLOT;
+      return countsPerDay[key] >= MAX_PER_SLOT * SLOT_COUNT;
     },
     selected: (day: Date) =>
       selectedDate ? format(day, "yyyy-MM-dd") === format(selectedDate, "yyyy-MM-dd") : false,
@@ -137,9 +125,7 @@ export default function ReservationCalendarModal({ isOpen, onClose }: Props) {
     selected: "bg-black text-white",
   } as const;
 
-  const isValid = Boolean(
-    selectedDate && selectedTime && customerName.trim() && customerPhone.trim()
-  );
+  const isValid = Boolean(selectedDate && selectedTime && customerName.trim() && customerPhone.trim());
 
   async function handleSubmit(e?: React.FormEvent) {
     e?.preventDefault();
@@ -147,18 +133,20 @@ export default function ReservationCalendarModal({ isOpen, onClose }: Props) {
     if (!isValid || loading) return;
     setLoading(true);
     try {
-      const day = format(selectedDate!, "yyyy-MM-dd");
-      const payload = {
-        reservation_date: day,
-        reservation_time: selectedTime,
-        number_of_guests: guestCount,
-        customer_name: customerName.trim(),
-        customer_phone: customerPhone.trim(),
-        notes,
-        status: "pending",
-      };
-      const { error } = await supabase.from("reservations").insert([payload]);
-      if (error) throw new Error(error.message);
+      const res = await fetch("/api/reservations/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          date: format(selectedDate!, "yyyy-MM-dd"),
+          time: selectedTime,
+          guests: guestCount,
+          name: customerName,
+          phone: customerPhone,
+          note: notes,
+        }),
+      });
+      const jr = await res.json();
+      if (!res.ok) throw new Error(jr.error || "Błąd zapisu");
       alert("Rezerwacja zapisana.");
       onClose();
     } catch (err: any) {
@@ -175,7 +163,7 @@ export default function ReservationCalendarModal({ isOpen, onClose }: Props) {
       className="fixed inset-0 z-[70] flex items-center justify-center"
       role="dialog"
       aria-modal="true"
-      id="reservation-modal"
+      id={id || "reservation-modal"}
       onMouseDown={onClose}
     >
       <div className="absolute inset-0 bg-black/60" aria-hidden="true" />
@@ -284,9 +272,7 @@ export default function ReservationCalendarModal({ isOpen, onClose }: Props) {
               </>
             )}
 
-            {errorMsg && (
-              <div className="text-sm text-red-600">{errorMsg}</div>
-            )}
+            {errorMsg && <div className="text-sm text-red-600">{errorMsg}</div>}
 
             <button
               type="submit"
