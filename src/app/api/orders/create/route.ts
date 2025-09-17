@@ -1,5 +1,6 @@
 // src/app/api/orders/create/route.ts
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
@@ -21,13 +22,15 @@ const supabaseAdmin = createClient(
 const TURNSTILE_SECRET_KEY = process.env.TURNSTILE_SECRET_KEY || "";
 
 /* ================= Twilio =================== */
-const twilioClient = Twilio(
-  process.env.TWILIO_ACCOUNT_SID!,
-  process.env.TWILIO_AUTH_TOKEN!
-);
+const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID || "";
+const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN || "";
 const STAFF_PHONE_NUMBER = process.env.STAFF_PHONE_NUMBER || "";
 const TWILIO_FROM_NUMBER =
   process.env.TWILIO_FROM_NUMBER || process.env.TWILIO_PHONE_NUMBER || "";
+const twilioClient =
+  TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN
+    ? Twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+    : null;
 
 /* ====== Wersje/Linki regulaminów (do maili) ====== */
 const TERMS_VERSION = process.env.TERMS_VERSION || "2025-01";
@@ -225,8 +228,6 @@ function sanitizeOrderStatus(raw: unknown): AllowedOrderStatus {
 }
 
 /* ===== Haversine ===== */
-// Używamy geometrycznej odległości w linii prostej (Haversine). Jeśli kiedyś
-// chcesz liczyć po drogach Google, wprowadź serwis Distance Matrix w tym miejscu.
 const haversineKm = (a:{lat:number;lng:number}, b:{lat:number;lng:number}) => {
   const R = 6371;
   const dLat = (b.lat - a.lat) * Math.PI / 180;
@@ -362,7 +363,12 @@ export async function POST(req: Request) {
 
     // 2.0) Weryfikacja Turnstile (jeśli skonfigurowana)
     if (TURNSTILE_SECRET_KEY) {
-      const token = raw?.turnstileToken || raw?.token || raw?.cf_turnstile_token;
+      const headerToken =
+        req.headers.get("cf-turnstile-response") ||
+        req.headers.get("CF-Turnstile-Response") ||
+        req.headers.get("x-turnstile-token");
+      const token = raw?.turnstileToken || raw?.token || raw?.cf_turnstile_token || headerToken;
+
       if (!token) {
         return NextResponse.json({ error: "Brak weryfikacji antybot." }, { status: 400 });
       }
@@ -378,9 +384,11 @@ export async function POST(req: Request) {
         });
         const jr = await ver.json();
         if (!jr?.success) {
+          console.error("[turnstile.verify] fail", jr?.["error-codes"] || jr);
           return NextResponse.json({ error: "Nieudana weryfikacja formularza." }, { status: 400 });
         }
-      } catch {
+      } catch (e) {
+        console.error("[turnstile.verify] error", e);
         return NextResponse.json({ error: "Błąd weryfikacji formularza." }, { status: 400 });
       }
     }
@@ -414,7 +422,6 @@ export async function POST(req: Request) {
         { lat: Number(n.delivery_lat), lng: Number(n.delivery_lng) }
       );
 
-      // sortujemy i wybieramy strefę: min <= d < max (brak dublowania na granicy)
       const zone = (zones as any[])
         .sort((a, b) => Number(a.min_distance_km) - Number(b.min_distance_km))
         .find((z) => distance_km >= Number(z.min_distance_km) && distance_km < Number(z.max_distance_km));
@@ -423,10 +430,8 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "Adres poza zasięgiem dostawy." }, { status: 400 });
       }
 
-      // podstawa (koszyk bez dostawy) – to ona liczy się do progów i FREE
       const base = Math.max(0, Number(n.total_price || 0) - Number(n.delivery_cost || 0));
 
-      // min. wartość zamówienia dla dostawy
       if (base < Number(zone.min_order_value || 0)) {
         return NextResponse.json(
           { error: `Minimalna wartość zamówienia to ${Number(zone.min_order_value).toFixed(2)} zł.` },
@@ -434,7 +439,6 @@ export async function POST(req: Request) {
         );
       }
 
-      // rodzaj cennika: per_km vs flat; obsłuż zarówno cost_per_km/flat_cost jak i pojedyncze "cost"
       const pricingType: string =
         (zone.pricing_type as string) ??
         (Number(zone.min_distance_km) === 0 ? "flat" : "per_km");
@@ -447,18 +451,15 @@ export async function POST(req: Request) {
       let serverCost =
         pricingType === "per_km" ? perKmRate * distance_km : flatCost;
 
-      // dostawa free od progu (liczone od base)
       if (zone.free_over != null && base >= Number(zone.free_over)) {
         serverCost = 0;
       }
 
-      // zaokrąglenie do 2 miejsc
       const rounded = Math.max(0, Math.round(serverCost * 100) / 100);
 
       n.delivery_cost = rounded;
       n.total_price = Math.max(0, Math.round((base + rounded) * 100) / 100);
     }
-    // jeśli brak współrzędnych — odpuszczamy twardą walidację (frontend powinien je dosyłać)
 
     // 3) Dociągnij produkty po STRING id
     const productIds = n.itemsArray
@@ -489,7 +490,7 @@ export async function POST(req: Request) {
         flat_number: n.flat_number,
         selected_option: n.selected_option,
         payment_method: n.payment_method,
-        payment_status: n.payment_status, // "pending" dla Online
+        payment_status: n.payment_status,
         items: itemsForOrdersColumn,
         total_price: n.total_price,
         delivery_cost: n.delivery_cost,
@@ -580,7 +581,7 @@ export async function POST(req: Request) {
 
     // 7) SMS do personelu
     try {
-      if (TWILIO_FROM_NUMBER && STAFF_PHONE_NUMBER) {
+      if (twilioClient && TWILIO_FROM_NUMBER && STAFF_PHONE_NUMBER) {
         const to = normalizePhone(STAFF_PHONE_NUMBER);
         const from = TWILIO_FROM_NUMBER;
         if (to && from) {
