@@ -1,4 +1,4 @@
-// src/app/verify/Client.tsx   ← (zwróć uwagę na wielką literę C)
+// src/app/verify/Client.tsx
 "use client";
 
 import { useEffect, useState } from "react";
@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 
 export default function VerifyClient() {
-  // PKCE domyślnie – bez flowType: "implicit"
+  // PKCE (domyślnie) – nie nadpisujemy flowType
   const supabase = createClientComponentClient();
   const router = useRouter();
   const [msg, setMsg] = useState("Weryfikuję link…");
@@ -19,7 +19,7 @@ export default function VerifyClient() {
         const hp = new URLSearchParams(url.hash.replace(/^#/, ""));
         const next = sp.get("next") || "/?verified=1";
 
-        // Błąd zwrócony w URL
+        // komunikaty błędu przekazane w URL
         const err = sp.get("error") || sp.get("error_code");
         const errDesc = sp.get("error_description");
         if (err || errDesc) throw new Error(errDesc || err!);
@@ -29,13 +29,14 @@ export default function VerifyClient() {
         if (code) {
           const { error } = await supabase.auth.exchangeCodeForSession(code);
           if (error) throw error;
+          // wyczyść query/hash, żeby nie zostało w historii
           window.history.replaceState({}, document.title, url.origin + url.pathname);
           setMsg("Adres e-mail potwierdzony. Loguję…");
           router.replace(next);
           return;
         }
 
-        // 2) Implicit hash (#access_token & #refresh_token)
+        // 2) Implicit hash (#access_token & #refresh_token) – fallback
         const access_token = hp.get("access_token");
         const refresh_token = hp.get("refresh_token");
         if (access_token && refresh_token) {
@@ -47,7 +48,7 @@ export default function VerifyClient() {
           return;
         }
 
-        // 3) Starsze linki OTP (token_hash + type)
+        // 3) Starsze linki OTP (token_hash + type) – fallback
         const token_hash = sp.get("token_hash");
         const type = sp.get("type") as "signup" | "magiclink" | "recovery" | "email_change" | null;
         if (token_hash && type) {
