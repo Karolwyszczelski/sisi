@@ -51,22 +51,9 @@ const nextConfig: NextConfig = {
           {
             key: "Permissions-Policy",
             value: [
-              "accelerometer=()",
-              "ambient-light-sensor=()",
-              "autoplay=()",
-              "camera=()",
-              "display-capture=()",
-              "encrypted-media=()",
-              "fullscreen=()",
-              "geolocation=()",
-              "gyroscope=()",
-              "magnetometer=()",
-              "microphone=()",
-              "midi=()",
-              "payment=()",
-              "picture-in-picture=()",
-              "usb=()",
-              "xr-spatial-tracking=()",
+              "accelerometer=()","ambient-light-sensor=()","autoplay=()","camera=()","display-capture=()",
+              "encrypted-media=()","fullscreen=()","geolocation=()","gyroscope=()","magnetometer=()",
+              "microphone=()","midi=()","payment=()","picture-in-picture=()","usb=()","xr-spatial-tracking=()",
             ].join(", "),
           },
           { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
@@ -80,6 +67,30 @@ const nextConfig: NextConfig = {
       { source: "/xmlrpc.php", headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }] },
       { source: "/category/:path*", headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }] },
       { source: "/tag/:path*", headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }] },
+    ];
+  },
+
+  // TWARDY CUT parametrów z dawnych WP (zapytania typu ?s=, ?p= itd.)
+  async redirects() {
+    const spamParams = ["s","p","m","paged","cat","attachment_id","replytocom"] as const;
+    const rules = spamParams.map((key) => ({
+      source: "/:path*",                             // dowolna ścieżka
+      has: [{ type: "query", key } as const],        // jeśli dany parametr istnieje
+      destination: "/gone",                          // przenosimy na /gone
+      permanent: false,                              // 302/307
+    }));
+    return rules;
+  },
+
+  // Dla pewności – legacy WP ścieżki na /gone (HTTP 200 z treścią /gone lub 410 w middleware)
+  async rewrites() {
+    return [
+      { source: "/wp-admin/:path*", destination: "/gone" },
+      { source: "/wp-content/:path*", destination: "/gone" },
+      { source: "/wp-includes/:path*", destination: "/gone" },
+      { source: "/xmlrpc.php", destination: "/gone" },
+      { source: "/category/:path*", destination: "/gone" },
+      { source: "/tag/:path*", destination: "/gone" },
     ];
   },
 };
