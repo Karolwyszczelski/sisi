@@ -1,11 +1,11 @@
 {
-  "redirects": [
-    { "source": "/:path*", "has": [{ "type": "query", "key": "s" }], "destination": "/gone", "permanent": false },
-    { "source": "/:path*", "has": [{ "type": "query", "key": "p" }], "destination": "/gone", "permanent": false },
-    { "source": "/:path*", "has": [{ "type": "query", "key": "m" }], "destination": "/gone", "permanent": false },
-    { "source": "/:path*", "has": [{ "type": "query", "key": "paged" }], "destination": "/gone", "permanent": false },
-    { "source": "/:path*", "has": [{ "type": "query", "key": "cat" }], "destination": "/gone", "permanent": false },
-    { "source": "/:path*", "has": [{ "type": "query", "key": "attachment_id" }], "destination": "/gone", "permanent": false },
-    { "source": "/:path*", "has": [{ "type": "query", "key": "replytocom" }], "destination": "/gone", "permanent": false }
+  "rewrites": [
+    { "source": "/:path*", "has": [{ "type": "query", "key": "s" }], "destination": "/gone" },
+    { "source": "/:path*", "has": [{ "type": "query", "key": "p" }], "destination": "/gone" },
+    { "source": "/:path*", "has": [{ "type": "query", "key": "m" }], "destination": "/gone" },
+    { "source": "/:path*", "has": [{ "type": "query", "key": "paged" }], "destination": "/gone" },
+    { "source": "/:path*", "has": [{ "type": "query", "key": "cat" }], "destination": "/gone" },
+    { "source": "/:path*", "has": [{ "type": "query", "key": "attachment_id" }], "destination": "/gone" },
+    { "source": "/:path*", "has": [{ "type": "query", "key": "replytocom" }], "destination": "/gone" }
   ]
 }
