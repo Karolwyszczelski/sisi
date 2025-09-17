@@ -17,6 +17,9 @@ const supabaseAdmin = createClient(
   { auth: { persistSession: false } }
 );
 
+/* ================= Turnstile =================== */
+const TURNSTILE_SECRET_KEY = process.env.TURNSTILE_SECRET_KEY || "";
+
 /* ================= Twilio =================== */
 const twilioClient = Twilio(
   process.env.TWILIO_ACCOUNT_SID!,
@@ -68,6 +71,15 @@ const normalizePhone = (phone?: string | null) => {
 
 const toArray = (val: any): any[] =>
   Array.isArray(val) ? val : val == null ? [] : [val];
+
+const clientIp = (req: Request) => {
+  const xff =
+    req.headers.get("cf-connecting-ip") ||
+    req.headers.get("x-forwarded-for") ||
+    req.headers.get("x-real-ip") ||
+    "";
+  return xff.split(",")[0].trim() || null;
+};
 
 /* ----- Parser składników ----- */
 const parseIngredients = (v: any): string[] => {
@@ -248,6 +260,7 @@ function normalizeBody(raw: any, req: Request) {
 
   // akceptacja prawna (z ciała lub auto)
   const ip =
+    req.headers.get("cf-connecting-ip") ||
     req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
     req.headers.get("x-real-ip") ||
     null;
@@ -305,6 +318,25 @@ function normalizeBody(raw: any, req: Request) {
 /* ===================== Handler ===================== */
 export async function POST(req: Request) {
   try {
+    // 0) Kill-switch (globalne włącz/wyłącz zamawianie)
+    {
+      const { data: cfg, error: cfgErr } = await supabaseAdmin
+        .from("restaurant_info")
+        .select("ordering_open")
+        .eq("id", 1)
+        .single();
+
+      if (cfgErr || !cfg) {
+        return NextResponse.json({ error: "Konfiguracja sklepu niedostępna." }, { status: 503 });
+      }
+      if (cfg.ordering_open === false) {
+        return NextResponse.json(
+          { error: "Zamawianie jest tymczasowo wyłączone. Zapraszamy później!" },
+          { status: 503 }
+        );
+      }
+    }
+
     // 1) Godziny (Europe/Warsaw)
     const nowPl = toZonedTime(new Date(), "Europe/Warsaw");
     const h = nowPl.getHours();
@@ -325,33 +357,54 @@ export async function POST(req: Request) {
     } catch {
       return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
     }
+
+    // 2.0) Weryfikacja Turnstile (jeśli skonfigurowana)
+    if (TURNSTILE_SECRET_KEY) {
+      const token = raw?.turnstileToken || raw?.token || raw?.cf_turnstile_token;
+      if (!token) {
+        return NextResponse.json({ error: "Brak weryfikacji antybot." }, { status: 400 });
+      }
+      try {
+        const ver = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({
+            secret: TURNSTILE_SECRET_KEY,
+            response: String(token),
+            remoteip: clientIp(req) || "",
+          }).toString(),
+        });
+        const jr = await ver.json();
+        if (!jr?.success) {
+          return NextResponse.json({ error: "Nieudana weryfikacja formularza." }, { status: 400 });
+        }
+      } catch {
+        return NextResponse.json({ error: "Błąd weryfikacji formularza." }, { status: 400 });
+      }
+    }
+
     const n = normalizeBody(raw, req);
 
-    // wymagamy e-maila i akceptacji
+    // wymagamy e-maila i pozycji
     if (!n.contact_email) {
       return NextResponse.json(
         { error: "Wymagany jest adres e-mail do potwierdzenia." },
         { status: 400 }
       );
     }
+    if (!Array.isArray(n.itemsArray) || n.itemsArray.length === 0) {
+      return NextResponse.json({ error: "Koszyk jest pusty." }, { status: 400 });
+    }
 
-    // 2.1) Walidacja strefy dostawy (serwer jako źródło prawdy)
-    if (n.selected_option === "delivery") {
-      const { data: zones, error: zErr } = await supabaseAdmin
-        .from("delivery_zones")
-        .select("*")
-        .eq("active", true);
-      const { data: rest, error: rErr } = await supabaseAdmin
-        .from("restaurant_info")
-        .select("lat,lng")
-        .eq("id", 1)
-        .single();
+    // 2.1) Walidacja strefy dostawy (serwer jako źródło prawdy — gdy mamy współrzędne)
+    if (n.selected_option === "delivery" && n.delivery_lat != null && n.delivery_lng != null) {
+      const [{ data: zones, error: zErr }, { data: rest, error: rErr }] = await Promise.all([
+        supabaseAdmin.from("delivery_zones").select("*").eq("active", true),
+        supabaseAdmin.from("restaurant_info").select("lat,lng").eq("id", 1).single(),
+      ]);
 
       if (zErr || rErr || !zones || !rest) {
         return NextResponse.json({ error: "Brak konfiguracji stref dostawy." }, { status: 500 });
-      }
-      if (n.delivery_lat == null || n.delivery_lng == null) {
-        return NextResponse.json({ error: "Brak współrzędnych adresu dostawy." }, { status: 400 });
       }
 
       const distance_km = haversineKm(
@@ -359,14 +412,16 @@ export async function POST(req: Request) {
         { lat: Number(n.delivery_lat), lng: Number(n.delivery_lng) }
       );
 
-      const zone = (zones as any[]).find(z =>
+      const zone = (zones as any[]).find((z) =>
         distance_km >= Number(z.min_distance_km) && distance_km <= Number(z.max_distance_km)
       );
       if (!zone) {
         return NextResponse.json({ error: "Adres poza zasięgiem dostawy." }, { status: 400 });
       }
 
-      const perKm = (zone.pricing_type ?? "per_km") === "per_km";
+      // koszt: domyślnie per_km; fallback do "min_distance_km === 0 => stały koszt"
+      const perKm =
+        (zone.pricing_type ?? (Number(zone.min_distance_km) === 0 ? "flat" : "per_km")) === "per_km";
       let serverCost = perKm ? Number(zone.cost) * distance_km : Number(zone.cost);
 
       const base = Math.max(0, Number(n.total_price || 0) - Number(n.delivery_cost || 0));
@@ -383,6 +438,7 @@ export async function POST(req: Request) {
       n.delivery_cost = rounded;
       n.total_price = Math.max(0, Math.round((base + rounded) * 100) / 100);
     }
+    // jeśli brak współrzędnych — odpuszczamy twardą walidację (frontend powinien je dosyłać)
 
     // 3) Dociągnij produkty po STRING id
     const productIds = n.itemsArray
@@ -413,7 +469,7 @@ export async function POST(req: Request) {
         flat_number: n.flat_number,
         selected_option: n.selected_option,
         payment_method: n.payment_method,
-        payment_status: n.payment_status,
+        payment_status: n.payment_status, // "pending" dla Online
         items: itemsForOrdersColumn,
         total_price: n.total_price,
         delivery_cost: n.delivery_cost,

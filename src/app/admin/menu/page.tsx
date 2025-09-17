@@ -1,8 +1,9 @@
+// src/app/admin/menu/page.tsx  (pełny plik z globalnym przełącznikiem zamawiania)
 "use client";
 
 import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
-import { Pencil, Trash, ToggleRight, ChevronDown } from "lucide-react";
+import { Pencil, Trash, ToggleRight, ChevronDown, Power } from "lucide-react";
 import debounce from "lodash.debounce";
 
 /* ===================== Typy ===================== */
@@ -87,9 +88,7 @@ function EditProductModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      {/* kontener modala z limitem wysokości i wewnętrznym scrollem */}
       <div className="flex w-full max-w-2xl max-h-[85vh] flex-col overflow-hidden rounded-xl bg-white shadow-xl">
-        {/* header */}
         <div className="flex items-center justify-between border-b px-5 py-3">
           <h3 className="text-xl font-bold">Edytuj produkt</h3>
           <button onClick={onClose} className="rounded border px-3 py-1 text-sm hover:bg-gray-50">
@@ -97,7 +96,6 @@ function EditProductModal({
           </button>
         </div>
 
-        {/* body (scroll) */}
         <div className="flex-1 overflow-y-auto px-5 py-4">
           {err && (
             <div className="mb-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -188,7 +186,6 @@ function EditProductModal({
           </div>
         </div>
 
-        {/* footer */}
         <div className="flex justify-end gap-2 border-t px-5 py-3">
           <button onClick={onClose} className="rounded border px-4 py-2 text-sm hover:bg-gray-50">
             Anuluj
@@ -217,22 +214,30 @@ export default function AdminMenuPage() {
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [editing, setEditing] = useState<Product | null>(null);
 
+  // GLOBALNE ZAMAWIANIE
+  const [orderingOpen, setOrderingOpen] = useState<boolean | null>(null);
+  const [toggleOrderingBusy, setToggleOrderingBusy] = useState(false);
+
   const fetchProducts = useCallback(async () => {
     setLoading(true);
     try {
-      const { data, error: err } = await supabase
-        .from<Product>("products")
-        .select("*")
-        .order("category", { ascending: true })
-        .order("subcategory", { ascending: true })
-        .order("name", { ascending: true });
+      const [{ data, error: err }, ri] = await Promise.all([
+        supabase
+          .from<Product>("products")
+          .select("*")
+          .order("category", { ascending: true })
+          .order("subcategory", { ascending: true })
+          .order("name", { ascending: true }),
+        supabase.from("restaurant_info").select("ordering_open").eq("id", 1).maybeSingle(),
+      ]);
 
       if (err) throw err;
       setProducts(data ?? []);
+      if (!ri.error && ri.data) setOrderingOpen(Boolean((ri.data as any).ordering_open));
       setError(null);
     } catch (e: any) {
-      console.error("Błąd pobierania produktów:", e);
-      setError(e.message || "Błąd ładowania produktów");
+      console.error("Błąd pobierania:", e);
+      setError(e.message || "Błąd ładowania danych");
     } finally {
       setLoading(false);
     }
@@ -240,14 +245,27 @@ export default function AdminMenuPage() {
 
   useEffect(() => {
     void fetchProducts();
-    const channel = supabase
+
+    const chProducts = supabase
       .channel("public:products")
       .on("postgres_changes", { event: "*", schema: "public", table: "products" }, () => {
         void fetchProducts();
       })
       .subscribe();
+
+    const chRestaurant = supabase
+      .channel("public:restaurant_info")
+      .on("postgres_changes", { event: "*", schema: "public", table: "restaurant_info", filter: "id=eq.1" }, (p) => {
+        const row = (p as any).new || (p as any).record;
+        if (row && typeof row.ordering_open === "boolean") {
+          setOrderingOpen(row.ordering_open);
+        }
+      })
+      .subscribe();
+
     return () => {
-      void supabase.removeChannel(channel);
+      void supabase.removeChannel(chProducts);
+      void supabase.removeChannel(chRestaurant);
     };
   }, [fetchProducts]);
 
@@ -259,7 +277,6 @@ export default function AdminMenuPage() {
       if (err) {
         console.error("Błąd aktualizacji dostępności:", err);
         alert(`Nie udało się zmienić dostępności: ${err.message}`);
-        // rollback
         setProducts((prev) => prev.map((p) => (p.id === id ? { ...p, available: current } : p)));
       }
     } catch (e: any) {
@@ -284,6 +301,27 @@ export default function AdminMenuPage() {
     } catch (e) {
       console.error("Błąd usuwania produktu (catch):", e);
       alert("Nie udało się usunąć produktu");
+    }
+  };
+
+  // GLOBAL TOGGLE
+  const flipOrdering = async () => {
+    if (orderingOpen == null) return;
+    setToggleOrderingBusy(true);
+    try {
+      const next = !orderingOpen;
+      // optymistycznie
+      setOrderingOpen(next);
+      const { error } = await supabase.from("restaurant_info").update({ ordering_open: next }).eq("id", 1);
+      if (error) {
+        setOrderingOpen(!next);
+        alert("Nie udało się zmienić statusu zamawiania: " + error.message);
+      }
+    } catch (e: any) {
+      setOrderingOpen((v) => !v);
+      alert("Nie udało się zmienić statusu zamawiania.");
+    } finally {
+      setToggleOrderingBusy(false);
     }
   };
 
@@ -332,27 +370,46 @@ export default function AdminMenuPage() {
       });
   }, [products, filterCat, sortKey, search]);
 
-  /* Debounce search */
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const onSearchChange = useCallback(
     debounce((v: string) => setSearch(v), 300),
     []
   );
 
-  /* Po zapisie z modala — aktualizacja listy lokalnie */
   const handleSaved = (updated: Product) => {
     setProducts((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
   };
 
   return (
     <div className="p-4 md:p-8 max-w-[1200px] mx-auto">
+      {/* Banner globalnego statusu */}
+      {orderingOpen === false && (
+        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-800">
+          Zamawianie jest obecnie <b>wyłączone</b>. Klienci nie mogą składać zamówień.
+        </div>
+      )}
+
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
         <div>
           <h1 className="text-3xl font-extrabold tracking-tight">Zarządzanie Menu</h1>
           {error && <p className="text-sm text-red-600 mt-1">{error}</p>}
         </div>
 
-        <div className="flex flex-wrap gap-3 w-full md:w-auto">
+        <div className="flex flex-wrap gap-3 w-full md:w-auto items-end">
+          {/* GLOBALNY PRZEŁĄCZNIK */}
+          <div className="flex items-end">
+            <button
+              onClick={flipOrdering}
+              disabled={orderingOpen == null || toggleOrderingBusy}
+              className={`flex items-center gap-2 rounded-lg px-4 py-2 font-medium shadow-sm border transition
+                ${orderingOpen ? "bg-green-600 text-white border-green-700 hover:bg-green-700" : "bg-gray-200 text-gray-800 border-gray-300 hover:bg-gray-300"}`}
+              title="Włącz/wyłącz przyjmowanie zamówień"
+            >
+              <Power className="w-4 h-4" />
+              {orderingOpen ? "Zamawianie: WŁĄCZONE" : "Zamawianie: WYŁĄCZONE"}
+            </button>
+          </div>
+
           <div className="flex-1 min-w-[160px]">
             <label className="block text-xs font-medium mb-1 uppercase text-gray-600">Kategoria</label>
             <select
@@ -436,24 +493,12 @@ export default function AdminMenuPage() {
               {loading
                 ? Array.from({ length: 6 }).map((_, i) => (
                     <tr key={i} className="animate-pulse">
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="h-4 w-4 bg-gray-200 rounded" />
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="h-4 w-40 bg-gray-200 rounded" />
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="h-4 w-16 bg-gray-200 rounded" />
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="h-4 w-32 bg-gray-200 rounded" />
-                      </td>
-                      <td className="px-6 py-4 text-center">
-                        <div className="h-6 w-16 bg-gray-200 rounded-full inline-block" />
-                      </td>
-                      <td className="px-6 py-4 text-right">
-                        <div className="h-4 w-28 bg-gray-200 rounded inline-block" />
-                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap"><div className="h-4 w-4 bg-gray-200 rounded" /></td>
+                      <td className="px-6 py-4"><div className="h-4 w-40 bg-gray-200 rounded" /></td>
+                      <td className="px-6 py-4"><div className="h-4 w-16 bg-gray-200 rounded" /></td>
+                      <td className="px-6 py-4"><div className="h-4 w-32 bg-gray-200 rounded" /></td>
+                      <td className="px-6 py-4 text-center"><div className="h-6 w-16 bg-gray-200 rounded-full inline-block" /></td>
+                      <td className="px-6 py-4 text-right"><div className="h-4 w-28 bg-gray-200 rounded inline-block" /></td>
                     </tr>
                   ))
                 : filtered.length === 0
@@ -468,9 +513,7 @@ export default function AdminMenuPage() {
                     <tr key={it.id} className={i % 2 === 0 ? "bg-white" : "bg-gray-50"}>
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">{i + 1}</td>
                       <td className="px-6 py-4 text-sm">{it.name}</td>
-                      <td className="px-6 py-4 text-sm">
-                        {parseFloat(it.price || "0").toFixed(2)} zł
-                      </td>
+                      <td className="px-6 py-4 text-sm">{parseFloat(it.price || "0").toFixed(2)} zł</td>
                       <td className="px-6 py-4 text-sm">
                         {it.subcategory ? `${it.category} > ${it.subcategory}` : it.category}
                       </td>
@@ -572,7 +615,6 @@ export default function AdminMenuPage() {
             ))}
       </div>
 
-      {/* Modal edycji */}
       {editing && (
         <EditProductModal
           product={editing}
