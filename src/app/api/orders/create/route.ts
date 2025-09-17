@@ -225,6 +225,8 @@ function sanitizeOrderStatus(raw: unknown): AllowedOrderStatus {
 }
 
 /* ===== Haversine ===== */
+// Używamy geometrycznej odległości w linii prostej (Haversine). Jeśli kiedyś
+// chcesz liczyć po drogach Google, wprowadź serwis Distance Matrix w tym miejscu.
 const haversineKm = (a:{lat:number;lng:number}, b:{lat:number;lng:number}) => {
   const R = 6371;
   const dLat = (b.lat - a.lat) * Math.PI / 180;
@@ -396,7 +398,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Koszyk jest pusty." }, { status: 400 });
     }
 
-    // 2.1) Walidacja strefy dostawy (serwer jako źródło prawdy — gdy mamy współrzędne)
+    // 2.1) Walidacja strefy dostawy (gdy mamy współrzędne)
     if (n.selected_option === "delivery" && n.delivery_lat != null && n.delivery_lng != null) {
       const [{ data: zones, error: zErr }, { data: rest, error: rErr }] = await Promise.all([
         supabaseAdmin.from("delivery_zones").select("*").eq("active", true),
@@ -412,21 +414,19 @@ export async function POST(req: Request) {
         { lat: Number(n.delivery_lat), lng: Number(n.delivery_lng) }
       );
 
-      const zone = (zones as any[]).find((z) =>
-        distance_km >= Number(z.min_distance_km) && distance_km <= Number(z.max_distance_km)
-      );
+      // sortujemy i wybieramy strefę: min <= d < max (brak dublowania na granicy)
+      const zone = (zones as any[])
+        .sort((a, b) => Number(a.min_distance_km) - Number(b.min_distance_km))
+        .find((z) => distance_km >= Number(z.min_distance_km) && distance_km < Number(z.max_distance_km));
+
       if (!zone) {
         return NextResponse.json({ error: "Adres poza zasięgiem dostawy." }, { status: 400 });
       }
 
-      // koszt: domyślnie per_km; fallback do "min_distance_km === 0 => stały koszt"
-      const perKm =
-        (zone.pricing_type ?? (Number(zone.min_distance_km) === 0 ? "flat" : "per_km")) === "per_km";
-      let serverCost = perKm ? Number(zone.cost) * distance_km : Number(zone.cost);
-
+      // podstawa (koszyk bez dostawy) – to ona liczy się do progów i FREE
       const base = Math.max(0, Number(n.total_price || 0) - Number(n.delivery_cost || 0));
-      if (zone.free_over != null && base >= Number(zone.free_over)) serverCost = 0;
 
+      // min. wartość zamówienia dla dostawy
       if (base < Number(zone.min_order_value || 0)) {
         return NextResponse.json(
           { error: `Minimalna wartość zamówienia to ${Number(zone.min_order_value).toFixed(2)} zł.` },
@@ -434,7 +434,27 @@ export async function POST(req: Request) {
         );
       }
 
+      // rodzaj cennika: per_km vs flat; obsłuż zarówno cost_per_km/flat_cost jak i pojedyncze "cost"
+      const pricingType: string =
+        (zone.pricing_type as string) ??
+        (Number(zone.min_distance_km) === 0 ? "flat" : "per_km");
+
+      const perKmRate =
+        Number(zone.cost_per_km ?? zone.per_km ?? zone.zl_per_km ?? zone.cost ?? 0);
+      const flatCost =
+        Number(zone.flat_cost ?? zone.stala ?? zone.cost ?? 0);
+
+      let serverCost =
+        pricingType === "per_km" ? perKmRate * distance_km : flatCost;
+
+      // dostawa free od progu (liczone od base)
+      if (zone.free_over != null && base >= Number(zone.free_over)) {
+        serverCost = 0;
+      }
+
+      // zaokrąglenie do 2 miejsc
       const rounded = Math.max(0, Math.round(serverCost * 100) / 100);
+
       n.delivery_cost = rounded;
       n.total_price = Math.max(0, Math.round((base + rounded) * 100) / 100);
     }
