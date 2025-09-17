@@ -4,7 +4,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import ReservationModal from "../components/ReservationModal";
+import ReservationModal from "@/components/ReservationModal";
 
 export default function OnasSection() {
   const [isResOpen, setResOpen] = useState(false);
@@ -13,17 +13,17 @@ export default function OnasSection() {
     className = "",
     label = "Zarezerwuj stolik",
   }: { className?: string; label?: string }) => (
-    <Link
-      href="#"
-      onClick={(e) => {
-        e.preventDefault();
-        setResOpen(true);
-      }}
+    <button
+      type="button"
+      onClick={() => setResOpen(true)}
       className={`inline-flex items-center justify-center rounded-full px-6 py-3 text-sm md:text-base font-semibold text-black bg-white hover:bg-neutral-200 transition ${className}`}
       aria-label="Otwórz okno rezerwacji stolika"
+      aria-haspopup="dialog"
+      aria-expanded={isResOpen}
+      aria-controls="reservation-modal"
     >
       {label}
-    </Link>
+    </button>
   );
 
   const FeatureCard = ({
@@ -49,13 +49,12 @@ export default function OnasSection() {
         id="onas"
         className="
           relative w-full text-white overflow-hidden
-          bg-transparent
-          md:bg-[url('/backgroundsisi.jpg')] md:bg-cover md:bg-center md:bg-no-repeat
+          bg-[url('/backgroundsisi.jpg')] bg-cover bg-center bg-no-repeat
         "
         aria-labelledby="onas-heading"
       >
-        {/* overlay: tylko desktop, by nie zasłaniać mobilnego stałego tła z layoutu */}
-        <div className="absolute inset-0 bg-black/50 hidden md:block" aria-hidden="true" />
+        {/* overlay */}
+        <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-black/40 to-black/60" aria-hidden="true" />
 
         <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-10 py-14 md:py-20">
           {/* Nagłówek + opis */}
@@ -87,15 +86,15 @@ export default function OnasSection() {
 
             {/* Statystyki */}
             <div className="mt-6 grid grid-cols-3 gap-3 max-w-xl w-full justify-items-center">
-              <div className="rounded-xl border border-white/20 bg-neutral-900/70 px-4 py-3 text-center">
+              <div className="rounded-xl border border-white/25 bg-neutral-900/80 px-4 py-3 text-center">
                 <div className="text-lg md:text-2xl font-extrabold">100%</div>
                 <div className="text-[11px] md:text-xs text-neutral-200">Świeże składniki</div>
               </div>
-              <div className="rounded-xl border border-white/20 bg-neutral-900/70 px-4 py-3 text-center">
+              <div className="rounded-xl border border-white/25 bg-neutral-900/80 px-4 py-3 text-center">
                 <div className="text-lg md:text-2xl font-extrabold">#1</div>
                 <div className="text-[11px] md:text-xs text-neutral-200">Smak w okolicy</div>
               </div>
-              <div className="rounded-xl border border-white/20 bg-neutral-900/70 px-4 py-3 text-center">
+              <div className="rounded-xl border border-white/25 bg-neutral-900/80 px-4 py-3 text-center">
                 <div className="text-lg md:text-2xl font-extrabold">24/7</div>
                 <div className="text-[11px] md:text-xs text-neutral-200">Rezerwacje online</div>
               </div>
@@ -142,7 +141,11 @@ export default function OnasSection() {
         </div>
 
         {isResOpen && (
-          <ReservationModal isOpen={isResOpen} onClose={() => setResOpen(false)} />
+          <ReservationModal
+            isOpen={isResOpen}
+            onClose={() => setResOpen(false)}
+            id="reservation-modal"
+          />
         )}
       </section>
     </>
