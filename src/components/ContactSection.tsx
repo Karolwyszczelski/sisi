@@ -18,9 +18,13 @@ export default function ContactSection() {
             <p className="text-sm mb-4">
               <strong>Godziny otwarcia:</strong>
               <br />
-              Pon - Pt: 11:00 - 22:00
+              Pon - Czw: 11:00 - 22:00
               <br />
-              Sob - Nd: 11:00 - 24:00
+              Pt - Sob: 11:00 - 24:00 - Bar
+              Pt - Sob: 11:00 - 22:00 - Kuchnia
+              <br />
+              Niedziela: 11:00 - 22:00
+              <br />
             </p>
             <p className="text-sm mb-4">
               <strong>Telefon:</strong>{" "}

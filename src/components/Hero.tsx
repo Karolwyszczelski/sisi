@@ -183,7 +183,7 @@ export default function Hero() {
           {/* SLIDE 2: PANCAKE */}
           <div className="w-1/2 h-full flex items-start justify-center">
             <div className="relative w-full max-w-sm mx-auto">
-              <span className="block text-center text-[clamp(44px,18vw,68px)] font-extrabold leading-none z-0 mt-[100px]">
+              <span className="block text-center text-[clamp(44px,18vw,68px)] font-extrabold leading-none z-0 mt-[70px]">
                 Pancake
               </span>
               <Image

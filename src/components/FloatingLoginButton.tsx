@@ -1,7 +1,7 @@
 // src/app/components/FloatingAuthButtons.tsx
 "use client";
 
-import React, { useState, useEffect, memo, useCallback, useMemo, useRef } from "react";
+import React, { useState, useEffect, memo, useCallback, useRef } from "react";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 import { useSession, Session } from "@supabase/auth-helpers-react";
 import { ShoppingCart, User, X } from "lucide-react";
@@ -53,7 +53,6 @@ const TurnstileBox: React.FC<{ onVerify: (token: string) => void }> = ({ onVerif
       });
     }
 
-    // doładowanie skryptu jeśli nie ma
     if (!window.turnstile) {
       const id = "cf-turnstile-api";
       if (!document.getElementById(id)) {
@@ -65,7 +64,6 @@ const TurnstileBox: React.FC<{ onVerify: (token: string) => void }> = ({ onVerif
         s.onload = render;
         document.head.appendChild(s);
       } else {
-        // może już się ładuje – spróbuj wyrenderować po chwili
         const t = setInterval(() => {
           if (window.turnstile) {
             clearInterval(t);
@@ -154,7 +152,6 @@ const RegistrationModal = memo(({
           required
         />
 
-        {/* Turnstile */}
         {TURNSTILE_SITE_KEY ? (
           <div>
             <TurnstileBox onVerify={setCaptchaToken} />
@@ -306,7 +303,7 @@ const OrdersHistory: React.FC<{ supabaseClient: ReturnType<typeof createClientCo
     supabaseClient
       .from("orders")
       .select("id, created_at, status, total_price, selected_option, items")
-      .eq("user_id", userId) // <— poprawione
+      .eq("user", userId) // poprawione pole
       .order("created_at", { ascending: false })
       .limit(15)
       .then(({ data, error }) => {
@@ -405,7 +402,9 @@ const LoyaltyProgram: React.FC<{ supabaseClient: ReturnType<typeof createClientC
 export default function FloatingAuthButtons() {
   const router = useRouter();
   const session = useSession();
-  const supabase = createClientComponentClient();
+  const supabase = createClientComponentClient({
+    options: { auth: { flowType: "implicit" } },
+  });
   const isLoggedIn = !!session?.user;
 
   const toggleCart = useCartStore(s => s.toggleCart);
@@ -622,7 +621,6 @@ const ClientPanelWithTabsWrapper: React.FC<{
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // walidacja i normalizacja telefonu
     const norm = normalizePlPhone(localPhone);
     if (!norm) return alert("Podaj prawidłowy numer telefonu (+48…).");
 
@@ -696,7 +694,24 @@ const ClientPanelWithTabsWrapper: React.FC<{
                 onChange={e => setLocalEmail(e.target.value)}
                 required
               />
-              <AddressAutocomplete value={localAddress} onSelect={setLocalAddress} />
+
+              {/* Autocomplete adresu – zgodnie z API komponentu */}
+              <AddressAutocomplete
+                onAddressSelect={(addr/*, lat, lng */) => setLocalAddress(addr)}
+                setCity={() => {}}
+                setPostalCode={() => {}}
+                setFlatNumber={() => {}}
+              />
+              {/* Podgląd wybranego adresu */}
+              {localAddress && (
+                <input
+                  type="text"
+                  readOnly
+                  value={localAddress}
+                  className="w-full border rounded px-3 py-2 text-gray-700 bg-gray-50"
+                />
+              )}
+
               <hr />
               <input
                 type="password"
