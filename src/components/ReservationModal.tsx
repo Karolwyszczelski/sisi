@@ -6,7 +6,7 @@ import { X } from "lucide-react";
 import { createClient } from "@supabase/supabase-js";
 import { DayPicker } from "react-day-picker";
 import "react-day-picker/dist/style.css";
-import { format, startOfMonth, endOfMonth } from "date-fns";
+import { format, startOfMonth, endOfMonth, isSameDay } from "date-fns";
 import { pl } from "date-fns/locale";
 
 const supabase = createClient(
@@ -20,6 +20,7 @@ interface Props {
 }
 
 export default function ReservationCalendarModal({ isOpen, onClose }: Props) {
+  // sloty 11:30–22:00 co 90 min
   const SLOT_DURATION_MIN = 90;
   const START_HOUR = 11;
   const START_MIN = 30;
@@ -37,17 +38,21 @@ export default function ReservationCalendarModal({ isOpen, onClose }: Props) {
   const [customerName, setCustomerName] = useState<string>("");
   const [customerPhone, setCustomerPhone] = useState<string>("");
   const [notes, setNotes] = useState<string>("");
+  const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   useEffect(() => {
     if (!currentMonth) return;
     (async () => {
       const from = startOfMonth(currentMonth).toISOString();
       const to = endOfMonth(currentMonth).toISOString();
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("reservations")
         .select("reservation_date")
         .gte("reservation_date", from)
         .lte("reservation_date", to);
+
+      if (error) return;
 
       const perDay: Record<string, number> = {};
       data?.forEach((r: any) => {
@@ -65,10 +70,12 @@ export default function ReservationCalendarModal({ isOpen, onClose }: Props) {
     }
     (async () => {
       const day = format(selectedDate, "yyyy-MM-dd");
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("reservations")
         .select("reservation_time")
         .eq("reservation_date", day);
+
+      if (error) return;
 
       const perSlot: Record<string, number> = {};
       data?.forEach((r: any) => {
@@ -80,19 +87,26 @@ export default function ReservationCalendarModal({ isOpen, onClose }: Props) {
       setCustomerName("");
       setCustomerPhone("");
       setNotes("");
+      setErrorMsg(null);
     })();
   }, [selectedDate]);
 
   const generateSlots = () => {
     if (!selectedDate) return [];
-    const arr: string[] = [];
+    const list: string[] = [];
     let d = new Date(selectedDate);
     d.setHours(START_HOUR, START_MIN, 0, 0);
     for (let i = 0; i < SLOT_COUNT; i++) {
-      arr.push(format(d, "HH:mm"));
+      list.push(format(d, "HH:mm"));
       d = new Date(d.getTime() + SLOT_DURATION_MIN * 60000);
     }
-    return arr;
+    // jeśli dziś, ukryj minione godziny
+    const now = new Date();
+    if (isSameDay(now, selectedDate)) {
+      const nowStr = format(now, "HH:mm");
+      return list.filter((t) => t >= nowStr);
+    }
+    return list;
   };
 
   const modifiers = {
@@ -113,158 +127,176 @@ export default function ReservationCalendarModal({ isOpen, onClose }: Props) {
     },
     selected: (day: Date) =>
       selectedDate ? format(day, "yyyy-MM-dd") === format(selectedDate, "yyyy-MM-dd") : false,
-  };
+  } as const;
+
   const modifiersClassNames = {
     past: "text-gray-300",
     free: "bg-green-200 hover:bg-green-300",
     partial: "bg-yellow-200 hover:bg-yellow-300",
     full: "bg-red-200 text-red-700 cursor-not-allowed",
     selected: "bg-black text-white",
-  };
+  } as const;
 
-  const handleConfirm = async () => {
-    if (!selectedDate || !selectedTime || !customerName.trim() || !customerPhone.trim()) return;
-    const day = format(selectedDate, "yyyy-MM-dd");
-    const payload: any = {
-      reservation_date: day,
-      reservation_time: selectedTime,
-      number_of_guests: guestCount,
-      customer_name: customerName,
-      customer_phone: customerPhone,
-      notes,
-      status: "pending",
-    };
-    const { error } = await supabase.from("reservations").insert([payload]);
-    if (error) console.error("Błąd rezerwacji:", error.message);
-    else {
-      alert("Rezerwacja zapisana!");
+  const isValid = Boolean(
+    selectedDate && selectedTime && customerName.trim() && customerPhone.trim()
+  );
+
+  async function handleSubmit(e?: React.FormEvent) {
+    e?.preventDefault();
+    setErrorMsg(null);
+    if (!isValid || loading) return;
+    setLoading(true);
+    try {
+      const day = format(selectedDate!, "yyyy-MM-dd");
+      const payload = {
+        reservation_date: day,
+        reservation_time: selectedTime,
+        number_of_guests: guestCount,
+        customer_name: customerName.trim(),
+        customer_phone: customerPhone.trim(),
+        notes,
+        status: "pending",
+      };
+      const { error } = await supabase.from("reservations").insert([payload]);
+      if (error) throw new Error(error.message);
+      alert("Rezerwacja zapisana.");
       onClose();
+    } catch (err: any) {
+      setErrorMsg(err?.message || "Nie udało się zapisać rezerwacji.");
+    } finally {
+      setLoading(false);
     }
-  };
+  }
 
   if (!isOpen) return null;
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60 p-4">
-      <div className="relative bg-white w-full max-w-md max-h-[90vh] rounded-2xl overflow-y-auto shadow-2xl">
+    <div
+      className="fixed inset-0 z-[70] flex items-center justify-center"
+      role="dialog"
+      aria-modal="true"
+      id="reservation-modal"
+      onMouseDown={onClose}
+    >
+      <div className="absolute inset-0 bg-black/60" aria-hidden="true" />
+      <div
+        className="relative z-[71] bg-white text-black w-full max-w-md max-h-[90vh] rounded-2xl overflow-y-auto shadow-2xl"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
         <button
+          type="button"
           onClick={onClose}
-          className="absolute top-2 right-4 z-20 text-gray-500 hover:text-gray-800"
+          className="absolute top-3 right-4 z-20 text-gray-500 hover:text-gray-800"
+          aria-label="Zamknij"
         >
-          <X size={24} />
+          <X size={22} />
         </button>
 
-        <div className="p-4 border-b">
-          <h2 className="text-lg font-semibold">Rezerwacja stolika</h2>
-        </div>
+        <form onSubmit={handleSubmit}>
+          <div className="p-4 border-b">
+            <h2 className="text-lg font-semibold">Rezerwacja stolika</h2>
+          </div>
 
-        <div className="p-6 space-y-4">
-          <DayPicker
-            mode="single"
-            className="rounded-lg shadow-inner bg-gray-50"
-            captionLayout="dropdown"
-            navbarClassName="flex justify-between px-2 py-1 bg-white"
-            navbarPrev="<"
-            navbarNext=">"
-            // Uwaga: interfejs Caption zależy od wersji react-day-picker
-            components={{
-              Caption: ({ date, localeUtils }: any) => (
-                <div className="text-center font-semibold">
-                  {localeUtils?.formatMonthTitle
-                    ? localeUtils.formatMonthTitle(date)
-                    : format(date, "LLLL yyyy", { locale: pl })}
-                </div>
-              ),
-            }}
-            month={currentMonth}
-            onMonthChange={setCurrentMonth}
-            selected={selectedDate}
-            onSelect={setSelectedDate}
-            locale={pl}
-            fromDate={new Date()}
-            modifiers={modifiers as any}
-            modifiersClassNames={modifiersClassNames as any}
-          />
+          <div className="p-6 space-y-4">
+            <DayPicker
+              mode="single"
+              className="rounded-lg shadow-inner bg-gray-50"
+              captionLayout="dropdown"
+              month={currentMonth}
+              onMonthChange={setCurrentMonth}
+              selected={selectedDate}
+              onSelect={setSelectedDate}
+              locale={pl}
+              fromDate={new Date()}
+              modifiers={modifiers as any}
+              modifiersClassNames={modifiersClassNames as any}
+            />
 
-          {selectedDate && (
-            <>
-              <label className="block font-medium">Godzina</label>
-              <select
-                className="w-full border rounded py-2 px-3"
-                value={selectedTime}
-                onChange={(e) => setSelectedTime(e.target.value)}
-              >
-                <option value="">— wybierz godzinę —</option>
-                {generateSlots().map((slot) => (
-                  <option
-                    key={slot}
-                    value={slot}
-                    disabled={(countsPerSlot[slot] || 0) >= MAX_PER_SLOT}
-                  >
-                    {slot}{" "}
-                    {(countsPerSlot[slot] || 0) >= MAX_PER_SLOT
-                      ? "(pełny)"
-                      : `(${countsPerSlot[slot] || 0}/${MAX_PER_SLOT})`}
-                  </option>
-                ))}
-              </select>
-            </>
-          )}
+            {selectedDate && (
+              <>
+                <label className="block font-medium">Godzina</label>
+                <select
+                  className="w-full border rounded py-2 px-3"
+                  value={selectedTime}
+                  onChange={(e) => setSelectedTime(e.target.value)}
+                >
+                  <option value="">— wybierz godzinę —</option>
+                  {generateSlots().map((slot) => (
+                    <option
+                      key={slot}
+                      value={slot}
+                      disabled={(countsPerSlot[slot] || 0) >= MAX_PER_SLOT}
+                    >
+                      {slot}{" "}
+                      {(countsPerSlot[slot] || 0) >= MAX_PER_SLOT
+                        ? "(pełny)"
+                        : `(${countsPerSlot[slot] || 0}/${MAX_PER_SLOT})`}
+                    </option>
+                  ))}
+                </select>
+              </>
+            )}
 
-          {selectedTime && (
-            <>
-              <label className="block font-medium">Liczba gości</label>
-              <input
-                type="number"
-                min={1}
-                max={10}
-                value={guestCount}
-                onChange={(e) => setGuestCount(Number(e.target.value))}
-                className="border rounded w-20 py-1 px-2"
-              />
-            </>
-          )}
+            {selectedTime && (
+              <>
+                <label className="block font-medium">Liczba gości</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={10}
+                  value={guestCount}
+                  onChange={(e) => setGuestCount(Number(e.target.value))}
+                  className="border rounded w-24 py-1 px-2"
+                />
+              </>
+            )}
 
-          {selectedTime && (
-            <>
-              <label className="block font-medium">Twoje dane</label>
-              <input
-                type="text"
-                placeholder="Imię i nazwisko"
-                value={customerName}
-                onChange={(e) => setCustomerName(e.target.value)}
-                className="w-full border rounded py-2 px-3 mb-2"
-              />
-              <input
-                type="tel"
-                placeholder="Telefon"
-                value={customerPhone}
-                onChange={(e) => setCustomerPhone(e.target.value)}
-                className="w-full border rounded py-2 px-3"
-              />
-            </>
-          )}
+            {selectedTime && (
+              <>
+                <label className="block font-medium">Twoje dane</label>
+                <input
+                  type="text"
+                  placeholder="Imię i nazwisko"
+                  value={customerName}
+                  onChange={(e) => setCustomerName(e.target.value)}
+                  className="w-full border rounded py-2 px-3 mb-2"
+                />
+                <input
+                  type="tel"
+                  placeholder="Telefon"
+                  value={customerPhone}
+                  onChange={(e) => setCustomerPhone(e.target.value)}
+                  className="w-full border rounded py-2 px-3"
+                />
+              </>
+            )}
 
-          {selectedTime && (
-            <>
-              <label className="block font-medium">Uwagi</label>
-              <textarea
-                rows={3}
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                className="w-full border rounded py-2 px-3"
-                placeholder="Dodatkowe informacje..."
-              />
-            </>
-          )}
+            {selectedTime && (
+              <>
+                <label className="block font-medium">Uwagi</label>
+                <textarea
+                  rows={3}
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  className="w-full border rounded py-2 px-3"
+                  placeholder="Dodatkowe informacje..."
+                />
+              </>
+            )}
 
-          <button
-            onClick={handleConfirm}
-            disabled={!selectedDate || !selectedTime || !customerName.trim() || !customerPhone.trim() }
-            className="w-full bg-yellow-500 text-white py-2 rounded disabled:opacity-50 hover:bg-yellow-600 transition"
-          >
-            Zarezerwuj
-          </button>
-        </div>
+            {errorMsg && (
+              <div className="text-sm text-red-600">{errorMsg}</div>
+            )}
+
+            <button
+              type="submit"
+              disabled={!isValid || loading}
+              className="w-full bg-yellow-500 text-black py-2 rounded font-semibold disabled:opacity-50 hover:bg-yellow-400 transition"
+            >
+              {loading ? "Wysyłanie..." : "Zarezerwuj"}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );
