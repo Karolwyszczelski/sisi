@@ -43,6 +43,8 @@ const supabase = createClient(
 
 const TERMS_VERSION = process.env.NEXT_PUBLIC_TERMS_VERSION || "2025-09-15";
 const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || "";
+const THANKS_QR_URL =
+  process.env.NEXT_PUBLIC_REVIEW_QR_URL || "https://g.co/kgs/47NSDMH";
 
 type Zone = {
   id: string;
@@ -808,15 +810,23 @@ export default function CheckoutModal() {
 
             {orderSent ? (
               <div className="text-center space-y-4">
+                {/* QR na samej górze, wycentrowany */}
+                <div className="w-full flex justify-center">
+                  <div className="bg-white p-3 rounded-xl shadow-sm">
+                    <QRCode value={THANKS_QR_URL} size={160} />
+                  </div>
+                </div>
+
                 <h2 className="text-2xl font-bold">Dziękujemy za zamówienie!</h2>
+
                 {showBurger ? (
                   <img src="/animations/Animationburger.gif" alt="Animacja burgera" className="mx-auto w-40 h-40 object-contain" />
                 ) : (
                   <p className="text-xl font-semibold text-yellow-600">Twoje zamówienie ląduje w kuchni...</p>
                 )}
-                <QRCode value="https://g.co/kgs/47NSDMH" size={140} />
-                <div className="flex justify-center gap-4 mt-4 flex-wrap">
-                  <button onClick={() => window.open("https://g.co/kgs/47NSDMH", "_blank")} className="px-4 py-2 bg-blue-500 text-white rounded">
+
+                <div className="flex justify-center gap-4 mt-2 flex-wrap">
+                  <button onClick={() => window.open(THANKS_QR_URL, "_blank")} className="px-4 py-2 bg-blue-500 text-white rounded">
                     Zostaw opinię
                   </button>
                   <button onClick={closeCheckoutModal} className="px-4 py-2 bg-gray-300 text-black rounded">

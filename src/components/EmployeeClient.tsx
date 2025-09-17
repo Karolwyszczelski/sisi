@@ -1,4 +1,3 @@
-// src/app/admin/pickup-order/page.tsx
 "use client";
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
@@ -16,7 +15,7 @@ interface Order {
   total_price: number;
   delivery_cost?: number | null;
   created_at: string;
-  status: "new" | "placed" | "accepted" | "cancelled" | "completed";
+  status: "new" | "pending" | "placed" | "accepted" | "cancelled" | "completed";
   clientDelivery?: string;
   deliveryTime?: string;
   address?: string;
@@ -229,16 +228,14 @@ export default function PickupOrdersPage() {
 
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
 
-  // AUDIO: dzwonek
+  // AUDIO
   const newOrderAudio = useRef<HTMLAudioElement | null>(null);
   useEffect(() => {
     const a = new Audio("/new-order.mp3");
     a.preload = "auto";
     a.volume = 1;
     newOrderAudio.current = a;
-    const unlock = async () => {
-      try { a.currentTime = 0; await a.play(); a.pause(); } catch {}
-    };
+    const unlock = async () => { try { a.currentTime = 0; await a.play(); a.pause(); } catch {} };
     window.addEventListener("pointerdown", unlock, { once: true });
     return () => window.removeEventListener("pointerdown", unlock);
   }, []);
@@ -246,7 +243,6 @@ export default function PickupOrdersPage() {
     try { if (newOrderAudio.current) { newOrderAudio.current.currentTime = 0; await newOrderAudio.current.play(); } } catch {}
   }, []);
 
-  // detekcja nowych
   const prevIdsRef = useRef<Set<string>>(new Set());
   const initializedRef = useRef(false);
 
@@ -291,7 +287,7 @@ export default function PickupOrdersPage() {
 
       const prev = prevIdsRef.current;
       const newOnes = mapped.filter(
-        (o) => (o.status === "new" || o.status === "placed") && !prev.has(o.id)
+        (o) => (o.status === "new" || o.status === "pending" || o.status === "placed") && !prev.has(o.id)
       );
       if (initializedRef.current && newOnes.length > 0) void playDing();
       prevIdsRef.current = new Set(mapped.map((o) => o.id));
@@ -312,7 +308,18 @@ export default function PickupOrdersPage() {
     return () => { void supabase.removeChannel(ch); };
   }, [fetchOrders, supabase]);
 
-  // polling listy gdy Online->pending
+  // DODANE: lekki nasłuch tylko płatności – aktualizuje lokalny stan bez pełnego refetch
+  useEffect(() => {
+    const ch = supabase
+      .channel("orders-payments")
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "orders" }, (payload: any) => {
+        const n = payload.new;
+        setOrders((prev) => prev.map((o) => (o.id === n.id ? { ...o, payment_status: n.payment_status, payment_method: n.payment_method } : o)));
+      })
+      .subscribe();
+    return () => { void supabase.removeChannel(ch); };
+  }, [supabase]);
+
   useEffect(() => {
     const hasPending = orders.some((o) => o.payment_method === "Online" && o.payment_status === "pending");
     if (!hasPending || editingOrderId) return;
@@ -320,7 +327,6 @@ export default function PickupOrdersPage() {
     return () => clearInterval(iv);
   }, [orders, editingOrderId, fetchOrders]);
 
-  // odświeżanie statusu P24 co 15s dla Online->pending
   const lastRefreshRef = useRef<Map<string, number>>(new Map());
   const refreshPaymentStatus = async (id: string) => {
     try {
@@ -401,18 +407,16 @@ export default function PickupOrdersPage() {
     if (res.ok) { updateLocal(id, { status: "new" }); fetchOrders(); }
   };
 
-  // BADGE płatności
   const paymentBadge = (o: Order) => {
     if (o.payment_method === "Online") {
       if (o.payment_status === "paid")   return <Badge tone="green">OPŁACONE ONLINE</Badge>;
       if (o.payment_status === "failed") return <Badge tone="rose">ONLINE – BŁĄD</Badge>;
-      return <Badge tone="yellow">ONLINE – OCZEKUJE</Badge>; // domyślnie/pending/null
+      return <Badge tone="yellow">ONLINE – OCZEKUJE</Badge>;
     }
     if (o.payment_method === "Terminal") return <Badge tone="blue">TERMINAL</Badge>;
     return <Badge tone="amber">GOTÓWKA</Badge>;
   };
 
-  // ustawianie metody (dla != Online czyścimy status)
   const setPaymentMethod = async (o: Order, method: PaymentMethod) => {
     try {
       setEditingOrderId(o.id);
@@ -423,23 +427,8 @@ export default function PickupOrdersPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(patch),
       });
-      if (!res.ok) return;
+    if (!res.ok) return;
       updateLocal(o.id, { payment_method: method, payment_status: patch.payment_status ?? o.payment_status });
-    } finally { setEditingOrderId(null); }
-  };
-
-  // (opcjonalny) ręczny override tylko dla Online — zostawiamy, ale nie zmienia statusu zamówienia
-  const setPaymentStatus = async (o: Order, status: Exclude<PaymentStatus, null>) => {
-    if (o.payment_method !== "Online") return; // bezpieczeństwo
-    try {
-      setEditingOrderId(o.id);
-      const res = await fetch(`/api/orders/${o.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ payment_status: status }),
-      });
-      if (!res.ok) return;
-      updateLocal(o.id, { payment_status: status });
     } finally { setEditingOrderId(null); }
   };
 
@@ -451,7 +440,9 @@ export default function PickupOrdersPage() {
     [orders, filterStatus, filterOption]
   );
 
-  const newList = filtered.filter((o) => o.status === "new" || o.status === "placed");
+  const newList = filtered.filter((o) =>
+    o.status === "new" || o.status === "pending" || o.status === "placed"
+  );
   const currList = filtered.filter((o) => o.status === "accepted");
   const histList = filtered.filter((o) => o.status === "cancelled" || o.status === "completed");
 
@@ -565,7 +556,6 @@ export default function PickupOrdersPage() {
                           <option>Online</option>
                         </select>
 
-                        {/* Online: tylko badge + odśwież z P24; opcjonalnie override dropdown (pozostawiamy, ale nie wymagany) */}
                         {o.payment_method === "Online" && (
                           <>
                             <span className="ml-1">{paymentBadge(o)}</span>
@@ -578,21 +568,9 @@ export default function PickupOrdersPage() {
                                 Odśwież status
                               </button>
                             )}
-                            {/* Jeśli chcesz całkiem wyłączyć ręczne ustawianie — usuń select poniżej */}
-                            <select
-                              value={o.payment_status || "pending"}
-                              onChange={(e) => setPaymentStatus(o, e.target.value as Exclude<PaymentStatus, null>)}
-                              className="h-8 rounded border px-2 text-xs"
-                              disabled={editingOrderId === o.id}
-                            >
-                              <option value="pending">oczekuje</option>
-                              <option value="paid">opłacone</option>
-                              <option value="failed">błąd</option>
-                            </select>
                           </>
                         )}
 
-                        {/* Gotówka/Terminal: tylko informacyjny badge, bez „Oznacz jako opłacone” */}
                         {o.payment_method !== "Online" && <span className="ml-1">{paymentBadge(o)}</span>}
                       </span>
                     </div>
@@ -613,7 +591,7 @@ export default function PickupOrdersPage() {
                 </div>
 
                 <footer className="mt-4 flex flex-wrap items-center gap-2">
-                  {(o.status === "new" || o.status === "placed") && (
+                  {(o.status === "new" || o.status === "pending" || o.status === "placed") && (
                     <>
                       <AcceptButton order={o} onAccept={(m) => acceptAndSetTime(o, m)} />
                       <EditOrderButton

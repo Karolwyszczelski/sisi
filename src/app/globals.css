@@ -85,4 +85,12 @@ body {
   }
 }
 
+/* mobilny hit-testing i skalowanie */
+html, body { -webkit-text-size-adjust: 100%; touch-action: manipulation; }
+@media (max-width: 1024px) {
+  html, body { transform: none !important; zoom: 1 !important; }
+}
+/* opcjonalnie brak podświetlenia tapów */
+* { -webkit-tap-highlight-color: transparent; }
+
 
