@@ -1,0 +1,12 @@
+name: P24 Reconcile
+on:
+  schedule:
+    - cron: "*/5 * * * *"   # co 5 min
+  workflow_dispatch:
+jobs:
+  call:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping reconcile endpoint
+        run: |
+          curl -fsS "https://www.sisiciechanow.pl/api/p24/reconcile?token=${{ secrets.CRON_SECRET }}"
