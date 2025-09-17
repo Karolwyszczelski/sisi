@@ -37,6 +37,7 @@ const WHITELIST = new Set<string>([
   "/admin/login",
   "/legal/regulamin",
   "/legal/polityka-prywatnosci",
+  "/gone", // ważne: /gone przepuszczamy do route handlera
 ]);
 
 const isJsonRequest = (req: NextRequest) => {
@@ -71,9 +72,11 @@ const isSpamPath = (pathname: string, req: NextRequest) => {
   if (segs.length >= 6) return true;
 
   // CJK w ścieżce
-  const looksCJK = /[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]/.test(
-    decodeURIComponent(pathname)
-  );
+  let decoded = pathname;
+  try {
+    decoded = decodeURIComponent(pathname);
+  } catch {}
+  const looksCJK = /[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]/.test(decoded);
   if (looksCJK && !WHITELIST.has(pathname)) return true;
 
   // parametry WP
@@ -101,6 +104,12 @@ export async function middleware(req: NextRequest) {
   }
 
   const pathname = normalizePath(req.nextUrl.pathname);
+
+  // 0.5) Jeśli to /gone — przepuść do route handlera (tam zwracamy 410).
+  //     To eliminuje możliwość pętli przy przepisywaniu/redirectach.
+  if (pathname === "/gone") {
+    return NextResponse.next();
+  }
 
   // 1) Spam → 410 + X-Robots-Tag
   if (isSpamPath(pathname, req)) {
