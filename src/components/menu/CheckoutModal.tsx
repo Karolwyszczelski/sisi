@@ -50,6 +50,8 @@ type Zone = {
   free_over: number | null;
   eta_min_minutes: number;
   eta_max_minutes: number;
+  pricing_type?: "per_km" | "flat";
+  active?: boolean;
 };
 
 const SAUCES = [
@@ -310,6 +312,12 @@ export default function CheckoutModal() {
   const tsMobileRef = useRef<HTMLDivElement | null>(null);
   const tsDesktopRef = useRef<HTMLDivElement | null>(null);
 
+  // dodatkowe stany dostawy
+  const [deliveryMinOk, setDeliveryMinOk] = useState(true);
+  const [deliveryMinRequired, setDeliveryMinRequired] = useState(0);
+  const [outOfRange, setOutOfRange] = useState(false);
+  const [custCoords, setCustCoords] = useState<{ lat: number; lng: number } | null>(null);
+
   // email
   const sessionEmail = session?.user?.email || "";
   const effectiveEmail = (contactEmail || sessionEmail).trim();
@@ -440,19 +448,33 @@ export default function CheckoutModal() {
     try {
       const resp = await fetch(`/api/distance?origin=${restLoc.lat},${restLoc.lng}&destination=${custLat},${custLng}`);
       const { distance_km, error } = await resp.json();
-      if (error) return console.error("Distance API:", error);
+      if (error) { console.error("Distance API:", error); return; }
 
-      const zone = zones.find((z) => distance_km >= z.min_distance_km && distance_km <= z.max_distance_km);
+      const zone = zones
+        .filter(z => z.active !== false)
+        .find(z => distance_km >= z.min_distance_km && distance_km <= z.max_distance_km);
+
       if (!zone) {
+        setOutOfRange(true);
+        setDeliveryMinOk(false);
+        setDeliveryMinRequired(0);
         setDeliveryInfo({ cost: 0, eta: "Poza zasięgiem" });
         return;
       }
 
-      let cost: number = zone.min_distance_km === 0 ? zone.cost : zone.cost * distance_km;
-      if (zone.free_over !== null && baseTotal >= zone.free_over) cost = 0;
+      setOutOfRange(false);
+
+      const perKm = (zone.pricing_type ?? "per_km") === "per_km";
+      let cost = perKm ? zone.cost * distance_km : zone.cost;
+
+      if (zone.free_over != null && subtotal >= zone.free_over) cost = 0;
+
+      const minOk = subtotal >= (zone.min_order_value || 0);
+      setDeliveryMinOk(minOk);
+      setDeliveryMinRequired(zone.min_order_value || 0);
 
       const eta = `${zone.eta_min_minutes}-${zone.eta_max_minutes} min`;
-      setDeliveryInfo({ cost, eta });
+      setDeliveryInfo({ cost: Math.max(0, Math.round(cost * 100) / 100), eta });
     } catch (e) {
       console.error("calcDelivery error:", e);
     }
@@ -460,6 +482,7 @@ export default function CheckoutModal() {
 
   const onAddressSelect = (address: string, lat: number, lng: number) => {
     setStreet(address);
+    setCustCoords({ lat, lng });
     calcDelivery(lat, lng);
   };
 
@@ -518,6 +541,10 @@ export default function CheckoutModal() {
       payload.city = city || null;
       payload.flat_number = flatNumber || null;
       payload.client_delivery_time = client_delivery_time;
+      if (custCoords) {
+        payload.delivery_lat = custCoords.lat;
+        payload.delivery_lng = custCoords.lng;
+      }
     } else if (optionalAddress.trim()) {
       payload.address = optionalAddress.trim();
     }
@@ -630,6 +657,10 @@ export default function CheckoutModal() {
     if (!requireCaptchaBeforeConfirm()) return;
     if (hoursGuardFail()) return setErrorMessage("Zamówienia przyjmujemy tylko w godz. 11:30–21:45.");
     if (!guardEmail()) return;
+    if (selectedOption === "delivery") {
+      if (outOfRange) return setErrorMessage("Adres jest poza zasięgiem dostawy.");
+      if (!deliveryMinOk) return setErrorMessage(`Minimalna wartość zamówienia dla tej strefy to ${deliveryMinRequired.toFixed(2)} zł.`);
+    }
 
     try {
       const orderPayload = buildOrderPayload();
@@ -656,6 +687,10 @@ export default function CheckoutModal() {
     if (!requireCaptchaBeforeConfirm()) return;
     if (hoursGuardFail()) return setErrorMessage("Zamówienia przyjmujemy tylko w godz. 11:30–21:45.");
     if (!guardEmail()) return;
+    if (selectedOption === "delivery") {
+      if (outOfRange) return setErrorMessage("Adres jest poza zasięgiem dostawy.");
+      if (!deliveryMinOk) return setErrorMessage(`Minimalna wartość zamówienia dla tej strefy to ${deliveryMinRequired.toFixed(2)} zł.`);
+    }
 
     try {
       const orderPayload = buildOrderPayload();
@@ -895,6 +930,13 @@ export default function CheckoutModal() {
                           {(selectedOption === "takeaway" || selectedOption === "delivery") && <div className="flex justify-between text-sm"><span>Opakowanie:</span><span>2.00 zł</span></div>}
                           {deliveryInfo && <div className="flex justify-between text-sm"><span>Dostawa:</span><span>{deliveryInfo.cost.toFixed(2)} zł</span></div>}
 
+                          {selectedOption === "delivery" && outOfRange && (
+                            <p className="text-xs text-red-600">Adres poza zasięgiem dostawy.</p>
+                          )}
+                          {selectedOption === "delivery" && !outOfRange && !deliveryMinOk && (
+                            <p className="text-xs text-red-600">Minimalna wartość zamówienia dla tej strefy: {deliveryMinRequired.toFixed(2)} zł.</p>
+                          )}
+
                           <PromoSectionExternal promo={promo} promoError={promoError} onApply={applyPromo} onClear={clearPromo} />
 
                           {discount > 0 && <div className="flex justify-between text-sm text-green-700"><span>Rabat:</span><span>-{discount.toFixed(2)} zł</span></div>}
@@ -980,6 +1022,13 @@ export default function CheckoutModal() {
                 <div className="flex justify-between"><span>Produkty:</span><span>{baseTotal.toFixed(2)} zł</span></div>
                 {(selectedOption === "takeaway" || selectedOption === "delivery") && <div className="flex justify-between"><span>Opakowanie:</span><span>2.00 zł</span></div>}
                 {deliveryInfo && <div className="flex justify-between"><span>Dostawa:</span><span>{deliveryInfo.cost.toFixed(2)} zł</span></div>}
+
+                {selectedOption === "delivery" && outOfRange && (
+                  <p className="text-xs text-red-600">Adres poza zasięgiem dostawy.</p>
+                )}
+                {selectedOption === "delivery" && !outOfRange && !deliveryMinOk && (
+                  <p className="text-xs text-red-600">Minimalna wartość zamówienia dla tej strefy: {deliveryMinRequired.toFixed(2)} zł.</p>
+                )}
 
                 <PromoSectionExternal promo={promo} promoError={promoError} onApply={applyPromo} onClear={clearPromo} />
 

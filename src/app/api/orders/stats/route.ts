@@ -10,21 +10,31 @@ import { getSessionAndRole } from "@/lib/serverAuth";
 
 type Row = Database["public"]["Tables"]["orders"]["Row"];
 
-// Bezpieczny parser items → nazwy produktów
+// ===== helpers =====
+const dayKeyPL = (d: Date) =>
+  new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Warsaw",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d);
+
+const startOfTodayPLISO = () => {
+  const now = new Date();
+  const z = new Date(now.toLocaleString("en-US", { timeZone: "Europe/Warsaw" }));
+  z.setHours(0, 0, 0, 0);
+  return new Date(z.getTime() - z.getTimezoneOffset() * 60_000).toISOString();
+};
+
 function collectStrings(val: any): string[] {
   if (!val) return [];
   if (typeof val === "string") return [val];
   if (Array.isArray(val)) return val.flatMap(collectStrings).filter(Boolean);
   if (typeof val === "object") {
-    const prefer = ["name","title","label","product_name","menu_item_name","item_name","nazwa","nazwa_pl"];
+    const prefer = ["name", "title", "label", "product_name", "menu_item_name", "item_name", "nazwa", "nazwa_pl"];
     const out: string[] = [];
-    for (const k of prefer) {
-      if (typeof (val as any)[k] === "string") out.push((val as any)[k]);
-    }
-    // zagnieżdżenia
-    for (const v of Object.values(val)) {
-      if (typeof v === "object") out.push(...collectStrings(v));
-    }
+    for (const k of prefer) if (typeof (val as any)[k] === "string") out.push((val as any)[k]);
+    for (const v of Object.values(val)) if (typeof v === "object") out.push(...collectStrings(v));
     return out;
   }
   return [];
@@ -35,44 +45,53 @@ function extractProductNames(items: any): string[] {
     const data = typeof items === "string" ? JSON.parse(items) : items;
     const arr = Array.isArray(data) ? data : [data];
     const names = new Set<string>();
-    for (const it of arr) {
-      const c = collectStrings(it);
-      for (const s of c) if (s && s.length <= 80) names.add(s);
-    }
+    for (const it of arr) for (const s of collectStrings(it)) if (s && s.length <= 80) names.add(s);
     return Array.from(names);
   } catch {
-    // fallback: csv
-    if (typeof items === "string") return items.split(",").map(s => s.trim()).filter(Boolean);
+    if (typeof items === "string") return items.split(",").map((s) => s.trim()).filter(Boolean);
     return [];
   }
 }
 
+// ===== route =====
 export async function GET(request: Request) {
   // 1) Auth
   const { session, role } = await getSessionAndRole(request);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (role !== "admin" && role !== "employee") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-  // 2) Supabase client (auth cookies!)
+  // 2) Supabase (na cookies usera)
   const supabase = createRouteHandlerClient<Database>({ cookies });
 
   try {
-    // 3) Zakres czasu
+    // 3) Zakres
     const { searchParams } = new URL(request.url);
-    const days = Math.max(1, parseInt(searchParams.get("days") || "7", 10));
+    const days = Math.max(1, parseInt(searchParams.get("days") || "30", 10));
     const now = new Date();
     const since = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+    const sinceISO = since.toISOString();
 
-    // 4) Minimalny select
-    const { data: rows, error } = await supabase
+    // 4) Pobierz zamówienia – fallback gdy brak kolumny updated_at
+    let rows: (Row & { updated_at?: string | null })[] = [];
+    let r1 = await supabase
       .from("orders")
       .select("id, created_at, updated_at, status, total_price, payment_status, items, deliveryTime, client_delivery_time")
-      .gte("created_at", since.toISOString());
+      .gte("created_at", sinceISO);
 
-    if (error) throw error;
+    if (r1.error) {
+      const r2 = await supabase
+        .from("orders")
+        .select("id, created_at, status, total_price, payment_status, items, deliveryTime, client_delivery_time")
+        .gte("created_at", sinceISO);
+      if (r2.error) throw r2.error;
+      rows = (r2.data as any) ?? [];
+    } else {
+      rows = (r1.data as any) ?? [];
+    }
 
+    // 5) Agregacje
     const ordersPerDay: Record<string, number> = {};
-    const avgMapAcc: Record<string, { sum: number; cnt: number }> = {};
+    const avgAcc: Record<string, { sum: number; cnt: number }> = {};
     const popularProducts: Record<string, number> = {};
 
     let todayOrders = 0;
@@ -82,90 +101,91 @@ export async function GET(request: Request) {
     let newOrders = 0;
     let currentOrders = 0;
 
-    const todayKey = now.toISOString().slice(0, 10);
+    const todayKey = dayKeyPL(now);
     const ym = todayKey.slice(0, 7);
 
-    for (const o of (rows ?? [])) {
-      const day = new Date(o.created_at!).toISOString().slice(0, 10);
-
-      // 5) Orders per day
+    for (const o of rows) {
+      const day = dayKeyPL(new Date(o.created_at!));
       ordersPerDay[day] = (ordersPerDay[day] ?? 0) + 1;
 
-      // 6) Avg fulfillment per day (minuty)
-      // Preferuj rzeczywisty czas: updated_at - created_at jeśli completed; jeśli brak, użyj deliveryTime/client_delivery_time jako proxy.
+      // średni czas realizacji (min)
       let minutes: number | null = null;
       if (o.status === "completed" && o.updated_at) {
         minutes = Math.max(0, Math.round((+new Date(o.updated_at) - +new Date(o.created_at!)) / 60000));
-      } else if (o.deliveryTime) {
-        minutes = Math.max(0, Math.round((+new Date(o.deliveryTime) - +new Date(o.created_at!)) / 60000));
+      } else if ((o as any).deliveryTime) {
+        minutes = Math.max(0, Math.round((+new Date((o as any).deliveryTime) - +new Date(o.created_at!)) / 60000));
       } else if ((o as any).client_delivery_time) {
         minutes = Math.max(0, Math.round((+new Date((o as any).client_delivery_time) - +new Date(o.created_at!)) / 60000));
       }
       if (minutes != null && Number.isFinite(minutes)) {
-        const acc = avgMapAcc[day] ?? { sum: 0, cnt: 0 };
-        acc.sum += minutes; acc.cnt += 1;
-        avgMapAcc[day] = acc;
+        const a = avgAcc[day] ?? { sum: 0, cnt: 0 };
+        a.sum += minutes; a.cnt += 1;
+        avgAcc[day] = a;
       }
 
-      // 7) Popular products
-      const names = extractProductNames(o.items);
-      for (const n of names) {
+      // popularne produkty
+      for (const n of extractProductNames((o as any).items)) {
         popularProducts[n] = (popularProducts[n] ?? 0) + 1;
       }
 
-      // 8) KPIs (przychody liczone dla opłaconych lub completed)
-      const isPaidish = o.payment_status === "paid" || o.status === "completed";
+      // KPI (przychód: paid lub completed)
+      const paidish = o.payment_status === "paid" || o.status === "completed";
       const price = Number(o.total_price) || 0;
 
       if (day === todayKey) {
-        todayOrders += 1;
-        if (isPaidish) todayRevenue += price;
+        todayOrders++;
+        if (paidish) todayRevenue += price;
       }
       if (day.startsWith(ym)) {
-        monthOrders += 1;
-        if (isPaidish) monthRevenue += price;
+        monthOrders++;
+        if (paidish) monthRevenue += price;
       }
 
-      // live counters
-      if (o.status === "new" || o.status === "placed") newOrders += 1;
-      if (o.status === "accepted") currentOrders += 1;
+      if (o.status === "new" || o.status === "placed" || o.status === "pending") newOrders++;
+      if (o.status === "accepted") currentOrders++;
     }
 
     const avgFulfillmentTime: Record<string, number> = {};
-    for (const [d, { sum, cnt }] of Object.entries(avgMapAcc)) {
+    for (const [d, { sum, cnt }] of Object.entries(avgAcc)) {
       if (cnt > 0) avgFulfillmentTime[d] = Math.round(sum / cnt);
     }
+
+    // Rezerwacje dziś – jeśli tabela istnieje
+    let todayReservations = 0;
+    try {
+      const { count } = await supabase
+        .from("reservations")
+        .select("id", { head: true, count: "exact" })
+        .gte("created_at", startOfTodayPLISO());
+      todayReservations = count ?? 0;
+    } catch { /* opcjonalna tabela */ }
+
+    // średnia miesięczna z mapy
+    const monthAvgs = Object.entries(avgFulfillmentTime).filter(([d]) => d.startsWith(ym));
+    const monthAvgFulfillment =
+      monthAvgs.length ? Math.round(monthAvgs.reduce((s, [, v]) => s + (v || 0), 0) / monthAvgs.length) : undefined;
 
     const kpis = {
       todayOrders,
       todayRevenue,
+      todayReservations,
       monthOrders,
       monthRevenue,
-      monthAvgFulfillment: undefined as number | undefined,
+      monthAvgFulfillment,
       newOrders,
       currentOrders,
-      reservations: 0, // jeśli w przyszłości będziesz liczyć z tabeli rezerwacji – tutaj podłącz
+      reservations: todayReservations,
     };
-
-    // Oszacuj średnią miesięczną z mapy (jeśli są dane)
-    const monthAvgs = Object.entries(avgFulfillmentTime).filter(([d]) => d.startsWith(ym));
-    if (monthAvgs.length) {
-      const sum = monthAvgs.reduce((s, [, v]) => s + (v || 0), 0);
-      kpis.monthAvgFulfillment = Math.round(sum / monthAvgs.length);
-    }
 
     return new NextResponse(
       JSON.stringify({ ordersPerDay, avgFulfillmentTime, popularProducts, kpis }),
-      {
-        status: 200,
-        headers: {
-          "Content-Type": "application/json",
-          "Cache-Control": "no-store, max-age=0",
-        },
-      }
+      { status: 200, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } }
     );
   } catch (err: any) {
     console.error("Błąd w GET /api/orders/stats:", err?.message || err);
-    return NextResponse.json({ error: err?.message || "Server error" }, { status: 500, headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json(
+      { error: err?.message || "Server error" },
+      { status: 500, headers: { "Cache-Control": "no-store" } }
+    );
   }
 }
