@@ -1,4 +1,3 @@
-// src/app/api/p24/callback/route.ts
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -27,7 +26,6 @@ function pick(v: any, ...keys: string[]) {
 
 async function readBodyOrQuery(req: NextRequest): Promise<P24Fields> {
   const ct = req.headers.get("content-type") || "";
-  // form-urlencoded
   if (ct.includes("application/x-www-form-urlencoded")) {
     const txt = await req.text();
     const params = new URLSearchParams(txt);
@@ -35,24 +33,21 @@ async function readBodyOrQuery(req: NextRequest): Promise<P24Fields> {
     params.forEach((v, k) => (o[k] = v));
     return o as P24Fields;
   }
-  // multipart
   if (ct.includes("multipart/form-data")) {
     const fd = await req.formData();
     const o: Record<string, any> = {};
-    for (const [k, v] of fd.entries()) o[k] = typeof v === "string" ? v : await v.text();
+    for (const [k, v] of fd.entries()) o[k] = typeof v === "string" ? v : await (v as File).text();
     return o as P24Fields;
   }
-  // JSON lub pusty
   try { return (await req.json()) as any; } catch {}
-  // fallback: query string (dla GET lub POST bez body)
   const qs = Object.fromEntries(req.nextUrl.searchParams.entries());
   return qs as any;
 }
 
 async function handle(req: NextRequest) {
-  if (!P24_MERCHANT_ID || !P24_POS_ID) {
-    return NextResponse.json({ error: "Server misconfigured" }, { status: 500 });
-  }
+  const MERCH = String(P24_MERCHANT_ID || "").trim();
+  const POS = String(P24_POS_ID || "").trim();
+  if (!MERCH || !POS) return NextResponse.json({ error: "Server misconfigured" }, { status: 500 });
 
   const raw = await readBodyOrQuery(req);
   const data: any = (raw as any)?.data ?? raw ?? {};
@@ -64,23 +59,24 @@ async function handle(req: NextRequest) {
 
   if (DEBUG_P24 === "1") console.log("P24 cb in:", { ct: req.headers.get("content-type"), method: req.method, sessionId, rawAmount, currency, orderIdFromGateway });
 
-  if (!sessionId || !rawAmount || !orderIdFromGateway) {
+  if (!sessionId || rawAmount === undefined || !orderIdFromGateway) {
     return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
   }
 
   const amountGr = parseP24Amount(rawAmount, currency);
+  if (amountGr === null) return NextResponse.json({ error: "Bad amount" }, { status: 400 });
 
-  // verify w P24
   const expected = p24SignVerifyMD5({ sessionId, orderId: orderIdFromGateway, amount: amountGr, currency });
+
   const host = hostFromEnv();
   const verifyBody = new URLSearchParams({
-    p24_merchant_id: String(P24_MERCHANT_ID),
-    p24_pos_id: String(P24_POS_ID),
+    p24_merchant_id: MERCH,
+    p24_pos_id: POS,
     p24_session_id: sessionId,
     p24_amount: String(amountGr),
     p24_currency: currency,
     p24_order_id: orderIdFromGateway,
-    p24_sign: String(expected),
+    p24_sign: expected,
   });
 
   const res = await fetch(`https://${host}/trnVerify`, {
@@ -95,7 +91,7 @@ async function handle(req: NextRequest) {
     (res.ok && /error=0/.test(text)) ||
     (res.ok && (() => { try { return JSON.parse(text)?.data?.status === "success"; } catch { return false; } })());
 
-  const orderIdFromSession = extractOrderIdFromSession(String(sessionId));
+  const orderIdFromSession = extractOrderIdFromSession(sessionId);
   const baseValues: Record<string, unknown> = { p24_session_id: sessionId, p24_order_id: orderIdFromGateway };
 
   const updateOrderWithFallback = async (values: Record<string, unknown>) => {
@@ -120,4 +116,4 @@ async function handle(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) { return handle(req); }
-export async function GET(req: NextRequest)  { return handle(req); } // fallback, gdyby P24 strzelało GET-em
+export async function GET(req: NextRequest)  { return handle(req); }
