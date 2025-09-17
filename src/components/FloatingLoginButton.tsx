@@ -405,7 +405,7 @@ const LoyaltyProgram: React.FC<{ supabaseClient: ReturnType<typeof createClientC
 export default function FloatingAuthButtons() {
   const router = useRouter();
   const session = useSession();
-  const supabase = createClientComponentClient(); // PKCE (domyślnie), bez 'implicit'
+  const supabase = createClientComponentClient(); // PKCE (domyślnie)
   const isLoggedIn = !!session?.user;
 
   const toggleCart = useCartStore(s => s.toggleCart);
@@ -470,7 +470,7 @@ export default function FloatingAuthButtons() {
         email,
         password,
         options: {
-          emailRedirectTo: `${window.location.origin}/verify`,
+          emailRedirectTo: `${window.location.origin}/verify?next=/`,
           data: {
             role: "client",
             full_name: fullName,
