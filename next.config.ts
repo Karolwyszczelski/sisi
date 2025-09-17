@@ -1,3 +1,4 @@
+// next.config.ts
 import type { NextConfig } from "next";
 
 const csp = [
@@ -47,15 +48,29 @@ const nextConfig: NextConfig = {
           { key: "X-Content-Type-Options", value: "nosniff" },
           { key: "X-Frame-Options", value: "DENY" },
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
-          { key: "Permissions-Policy", value: [
-              "accelerometer=()","ambient-light-sensor=()","autoplay=()","camera=()","display-capture=()",
-              "encrypted-media=()","fullscreen=()","geolocation=()","gyroscope=()","magnetometer=()",
-              "microphone=()","midi=()","payment=()","picture-in-picture=()","usb=()","xr-spatial-tracking=()",
+          {
+            key: "Permissions-Policy",
+            value: [
+              "accelerometer=()",
+              "ambient-light-sensor=()",
+              "autoplay=()",
+              "camera=()",
+              "display-capture=()",
+              "encrypted-media=()",
+              "fullscreen=()",
+              "geolocation=()",
+              "gyroscope=()",
+              "magnetometer=()",
+              "microphone=()",
+              "midi=()",
+              "payment=()",
+              "picture-in-picture=()",
+              "usb=()",
+              "xr-spatial-tracking=()",
             ].join(", "),
           },
           { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
           { key: "Cross-Origin-Resource-Policy", value: "same-origin" },
-          // <<< nowy nagłówek języka
           { key: "Content-Language", value: "pl" },
         ],
       },
@@ -65,17 +80,6 @@ const nextConfig: NextConfig = {
       { source: "/xmlrpc.php", headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }] },
       { source: "/category/:path*", headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }] },
       { source: "/tag/:path*", headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }] },
-    ];
-  },
-
-  async rewrites() {
-    return [
-      { source: "/wp-admin/:path*", destination: "/gone" },
-      { source: "/wp-content/:path*", destination: "/gone" },
-      { source: "/wp-includes/:path*", destination: "/gone" },
-      { source: "/xmlrpc.php", destination: "/gone" },
-      { source: "/category/:path*", destination: "/gone" },
-      { source: "/tag/:path*", destination: "/gone" },
     ];
   },
 };
