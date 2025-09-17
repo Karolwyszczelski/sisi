@@ -435,7 +435,6 @@ export default function CheckoutModal() {
     if (TURNSTILE_SITE_KEY && turnstileError) setShowConfirmation(false);
   }, [turnstileError]);
 
-  // upewnij się, że token jest świeży przed submit
   const ensureFreshToken = async () => {
     if (!TURNSTILE_SITE_KEY) return true;
     if (turnstileToken) return true;
@@ -691,7 +690,11 @@ export default function CheckoutModal() {
 
       await safeFetch("/api/orders/create", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          // >>> najważniejsze – żeton też w nagłówku (Cloudflare go parsuje):
+          "cf-turnstile-response": turnstileToken || "",
+        },
         body: JSON.stringify({ orderPayload, itemsPayload, turnstileToken }),
       });
 
@@ -727,7 +730,10 @@ export default function CheckoutModal() {
 
       const data = await safeFetch("/api/orders/create", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "cf-turnstile-response": turnstileToken || "",
+        },
         body: JSON.stringify({ orderPayload, itemsPayload, turnstileToken }),
       });
 
