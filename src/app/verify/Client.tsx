@@ -15,33 +15,44 @@ export default function VerifyClient() {
         const url = new URL(window.location.href);
         const sp = url.searchParams;
         const hp = new URLSearchParams(url.hash.replace(/^#/, ""));
+        const next = sp.get("next") || "/?verified=1";
 
+        // 0) Link z błędem
+        const err = sp.get("error") || sp.get("error_code");
+        const errDesc = sp.get("error_description");
+        if (err || errDesc) {
+          throw new Error(errDesc || err || "Nieznany błąd weryfikacji.");
+        }
+
+        // 1) PKCE: ?code=...
         const code = sp.get("code");
         if (code) {
           const { error } = await supabase.auth.exchangeCodeForSession(code);
           if (error) throw error;
           setMsg("Adres e-mail potwierdzony. Loguję…");
-          router.replace("/?verified=1");
+          router.replace(next);
           return;
         }
 
+        // 2) Starszy hash: #access_token=...&refresh_token=...
         const access_token = hp.get("access_token");
         const refresh_token = hp.get("refresh_token");
         if (access_token && refresh_token) {
           const { error } = await supabase.auth.setSession({ access_token, refresh_token });
           if (error) throw error;
           setMsg("Adres e-mail potwierdzony. Loguję…");
-          router.replace("/?verified=1");
+          router.replace(next);
           return;
         }
 
+        // 3) OTP: ?token_hash=...&type=signup|magiclink|recovery|email_change
         const token_hash = sp.get("token_hash");
         const type = sp.get("type") as "signup" | "magiclink" | "recovery" | "email_change" | null;
         if (token_hash && type) {
           const { error } = await supabase.auth.verifyOtp({ token_hash, type });
           if (error) throw error;
           setMsg("Adres e-mail potwierdzony. Loguję…");
-          router.replace("/?verified=1");
+          router.replace(next);
           return;
         }
 
