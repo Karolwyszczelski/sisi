@@ -23,8 +23,11 @@ declare global {
           callback?: (token: string) => void;
           "error-callback"?: () => void;
           "expired-callback"?: () => void;
+          "timeout-callback"?: () => void;
           retry?: "never" | "auto";
           theme?: "auto" | "light" | "dark";
+          appearance?: "always" | "execute" | "interaction-only";
+          ["refresh-expired"]?: "auto" | "manual";
         }
       ) => any;
       reset: (id?: any) => void;
@@ -149,12 +152,6 @@ const ProductItem: React.FC<{
           >
             Wołowina
           </button>
-          <button
-            className={clsx("px-2 py-1 rounded text-xs border", prod.meatType === "kurczak" ? "bg-yellow-300 border-yellow-400" : "bg-gray-200 border-gray-300")}
-            onClick={() => changeMeatType(prod.name, "kurczak")}
-          >
-            Kurczak
-          </button>
         </div>
 
         <div className="font-semibold mt-2">Dodatki:</div>
@@ -183,19 +180,23 @@ const ProductItem: React.FC<{
           <span className="text-xs text-gray-600">Ilość: {prod.extraMeatCount || 0}</span>
         </div>
 
-        <div className="font-semibold mt-2">Wymiana składnika:</div>
-        <div className="flex flex-wrap gap-2">
-          {prod.swaps?.map((sw: any, i: number) => (
-            <div key={i} className="bg-gray-200 text-xs px-2 py-1 rounded border border-gray-300">
-              {sw.from} → {sw.to}
+        {!!prod.availableSwaps?.length && (
+          <>
+            <div className="font-semibold mt-2">Wymiana składnika:</div>
+            <div className="flex flex-wrap gap-2">
+              {prod.swaps?.map((sw: any, i: number) => (
+                <div key={i} className="bg-gray-200 text-xs px-2 py-1 rounded border border-gray-300">
+                  {sw.from} → {sw.to}
+                </div>
+              ))}
+              {prod.availableSwaps?.map((opt: any, i: number) => (
+                <button key={i} onClick={() => swapIngredient(prod.name, opt.from, opt.to)} className="bg-white border px-2 py-1 text-xs rounded hover:bg-gray-100">
+                  {opt.from} → {opt.to}
+                </button>
+              ))}
             </div>
-          ))}
-          {prod.availableSwaps?.map((opt: any, i: number) => (
-            <button key={i} onClick={() => swapIngredient(prod.name, opt.from, opt.to)} className="bg-white border px-2 py-1 text-xs rounded hover:bg-gray-100">
-              {opt.from} → {opt.to}
-            </button>
-          ))}
-        </div>
+          </>
+        )}
       </div>
       <div className="flex justify-end items-center mt-2 gap-2 flex-wrap text-[11px]">
         <button onClick={() => removeItem(prod.name)} className="text-red-600 underline">Usuń 1 szt.</button>
@@ -203,9 +204,9 @@ const ProductItem: React.FC<{
       </div>
     </div>
   );
-}
+};
 
-/* kupony poza głównym renderem */
+/* kupony */
 type PromoType = { code: string; type: "percent" | "amount"; value: number } | null;
 function PromoSectionExternal({
   promo, promoError, onApply, onClear,
@@ -393,12 +394,16 @@ export default function CheckoutModal() {
         },
         "expired-callback": () => {
           setTurnstileToken(null);
-          try {
-            window.turnstile?.reset(tsIdRef.current);
-          } catch {}
+          try { window.turnstile?.reset(tsIdRef.current); } catch {}
+        },
+        "timeout-callback": () => {
+          setTurnstileToken(null);
+          try { window.turnstile?.reset(tsIdRef.current); } catch {}
         },
         retry: "auto",
         theme: "auto",
+        appearance: "always",
+        ["refresh-expired"]: "auto",
       });
     } catch {
       setTurnstileError(true);
@@ -429,6 +434,19 @@ export default function CheckoutModal() {
   useEffect(() => {
     if (TURNSTILE_SITE_KEY && turnstileError) setShowConfirmation(false);
   }, [turnstileError]);
+
+  // upewnij się, że token jest świeży przed submit
+  const ensureFreshToken = async () => {
+    if (!TURNSTILE_SITE_KEY) return true;
+    if (turnstileToken) return true;
+    try {
+      if (window.turnstile && tsIdRef.current) window.turnstile.reset(tsIdRef.current);
+      await new Promise((r) => setTimeout(r, 400));
+      return !!turnstileToken;
+    } catch {
+      return false;
+    }
+  };
 
   const baseTotal = useMemo<number>(() => {
     return items.reduce((acc: number, it: any) => {
@@ -464,7 +482,7 @@ export default function CheckoutModal() {
 
       setOutOfRange(false);
 
-      const perKm = (zone.pricing_type ?? "per_km") === "per_km";
+      const perKm = (zone.pricing_type ?? (zone.min_distance_km === 0 ? "flat" : "per_km")) === "per_km";
       let cost = perKm ? zone.cost * distance_km : zone.cost;
 
       if (zone.free_over != null && subtotal >= zone.free_over) cost = 0;
@@ -532,7 +550,7 @@ export default function CheckoutModal() {
       total_price: totalWithDelivery,
       discount_amount: discount || 0,
       promo_code: promo?.code || null,
-      legal_accept: { terms: true, privacy: true, version: TERMS_VERSION, ts: new Date().toISOString() },
+      legal_accept: { terms_version: TERMS_VERSION, privacy_version: TERMS_VERSION, marketing_opt_in: false },
       status: "placed",
     };
     if (selectedOption === "delivery") {
@@ -654,9 +672,14 @@ export default function CheckoutModal() {
     if (!selectedOption) return setErrorMessage("Wybierz sposób odbioru.");
     if (!paymentMethod) return setErrorMessage("Wybierz metodę płatności.");
     if (!requireLegalBeforeConfirm()) return;
-    if (!requireCaptchaBeforeConfirm()) return;
     if (hoursGuardFail()) return setErrorMessage("Zamówienia przyjmujemy tylko w godz. 11:30–21:45.");
     if (!guardEmail()) return;
+
+    if (TURNSTILE_SITE_KEY) {
+      const ok = await ensureFreshToken();
+      if (!ok) return setErrorMessage("Potwierdź, że nie jesteś robotem.");
+    }
+
     if (selectedOption === "delivery") {
       if (outOfRange) return setErrorMessage("Adres jest poza zasięgiem dostawy.");
       if (!deliveryMinOk) return setErrorMessage(`Minimalna wartość zamówienia dla tej strefy to ${deliveryMinRequired.toFixed(2)} zł.`);
@@ -676,6 +699,7 @@ export default function CheckoutModal() {
       setOrderSent(true);
     } catch (err: any) {
       setErrorMessage(err.message || "Wystąpił błąd podczas składania zamówienia.");
+      try { if (window.turnstile && tsIdRef.current) window.turnstile.reset(tsIdRef.current); } catch {}
     }
   };
 
@@ -684,9 +708,14 @@ export default function CheckoutModal() {
     if (!selectedOption) return setErrorMessage("Wybierz sposób odbioru.");
     if (!paymentMethod) return setErrorMessage("Wybierz metodę płatności.");
     if (!requireLegalBeforeConfirm()) return;
-    if (!requireCaptchaBeforeConfirm()) return;
     if (hoursGuardFail()) return setErrorMessage("Zamówienia przyjmujemy tylko w godz. 11:30–21:45.");
     if (!guardEmail()) return;
+
+    if (TURNSTILE_SITE_KEY) {
+      const ok = await ensureFreshToken();
+      if (!ok) return setErrorMessage("Potwierdź, że nie jesteś robotem.");
+    }
+
     if (selectedOption === "delivery") {
       if (outOfRange) return setErrorMessage("Adres jest poza zasięgiem dostawy.");
       if (!deliveryMinOk) return setErrorMessage(`Minimalna wartość zamówienia dla tej strefy to ${deliveryMinRequired.toFixed(2)} zł.`);
@@ -721,12 +750,13 @@ export default function CheckoutModal() {
       }
     } catch (e: any) {
       setErrorMessage(e.message || "Nie udało się zainicjować płatności.");
+      try { if (window.turnstile && tsIdRef.current) window.turnstile.reset(tsIdRef.current); } catch {}
     }
   };
 
   if (!isClient || !isCheckoutOpen) return null;
 
-  /* zgody jako element */
+  /* zgody */
   const LegalConsentEl = (
     <label className="flex items-start gap-2 mt-3 text-xs leading-5">
       <input type="checkbox" checked={legalAccepted} onChange={(e) => setLegalAccepted(e.target.checked)} className="mt-0.5" />
@@ -744,6 +774,7 @@ export default function CheckoutModal() {
     <>
       {TURNSTILE_SITE_KEY && (
         <Script
+          id="cf-turnstile"
           src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"
           async
           defer
@@ -961,7 +992,7 @@ export default function CheckoutModal() {
                               <div className="mt-2">
                                 <h4 className="font-semibold mb-1">Weryfikacja</h4>
                                 {turnstileError ? (
-                                  <p className="text-sm text-red-600">Nie udało się załadować weryfikacji. Sprawdź CSP lub blokery.</p>
+                                  <p className="text-sm text-red-600">Nie udało się załadować weryfikacji. Sprawdź blokery.</p>
                                 ) : (
                                   <>
                                     <div ref={tsMobileRef} />
@@ -973,7 +1004,14 @@ export default function CheckoutModal() {
 
                             {!showConfirmation ? (
                               !shouldHideOrderActions && (
-                                <button onClick={() => setShowConfirmation(true)} disabled={!paymentMethod || !legalAccepted || (TURNSTILE_SITE_KEY ? !turnstileToken : false)} className="w-full mt-3 py-2 bg-yellow-400 text-black rounded font-semibold disabled:opacity-50">
+                                <button
+                                  onClick={async () => {
+                                    if (!(await ensureFreshToken())) return setErrorMessage("Potwierdź, że nie jesteś robotem.");
+                                    setShowConfirmation(true);
+                                  }}
+                                  disabled={!paymentMethod || !legalAccepted || (TURNSTILE_SITE_KEY ? !turnstileToken : false)}
+                                  className="w-full mt-3 py-2 bg-yellow-400 text-black rounded font-semibold disabled:opacity-50"
+                                >
                                   Potwierdź płatność
                                 </button>
                               )
@@ -996,10 +1034,10 @@ export default function CheckoutModal() {
                     <div className="mt-2 flex justify-between">
                       <button onClick={() => goToStep(2)} className="px-4 py-2 bg-gray-200 rounded">← Wstecz</button>
                       <button
-                        onClick={() => {
+                        onClick={async () => {
                           if (!paymentMethod) setErrorMessage("Wybierz metodę płatności.");
-                          if (!legalAccepted) setErrorMessage("Zaznacz akceptację regulaminu i polityki prywatności.");
-                          if (TURNSTILE_SITE_KEY && !turnstileToken) setErrorMessage("Potwierdź, że nie jesteś robotem.");
+                          else if (!legalAccepted) setErrorMessage("Zaznacz akceptację regulaminu i polityki prywatności.");
+                          else if (TURNSTILE_SITE_KEY && !(await ensureFreshToken())) setErrorMessage("Potwierdź, że nie jesteś robotem.");
                           document.getElementById("paymentBox")?.scrollIntoView({ behavior: "smooth", block: "start" });
                           setShowConfirmation(true);
                         }}
@@ -1054,7 +1092,7 @@ export default function CheckoutModal() {
                     <div className="mt-2">
                       <h4 className="font-semibold mb-1">Weryfikacja</h4>
                       {turnstileError ? (
-                        <p className="text-sm text-red-600">Nie udało się załadować weryfikacji. Sprawdź CSP lub blokery.</p>
+                        <p className="text-sm text-red-600">Nie udało się załadować weryfikacji. Sprawdź blokery.</p>
                       ) : (
                         <>
                           <div ref={tsDesktopRef} />
@@ -1066,7 +1104,14 @@ export default function CheckoutModal() {
 
                   {!showConfirmation ? (
                     !shouldHideOrderActions && (
-                      <button onClick={() => setShowConfirmation(true)} disabled={!paymentMethod || !legalAccepted || (TURNSTILE_SITE_KEY ? !turnstileToken : false)} className="w-full mt-3 py-2 bg-yellow-400 text-black rounded font-semibold disabled:opacity-50">
+                      <button
+                        onClick={async () => {
+                          if (!(await ensureFreshToken())) return setErrorMessage("Potwierdź, że nie jesteś robotem.");
+                          setShowConfirmation(true);
+                        }}
+                        disabled={!paymentMethod || !legalAccepted || (TURNSTILE_SITE_KEY ? !turnstileToken : false)}
+                        className="w-full mt-3 py-2 bg-yellow-400 text-black rounded font-semibold disabled:opacity-50"
+                      >
                         Potwierdź płatność
                       </button>
                     )
