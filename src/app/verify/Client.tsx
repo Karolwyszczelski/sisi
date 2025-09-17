@@ -1,11 +1,10 @@
 "use client";
-
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 
 export default function VerifyClient() {
-  const supabase = createClientComponentClient();
+  const supabase = createClientComponentClient({ options: { auth: { flowType: "implicit" } } });
   const router = useRouter();
   const [msg, setMsg] = useState("Weryfikuję link…");
 
@@ -17,35 +16,23 @@ export default function VerifyClient() {
         const hp = new URLSearchParams(url.hash.replace(/^#/, ""));
         const next = sp.get("next") || "/?verified=1";
 
-        // 0) Link z błędem
+        // Błędy z linku
         const err = sp.get("error") || sp.get("error_code");
         const errDesc = sp.get("error_description");
-        if (err || errDesc) {
-          throw new Error(errDesc || err || "Nieznany błąd weryfikacji.");
+        if (err || errDesc) throw new Error(errDesc || err!);
+
+        // Najpierw spróbuj uniwersalnie (obsługuje #access_token i ?code)
+        const got = await supabase.auth.getSessionFromUrl({ storeSession: true });
+        if (!got.error && got.data?.session) {
+          setMsg("Adres e-mail potwierdzony. Loguję…");
+          router.replace(next);
+          return;
         }
 
-        // 1) PKCE: ?code=...
+        // Fallbacki:
         const code = sp.get("code");
-        if (code) {
-          const { error } = await supabase.auth.exchangeCodeForSession(code);
-          if (error) throw error;
-          setMsg("Adres e-mail potwierdzony. Loguję…");
-          router.replace(next);
-          return;
-        }
+        if (code) throw new Error("Nie mogę zweryfikować (brak code_verifier). Otwórz link w tej samej przeglądarce lub poproś o nowy link.");
 
-        // 2) Starszy hash: #access_token=...&refresh_token=...
-        const access_token = hp.get("access_token");
-        const refresh_token = hp.get("refresh_token");
-        if (access_token && refresh_token) {
-          const { error } = await supabase.auth.setSession({ access_token, refresh_token });
-          if (error) throw error;
-          setMsg("Adres e-mail potwierdzony. Loguję…");
-          router.replace(next);
-          return;
-        }
-
-        // 3) OTP: ?token_hash=...&type=signup|magiclink|recovery|email_change
         const token_hash = sp.get("token_hash");
         const type = sp.get("type") as "signup" | "magiclink" | "recovery" | "email_change" | null;
         if (token_hash && type) {
