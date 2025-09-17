@@ -6,9 +6,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import {
   extractOrderIdFromSession,
-  hostFromEnv,
-  p24SignVerifyMD5,
-  parseP24Amount,
+  hostFromEnv,           // zwraca 'secure.przelewy24.pl' lub 'sandbox.przelewy24.pl'
+  p24SignVerifyMD5,     // md5(sessionId|orderId|amount|currency|crc)
+  parseP24Amount,       // zamienia 15.90 PLN -> 1590
 } from "@/lib/p24";
 
 const {
@@ -39,13 +39,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
     if (!P24_MERCHANT_ID || !P24_POS_ID) {
-      console.error("P24 env missing: P24_MERCHANT_ID or P24_POS_ID");
       return NextResponse.json({ error: "Server misconfigured" }, { status: 500 });
     }
 
     const amountGr = parseP24Amount(rawAmount, currency);
 
-    // podpis wymagany w /trnVerify
     const expected = p24SignVerifyMD5({
       sessionId,
       orderId: String(orderIdFromGateway),
@@ -53,7 +51,6 @@ export async function POST(req: NextRequest) {
       currency,
     });
 
-    // verify call do P24
     const host = hostFromEnv();
     const verifyBody = new URLSearchParams({
       p24_merchant_id: String(P24_MERCHANT_ID),
@@ -74,23 +71,10 @@ export async function POST(req: NextRequest) {
 
     const ok =
       (res.ok && /error=0/.test(text)) ||
-      (res.ok &&
-        (() => {
-          try {
-            const j = JSON.parse(text);
-            return j?.data?.status === "success";
-          } catch {
-            return false;
-          }
-        })());
+      (res.ok && (() => { try { const j = JSON.parse(text); return j?.data?.status === "success"; } catch { return false; } })());
 
-    // fallback: orderId z sessionId
     const orderIdFromSession = extractOrderIdFromSession(sessionId);
-    if (!orderIdFromSession) {
-      console.warn("P24 callback: unable to derive order id", { sessionId });
-    }
 
-    // wartości pomocnicze do zapisu
     const baseValues: Record<string, unknown> = {
       p24_session_id: String(sessionId),
       ...(orderIdFromGateway ? { p24_order_id: String(orderIdFromGateway) } : {}),
@@ -107,79 +91,43 @@ export async function POST(req: NextRequest) {
         .select()
         .maybeSingle();
 
-      if (error) {
-        console.error(
-          `P24 callback: ${statusLabel} status update by session id failed`,
-          error
-        );
-        return "error";
-      }
+      if (error) return "error";
       if (data) return "success";
-
-      console.warn(
-        `P24 callback: no order matched session id for ${statusLabel} update`,
-        { sessionId }
-      );
 
       if (!orderIdFromSession) return "not-found";
 
-      const { data: fallbackData, error: fallbackError } = await supabase
+      const { data: d2, error: e2 } = await supabase
         .from("orders")
         .update(values)
         .eq("id", orderIdFromSession)
         .select()
         .maybeSingle();
 
-      if (fallbackError) {
-        console.error(
-          `P24 callback: ${statusLabel} status update by order id failed`,
-          fallbackError
-        );
-        return "error";
-      }
-      if (fallbackData) return "success";
-
-      console.warn(
-        `P24 callback: no order matched fallback order id for ${statusLabel} update`,
-        { sessionId, orderIdFromSession }
-      );
-      return "not-found";
+      if (e2) return "error";
+      return d2 ? "success" : "not-found";
     };
 
     if (ok) {
       const paidAt = new Date().toISOString();
-      const updateResult = await updateOrderWithFallback(
+      const r = await updateOrderWithFallback(
         { ...baseValues, payment_status: "paid", paid_at: paidAt },
         "paid"
       );
-
-      if (updateResult === "error") {
-        return NextResponse.json({ error: "Update failed" }, { status: 500 });
-      }
-      if (updateResult === "not-found") {
-        return NextResponse.json({ error: "Order not found" }, { status: 400 });
-      }
+      if (r === "error") return NextResponse.json({ error: "Update failed" }, { status: 500 });
+      if (r === "not-found") return NextResponse.json({ error: "Order not found" }, { status: 400 });
       return NextResponse.json({ ok: true });
     }
 
-    const failedResult = await updateOrderWithFallback(
+    const rf = await updateOrderWithFallback(
       { ...baseValues, payment_status: "failed" },
       "failed"
     );
-
-    if (failedResult === "error") {
-      return NextResponse.json({ error: "Update failed" }, { status: 500 });
+    if (rf === "error") return NextResponse.json({ error: "Update failed" }, { status: 500 });
+    if (rf === "not-found") {
+      return NextResponse.json({ ok: false, error: "Order not found" }, { status: 400 });
     }
-    if (failedResult === "not-found") {
-      return NextResponse.json(
-        { ok: false, error: "Order not found" },
-        { status: 400 }
-      );
-    }
-
     return NextResponse.json({ ok: false }, { status: 400 });
-  } catch (e: unknown) {
-    console.error("P24 callback error:", e);
+  } catch (e) {
     return NextResponse.json({ error: "Server error" }, { status: 500 });
   }
 }

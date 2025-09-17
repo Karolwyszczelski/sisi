@@ -156,10 +156,13 @@ export async function POST(req: Request) {
       return "not-found";
     };
 
-    const baseValues: Record<string, unknown> =
-      orderIdFromGateway
+     const baseValues: Record<string, unknown> = {
+      p24_session_id: String(sessionId),
+      ...(orderIdFromGateway
         ? { p24_order_id: String(orderIdFromGateway) }
-        : {};
+        : {}),
+    };
+
 
 
     if (ok) {

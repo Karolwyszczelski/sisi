@@ -308,6 +308,18 @@ export default function PickupOrdersPage() {
     return () => { void supabase.removeChannel(ch); };
   }, [fetchOrders, supabase]);
 
+  // DODANE: lekki nasłuch tylko płatności – aktualizuje lokalny stan bez pełnego refetch
+  useEffect(() => {
+    const ch = supabase
+      .channel("orders-payments")
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "orders" }, (payload: any) => {
+        const n = payload.new;
+        setOrders((prev) => prev.map((o) => (o.id === n.id ? { ...o, payment_status: n.payment_status, payment_method: n.payment_method } : o)));
+      })
+      .subscribe();
+    return () => { void supabase.removeChannel(ch); };
+  }, [supabase]);
+
   useEffect(() => {
     const hasPending = orders.some((o) => o.payment_method === "Online" && o.payment_status === "pending");
     if (!hasPending || editingOrderId) return;
@@ -415,7 +427,7 @@ export default function PickupOrdersPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(patch),
       });
-      if (!res.ok) return;
+    if (!res.ok) return;
       updateLocal(o.id, { payment_method: method, payment_status: patch.payment_status ?? o.payment_status });
     } finally { setEditingOrderId(null); }
   };
