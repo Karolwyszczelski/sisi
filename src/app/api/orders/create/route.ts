@@ -344,11 +344,11 @@ export async function POST(req: Request) {
     const nowPl = toZonedTime(new Date(), "Europe/Warsaw");
     const h = nowPl.getHours();
     const m = nowPl.getMinutes();
-    const beforeOpen = h < 11 || (h === 11 && m < 30);
+    const beforeOpen = h < 10 || (h === 10 && m < 40);
     const afterClose = h > 21 || (h === 21 && m > 45);
     if (beforeOpen || afterClose) {
       return NextResponse.json(
-        { error: "Zamówienia przyjmujemy w godz. 11:30–21:45." },
+        { error: "Zamówienia przyjmujemy w godz. 10:40–21:45." },
         { status: 400 }
       );
     }
