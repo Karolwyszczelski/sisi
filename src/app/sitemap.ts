@@ -7,9 +7,8 @@ export default function sitemap(): MetadataRoute.Sitemap {
   const now = new Date();
   const paths = [
     "",
-    "/menu",
-    "/rezerwacje",
-    "/kontakt",
+    "/#menu",
+    "/#kontakt",
     "/legal/regulamin",
     "/legal/polityka-prywatnosci",
   ];
