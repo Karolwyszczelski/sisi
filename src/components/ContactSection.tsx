@@ -21,6 +21,7 @@ export default function ContactSection() {
               Pon - Czw: 11:00 - 22:00
               <br />
               Pt - Sob: 11:00 - 24:00 - Bar
+              <br />
               Pt - Sob: 11:00 - 22:00 - Kuchnia
               <br />
               Niedziela: 11:00 - 22:00

@@ -295,7 +295,7 @@ export default function CheckoutModal() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const [deliveryTimeOption, setDeliveryTimeOption] = useState<"asap" | "schedule">("asap");
-  const [scheduledTime, setScheduledTime] = useState<string>("11:30");
+  const [scheduledTime, setScheduledTime] = useState<string>("10:40");
 
   const [products, setProducts] = useState<Product[]>([]);
   const [zones, setZones] = useState<Zone[]>([]);
@@ -592,7 +592,7 @@ export default function CheckoutModal() {
     const nowPl = toZonedTime(new Date(), "Europe/Warsaw");
     const h = nowPl.getHours();
     const m = nowPl.getMinutes();
-    const beforeOpen = h < 11 || (h === 11 && m < 30);
+    const beforeOpen = h < 10 || (h === 10 && m < 40);
     const afterClose = h > 21 || (h === 21 && m > 45);
     return beforeOpen || afterClose;
   };
@@ -673,7 +673,7 @@ export default function CheckoutModal() {
     if (!selectedOption) return setErrorMessage("Wybierz sposób odbioru.");
     if (!paymentMethod) return setErrorMessage("Wybierz metodę płatności.");
     if (!requireLegalBeforeConfirm()) return;
-    if (hoursGuardFail()) return setErrorMessage("Zamówienia przyjmujemy tylko w godz. 11:30–21:45.");
+    if (hoursGuardFail()) return setErrorMessage("Zamówienia przyjmujemy tylko w godz. 10:40–21:45.");
     if (!guardEmail()) return;
 
     if (TURNSTILE_SITE_KEY) {
