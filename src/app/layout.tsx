@@ -29,7 +29,7 @@ export const metadata: Metadata = {
     siteName: "SISI Burger & Pancakes",
     title: "SISI Burger & Pancakes",
     description: "Zamów najlepsze burgery i pancakes w Ciechanowie!",
-    images: [{ url: "/og-cover.jpg", width: 1200, height: 630 }],
+    images: [{ url: "/og/sisi-og.jpg", width: 1200, height: 630, alt: "SISI Burger & Pancakes" }]
     locale: "pl_PL",
   },
   twitter: {
