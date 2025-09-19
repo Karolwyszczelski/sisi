@@ -76,7 +76,7 @@ export default function BurgerMiesiaca() {
   const handleAddToCart = () => {
     addItem({
       name: `Burger Miesiąca – ${burgerName}`,
-      price: 29,
+      price: 34.90,
       quantity: 1,
     });
     setAdded(true);
