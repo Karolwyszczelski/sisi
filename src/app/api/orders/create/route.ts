@@ -38,7 +38,7 @@ const PRIVACY_VERSION = process.env.PRIVACY_VERSION || "2025-01";
 const TERMS_URL =
   process.env.TERMS_URL || "https://www.sisiciechanow.pl/regulamin";
 const PRIVACY_URL =
-  process.env.PRIVACY_URL || "https://www.sisiciechanow.pl/polityka-prywatnosci";
+  process.env.TERMS_URL || "https://www.sisiciechanow.pl/polityka-prywatnosci";
 
 /* ============== Typy i utils =============== */
 type Any = Record<string, any>;
@@ -318,10 +318,29 @@ function normalizeBody(raw: any, req: Request) {
   };
 }
 
+/* ===== Kalkulacja subtotalu po stronie serwera (spójna z frontem) ===== */
+const SAUCES = [
+  "Amerykański","Ketchup","Majonez","Musztarda","Meksykański","Serowy chili","Czosnkowy","Musztardowo-miodowy","BBQ",
+];
+
+function calcSubtotalFromItems(selected_option: string, itemsArray: Any[]): number {
+  const packaging = (selected_option === "delivery" || selected_option === "takeaway") ? 2 : 0;
+  const itemsSum = itemsArray.reduce((acc, it) => {
+    const qty = Number(it.quantity ?? 1) || 1;
+    const basePrice = Number(it.price ?? it.unit_price ?? 0) || 0;
+    const addons = Array.isArray(it?.options?.addons) ? it.options.addons : (Array.isArray(it.addons) ? it.addons : []);
+    const addonsCost = (addons ?? []).reduce((s: number, a: any) => s + (SAUCES.includes(String(a)) ? 3 : 4), 0);
+    const extraMeat = Number(it?.options?.extraMeatCount ?? 0) || 0;
+    const extraMeatCost = extraMeat * 10;
+    return acc + (basePrice + addonsCost + extraMeatCost) * qty;
+  }, 0);
+  return Math.max(0, Math.round((itemsSum + packaging) * 100) / 100);
+}
+
 /* ===================== Handler ===================== */
 export async function POST(req: Request) {
   try {
-    // 0) Kill-switch (globalne włącz/wyłącz zamawianie)
+    // 0) Kill-switch
     {
       const { data: cfg, error: cfgErr } = await supabaseAdmin
         .from("restaurant_info")
@@ -361,7 +380,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
     }
 
-    // 2.0) Weryfikacja Turnstile (jeśli skonfigurowana)
+    // 2.0) Turnstile
     if (TURNSTILE_SECRET_KEY) {
       const headerToken =
         req.headers.get("cf-turnstile-response") ||
@@ -406,8 +425,19 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Koszyk jest pusty." }, { status: 400 });
     }
 
-    // 2.1) Walidacja strefy dostawy (gdy mamy współrzędne)
-    if (n.selected_option === "delivery" && n.delivery_lat != null && n.delivery_lng != null) {
+    // 2.1) Subtotal po stronie serwera
+    const baseFromItems = calcSubtotalFromItems(n.selected_option, n.itemsArray);
+    const discount = Math.max(0, Number(n.discount_amount || 0));
+
+    // 2.2) Dostawa: wymagaj współrzędnych, dopasuj strefę z <= max, policz koszt
+    if (n.selected_option === "delivery") {
+      if (n.delivery_lat == null || n.delivery_lng == null) {
+        return NextResponse.json(
+          { error: "Wybierz adres z listy, aby ustawić lokalizację dostawy." },
+          { status: 400 }
+        );
+      }
+
       const [{ data: zones, error: zErr }, { data: rest, error: rErr }] = await Promise.all([
         supabaseAdmin.from("delivery_zones").select("*").eq("active", true),
         supabaseAdmin.from("restaurant_info").select("lat,lng").eq("id", 1).single(),
@@ -424,41 +454,40 @@ export async function POST(req: Request) {
 
       const zone = (zones as any[])
         .sort((a, b) => Number(a.min_distance_km) - Number(b.min_distance_km))
-        .find((z) => distance_km >= Number(z.min_distance_km) && distance_km < Number(z.max_distance_km));
+        .find((z) => distance_km >= Number(z.min_distance_km) && distance_km <= Number(z.max_distance_km));
 
       if (!zone) {
         return NextResponse.json({ error: "Adres poza zasięgiem dostawy." }, { status: 400 });
       }
 
-      const base = Math.max(0, Number(n.total_price || 0) - Number(n.delivery_cost || 0));
-
-      if (base < Number(zone.min_order_value || 0)) {
+      // Minimum zamówienia dla dostawy z DB (np. 40 zł)
+      if (baseFromItems < Number(zone.min_order_value || 0)) {
         return NextResponse.json(
-          { error: `Minimalna wartość zamówienia to ${Number(zone.min_order_value).toFixed(2)} zł.` },
+          { error: `Minimalna wartość zamówienia dla dostawy to ${Number(zone.min_order_value).toFixed(2)} zł.` },
           { status: 400 }
         );
       }
 
       const pricingType: string =
-        (zone.pricing_type as string) ??
-        (Number(zone.min_distance_km) === 0 ? "flat" : "per_km");
+        (zone.pricing_type as string) ?? (Number(zone.min_distance_km) === 0 ? "flat" : "per_km");
 
-      const perKmRate =
-        Number(zone.cost_per_km ?? zone.per_km ?? zone.zl_per_km ?? zone.cost ?? 0);
-      const flatCost =
-        Number(zone.flat_cost ?? zone.stala ?? zone.cost ?? 0);
+      const perKmRate = Number((zone as any).cost_per_km ?? (zone as any).per_km ?? (zone as any).zl_per_km ?? zone.cost ?? 0);
+      const flatCost  = Number((zone as any).flat_cost ?? (zone as any).stala ?? zone.cost ?? 0);
 
-      let serverCost =
-        pricingType === "per_km" ? perKmRate * distance_km : flatCost;
+      let serverCost = pricingType === "per_km" ? perKmRate * distance_km : flatCost;
 
-      if (zone.free_over != null && base >= Number(zone.free_over)) {
+      if (zone.free_over != null && baseFromItems >= Number(zone.free_over)) {
         serverCost = 0;
       }
 
       const rounded = Math.max(0, Math.round(serverCost * 100) / 100);
 
       n.delivery_cost = rounded;
-      n.total_price = Math.max(0, Math.round((base + rounded) * 100) / 100);
+      n.total_price = Math.max(0, Math.round((baseFromItems + rounded - Math.min(discount, baseFromItems + rounded)) * 100) / 100);
+    } else {
+      // brak dostawy
+      n.delivery_cost = 0;
+      n.total_price = Math.max(0, Math.round((baseFromItems - Math.min(discount, baseFromItems)) * 100) / 100);
     }
 
     // 3) Dociągnij produkty po STRING id
@@ -529,7 +558,7 @@ export async function POST(req: Request) {
             name: ni.name,
             quantity: ni.quantity,
             unit_price: ni.price,
-            line_no: i + 1,
+            line_no: i + 1, // kolumna może być dodana przez IF NOT EXISTS
           };
         });
         const { error: oiErr } = await supabaseAdmin.from("order_items").insert(shaped);
@@ -585,6 +614,7 @@ export async function POST(req: Request) {
         const to = normalizePhone(STAFF_PHONE_NUMBER);
         const from = TWILIO_FROM_NUMBER;
         if (to && from) {
+          // podgląd nazw z pozycji
           const previewNames = normalizedItems.slice(0, 3).map((x) => x.name).join(", ");
           const more = normalizedItems.length > 3 ? ` +${normalizedItems.length - 3}` : "";
           const total =
