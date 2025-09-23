@@ -684,6 +684,8 @@ export default function CheckoutModal() {
     if (selectedOption === "delivery") {
       if (outOfRange) return setErrorMessage("Adres jest poza zasięgiem dostawy.");
       if (!deliveryMinOk) return setErrorMessage(`Minimalna wartość zamówienia dla tej strefy to ${deliveryMinRequired.toFixed(2)} zł.`);
+      if (!custCoords) return setErrorMessage("Wybierz adres z listy, aby ustawić lokalizację dostawy.");
+      if (!deliveryInfo) return setErrorMessage("Poczekaj na przeliczenie kosztu dostawy.");
     }
 
     try {
@@ -694,7 +696,6 @@ export default function CheckoutModal() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          // >>> najważniejsze – żeton też w nagłówku (Cloudflare go parsuje):
           "cf-turnstile-response": turnstileToken || "",
         },
         body: JSON.stringify({ orderPayload, itemsPayload, turnstileToken }),
@@ -724,6 +725,8 @@ export default function CheckoutModal() {
     if (selectedOption === "delivery") {
       if (outOfRange) return setErrorMessage("Adres jest poza zasięgiem dostawy.");
       if (!deliveryMinOk) return setErrorMessage(`Minimalna wartość zamówienia dla tej strefy to ${deliveryMinRequired.toFixed(2)} zł.`);
+      if (!custCoords) return setErrorMessage("Wybierz adres z listy, aby ustawić lokalizację dostawy.");
+      if (!deliveryInfo) return setErrorMessage("Poczekaj na przeliczenie kosztu dostawy.");
     }
 
     try {
@@ -778,6 +781,9 @@ export default function CheckoutModal() {
     </label>
   );
 
+  const confirmDisabled = !paymentMethod || !legalAccepted || (TURNSTILE_SITE_KEY ? !turnstileToken : false) ||
+    (selectedOption === "delivery" && (!!outOfRange || !deliveryMinOk || !custCoords || !deliveryInfo));
+
   return (
     <>
       {TURNSTILE_SITE_KEY && (
@@ -810,7 +816,7 @@ export default function CheckoutModal() {
 
             {orderSent ? (
               <div className="text-center space-y-4">
-                {/* QR na samej górze, wycentrowany */}
+                {/* QR */}
                 <div className="w-full flex justify-center">
                   <div className="bg-white p-3 rounded-xl shadow-sm">
                     <QRCode value={THANKS_QR_URL} size={160} />
@@ -1025,7 +1031,7 @@ export default function CheckoutModal() {
                                     if (!(await ensureFreshToken())) return setErrorMessage("Potwierdź, że nie jesteś robotem.");
                                     setShowConfirmation(true);
                                   }}
-                                  disabled={!paymentMethod || !legalAccepted || (TURNSTILE_SITE_KEY ? !turnstileToken : false)}
+                                  disabled={confirmDisabled}
                                   className="w-full mt-3 py-2 bg-yellow-400 text-black rounded font-semibold disabled:opacity-50"
                                 >
                                   Potwierdź płatność
@@ -1034,7 +1040,7 @@ export default function CheckoutModal() {
                             ) : (
                               !shouldHideOrderActions && (
                                 <div className="flex flex-col gap-2 mt-2">
-                                  <button onClick={paymentMethod === "Online" ? handleOnlinePayment : handleSubmitOrder} className="w-full py-2 bg-black text-white rounded font-semibold hover:opacity-95">
+                                  <button onClick={paymentMethod === "Online" ? handleOnlinePayment : handleSubmitOrder} className="w-full py-2 bg-black text-white rounded font-semibold hover:opacity-95" disabled={confirmDisabled}>
                                     ✅ Zamawiam i płacę ({paymentMethod})
                                   </button>
                                   <button onClick={() => setShowConfirmation(false)} className="text-xs underline">Zmień metodę</button>
@@ -1125,7 +1131,7 @@ export default function CheckoutModal() {
                           if (!(await ensureFreshToken())) return setErrorMessage("Potwierdź, że nie jesteś robotem.");
                           setShowConfirmation(true);
                         }}
-                        disabled={!paymentMethod || !legalAccepted || (TURNSTILE_SITE_KEY ? !turnstileToken : false)}
+                        disabled={confirmDisabled}
                         className="w-full mt-3 py-2 bg-yellow-400 text-black rounded font-semibold disabled:opacity-50"
                       >
                         Potwierdź płatność
@@ -1134,7 +1140,7 @@ export default function CheckoutModal() {
                   ) : (
                     !shouldHideOrderActions && (
                       <div className="flex flex-col gap-2 mt-2">
-                        <button onClick={paymentMethod === "Online" ? handleOnlinePayment : handleSubmitOrder} className="w-full py-2 bg-black text-white rounded font-semibold hover:opacity-95">
+                        <button onClick={paymentMethod === "Online" ? handleOnlinePayment : handleSubmitOrder} className="w-full py-2 bg-black text-white rounded font-semibold hover:opacity-95" disabled={confirmDisabled}>
                           ✅ Zamawiam i płacę ({paymentMethod})
                         </button>
                         <button onClick={() => setShowConfirmation(false)} className="text-xs underline">Zmień</button>
