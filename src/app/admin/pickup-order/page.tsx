@@ -103,30 +103,41 @@ const deepFindName = (root: Any): string | undefined => {
   return undefined;
 };
 
-/* --------------------- DODATKI: LICZENIE I AGREGACJA ---------------------- */
+/* --------------------- DODATKI: LICZENIE, FILTR, AGREGACJA ---------------- */
 
 type Addon = { name: string; qty: number };
 
 const cleanLabel = (s: string) =>
-  s
-    .replace(/\s*[+\-]?\s*\d+[.,]?\d*\s*zł/gi, "")
-    .replace(/\s{2,}/g, " ")
-    .trim();
+  s.replace(/\s*[+\-]?\s*\d+[.,]?\d*\s*zł/gi, "").replace(/\s{2,}/g, " ").trim();
+
+const ADDON_BLOCK: RegExp[] = [
+  /^mi[eę]so\b/i,
+  /wysmaż/i,
+  /^stopie[nń]/i,
+  /^rozmiar\b/i,
+  /^nap[óo]j\b/i,
+  /^pojemno[śs]ć\b/i,
+  /^l[óo]d\b/i,
+];
+
+const isAddonAllowed = (label: string) => {
+  const t = cleanLabel(label);
+  if (!t || t === "-" || t === "0") return false;
+  if (t.includes(":")) return false; // atrybut „X: Y” → nie dodatek
+  return !ADDON_BLOCK.some((re) => re.test(t));
+};
 
 const parseAddonString = (s: string): Addon | null => {
   if (!s) return null;
   let raw = cleanLabel(String(s));
 
-  // 2x Bekon / 2 × Bekon
-  let m = raw.match(/^\s*(\d+)\s*[x×]\s*(.+)$/i);
+  let m = raw.match(/^\s*(\d+)\s*[x×]\s*(.+)$/i); // 2x Bekon
   if (m) return { name: cleanLabel(m[2]), qty: Math.max(1, Number(m[1])) };
 
-  // Bekon x2 / Bekon × 2
-  m = raw.match(/^(.+?)\s*[x×]\s*(\d+)\s*$/i);
+  m = raw.match(/^(.+?)\s*[x×]\s*(\d+)\s*$/i); // Bekon x2
   if (m) return { name: cleanLabel(m[1]), qty: Math.max(1, Number(m[2])) };
 
-  // Bekon (x2) / Bekon (2)
-  m = raw.match(/^(.+?)\s*\(\s*(?:x\s*)?(\d+)\s*\)\s*$/i);
+  m = raw.match(/^(.+?)\s*\(\s*(?:x\s*)?(\d+)\s*\)\s*$/i); // Bekon (x2)
   if (m) return { name: cleanLabel(m[1]), qty: Math.max(1, Number(m[2])) };
 
   return { name: raw, qty: 1 };
@@ -140,7 +151,6 @@ const collectAddonsDetailed = (val: any): Addon[] => {
   }
   if (Array.isArray(val)) return val.flatMap((v) => collectAddonsDetailed(v));
   if (typeof val === "object") {
-    // słownik { "Bekon": true }
     const truthy = Object.entries(val)
       .filter(([, v]) => v === true || v === 1 || v === "1")
       .map(([k]) => ({ name: cleanLabel(k), qty: 1 }));
@@ -155,7 +165,8 @@ const collectAddonsDetailed = (val: any): Addon[] => {
     const qty = toNumber((val as any).qty ?? (val as any).quantity ?? (val as any).amount ?? 1, 1) || 1;
     if (name) return [{ name: cleanLabel(name), qty: Math.max(1, qty) }];
 
-    if ((val as any).items && Array.isArray((val as any).items)) return collectAddonsDetailed((val as any).items);
+    // NIE schodzimy w .items, żeby nie łapać atrybutów produktu
+    // if ((val as any).items && Array.isArray((val as any).items)) return collectAddonsDetailed((val as any).items);
   }
   return [];
 };
@@ -185,7 +196,6 @@ const normalizeProduct = (raw: Any) => {
   const price = toNumber(raw.price ?? raw.unit_price ?? raw.total_price ?? raw.amount_price ?? raw.item?.price ?? 0);
   const quantity = toNumber(raw.quantity ?? raw.qty ?? raw.amount ?? 1, 1) || 1;
 
-  // szczegółowe dodatki z ilościami
   const addonsDetailed = aggregateAddons([
     ...collectAddonsDetailed(raw.addons),
     ...collectAddonsDetailed(raw.extras),
@@ -193,7 +203,7 @@ const normalizeProduct = (raw: Any) => {
     ...collectAddonsDetailed(raw.selected_addons),
     ...collectAddonsDetailed(raw.toppings),
     ...collectStrings(raw.addons).map((s) => parseAddonString(s)).filter(Boolean) as Addon[],
-  ]);
+  ]).filter((a) => isAddonAllowed(a.name));
 
   const addons = addonsDetailed.map((a) => a.name);
   const addonsTotalQty = addonsDetailed.reduce((s, a) => s + a.qty, 0);
@@ -364,7 +374,6 @@ export default function PickupOrdersPage() {
       });
 
       const prev = prevIdsRef.current;
-      // dźwięk TYLKO dla nowych, które pojawiły się pierwszy raz
       const newOnes = mapped.filter((o) => o.status === "new" && !prev.has(o.id));
       if (initializedRef.current && newOnes.length > 0) void playDing();
       prevIdsRef.current = new Set(mapped.map((o) => o.id));
@@ -385,7 +394,7 @@ export default function PickupOrdersPage() {
     return () => { void supabase.removeChannel(ch); };
   }, [fetchOrders, supabase]);
 
-  // DODANE: lekki nasłuch tylko płatności – aktualizuje lokalny stan bez pełnego refetch
+  // lekki nasłuch płatności
   useEffect(() => {
     const ch = supabase
       .channel("orders-payments")
@@ -397,6 +406,7 @@ export default function PickupOrdersPage() {
     return () => { void supabase.removeChannel(ch); };
   }, [supabase]);
 
+  // polling statusu płatności dla oczekujących online
   useEffect(() => {
     const hasPending = orders.some((o) => o.payment_method === "Online" && o.payment_status === "pending");
     if (!hasPending || editingOrderId) return;
@@ -432,7 +442,7 @@ export default function PickupOrdersPage() {
     return () => clearInterval(iv);
   }, [orders]);
 
-  // DŹWIĘK CO 30 s DOPÓKI ISTNIEJĄ ZAMÓWIENIA W STATUSIE "new"
+  // dźwięk co 30 s dopóki są „new”
   const hasNew = useMemo(() => orders.some((o) => o.status === "new"), [orders]);
   useEffect(() => {
     if (!initializedRef.current) return;
