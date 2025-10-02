@@ -45,7 +45,7 @@ const toNumber = (x: any, d = 0) => {
   return isFinite(n) ? n : d;
 };
 
-/* ---------------------------- PARSING PRODUKTÓW ---------------------------- */
+/* -------------------------------- produkty -------------------------------- */
 
 const parseProducts = (itemsData: any): any[] => {
   if (!itemsData) return [];
@@ -103,43 +103,43 @@ const deepFindName = (root: Any): string | undefined => {
   return undefined;
 };
 
-/* --------------------- DODATKI: LICZENIE, FILTR, AGREGACJA ---------------- */
+/* --------------------------- dodatki i warianty --------------------------- */
 
 type Addon = { name: string; qty: number };
+type Attribute = { key: string; value: string };
 
 const cleanLabel = (s: string) =>
   s.replace(/\s*[+\-]?\s*\d+[.,]?\d*\s*zł/gi, "").replace(/\s{2,}/g, " ").trim();
 
-const ADDON_BLOCK: RegExp[] = [
-  /^mi[eę]so\b/i,
-  /wysmaż/i,
-  /^stopie[nń]/i,
-  /^rozmiar\b/i,
-  /^nap[óo]j\b/i,
-  /^pojemno[śs]ć\b/i,
-  /^l[óo]d\b/i,
-];
+// atrybuty, które nie są dodatkami
+const ATTR_KEYS = [/^mi[eę]so$/i, /^stopie[nń]/i, /^rozmiar$/i, /^sos$/i, /^ostro/i];
+const ADDON_BLOCK = [/^mi[eę]so\b/i, /wysmaż/i, /^stopie[nń]/i, /^rozmiar\b/i];
 
 const isAddonAllowed = (label: string) => {
   const t = cleanLabel(label);
   if (!t || t === "-" || t === "0") return false;
-  if (t.includes(":")) return false; // atrybut „X: Y” → nie dodatek
+  if (t.includes(":")) return false; // „X: Y” to atrybut
   return !ADDON_BLOCK.some((re) => re.test(t));
+};
+
+// pokaż „Mięso: …” tylko dla pozycji typu burger/kebab/wrap
+const shouldShowAttributeForProduct = (productName: string, attrKey: string) => {
+  const key = attrKey.toLowerCase();
+  if (key.startsWith("mięso") || key.startsWith("mieso")) {
+    return /(burger|cheeseburger|kebab|wrap|tortilla)/i.test(productName);
+  }
+  return true;
 };
 
 const parseAddonString = (s: string): Addon | null => {
   if (!s) return null;
   let raw = cleanLabel(String(s));
-
-  let m = raw.match(/^\s*(\d+)\s*[x×]\s*(.+)$/i); // 2x Bekon
+  let m = raw.match(/^\s*(\d+)\s*[x×]\s*(.+)$/i);
   if (m) return { name: cleanLabel(m[2]), qty: Math.max(1, Number(m[1])) };
-
-  m = raw.match(/^(.+?)\s*[x×]\s*(\d+)\s*$/i); // Bekon x2
+  m = raw.match(/^(.+?)\s*[x×]\s*(\d+)\s*$/i);
   if (m) return { name: cleanLabel(m[1]), qty: Math.max(1, Number(m[2])) };
-
-  m = raw.match(/^(.+?)\s*\(\s*(?:x\s*)?(\d+)\s*\)\s*$/i); // Bekon (x2)
+  m = raw.match(/^(.+?)\s*\(\s*(?:x\s*)?(\d+)\s*\)\s*$/i);
   if (m) return { name: cleanLabel(m[1]), qty: Math.max(1, Number(m[2])) };
-
   return { name: raw, qty: 1 };
 };
 
@@ -165,8 +165,7 @@ const collectAddonsDetailed = (val: any): Addon[] => {
     const qty = toNumber((val as any).qty ?? (val as any).quantity ?? (val as any).amount ?? 1, 1) || 1;
     if (name) return [{ name: cleanLabel(name), qty: Math.max(1, qty) }];
 
-    // NIE schodzimy w .items, żeby nie łapać atrybutów produktu
-    // if ((val as any).items && Array.isArray((val as any).items)) return collectAddonsDetailed((val as any).items);
+    // nie schodzimy w .items
   }
   return [];
 };
@@ -179,6 +178,52 @@ const aggregateAddons = (list: Addon[]): Addon[] => {
     const prev = map.get(key);
     if (prev) prev.qty += a.qty;
     else map.set(key, { name: cleanLabel(a.name), qty: a.qty });
+  }
+  return Array.from(map.values());
+};
+
+const parseAttributePair = (s: string): Attribute | null => {
+  const m = s.split(":");
+  if (m.length < 2) return null;
+  const key = cleanLabel(m[0]);
+  const value = cleanLabel(m.slice(1).join(":"));
+  if (!key || !value) return null;
+  if (!ATTR_KEYS.some((re) => re.test(key))) return null;
+  return { key, value };
+};
+
+const collectAttributes = (val: any): Attribute[] => {
+  if (!val) return [];
+  if (typeof val === "string") {
+    const a = parseAttributePair(val);
+    return a ? [a] : [];
+  }
+  if (Array.isArray(val)) return val.flatMap((v) => collectAttributes(v));
+  if (typeof val === "object") {
+    const key =
+      (typeof (val as any).label === "string" && (val as any).label) ||
+      (typeof (val as any).name === "string" && (val as any).name) ||
+      (typeof (val as any).title === "string" && (val as any).title) ||
+      "";
+    const value =
+      (typeof (val as any).value === "string" && (val as any).value) ||
+      (typeof (val as any).option === "string" && (val as any).option) ||
+      (typeof (val as any).variant === "string" && (val as any).variant) ||
+      "";
+    const a = key && value ? { key: cleanLabel(key), value: cleanLabel(value) } : null;
+    return a ? [a] : [];
+  }
+  return [];
+};
+
+const aggregateAttributes = (list: Attribute[]): Attribute[] => {
+  const map = new Map<string, Attribute>();
+  for (const a of list) {
+    const k = cleanLabel(a.key);
+    const v = cleanLabel(a.value);
+    if (!k || !v) continue;
+    const id = `${k.toLowerCase()}::${v.toLowerCase()}`;
+    if (!map.has(id)) map.set(id, { key: k, value: v });
   }
   return Array.from(map.values());
 };
@@ -196,6 +241,7 @@ const normalizeProduct = (raw: Any) => {
   const price = toNumber(raw.price ?? raw.unit_price ?? raw.total_price ?? raw.amount_price ?? raw.item?.price ?? 0);
   const quantity = toNumber(raw.quantity ?? raw.qty ?? raw.amount ?? 1, 1) || 1;
 
+  // dodatki
   const addonsDetailed = aggregateAddons([
     ...collectAddonsDetailed(raw.addons),
     ...collectAddonsDetailed(raw.extras),
@@ -207,6 +253,15 @@ const normalizeProduct = (raw: Any) => {
 
   const addons = addonsDetailed.map((a) => a.name);
   const addonsTotalQty = addonsDetailed.reduce((s, a) => s + a.qty, 0);
+
+  // warianty
+  const attributes = aggregateAttributes([
+    ...collectAttributes(raw.options),
+    ...collectAttributes(raw.selected_options),
+    ...collectAttributes(raw.attributes),
+    ...collectStrings(raw.options).map((s) => parseAttributePair(s)).filter(Boolean) as Attribute[],
+    ...collectStrings(raw.selected_addons).map((s) => parseAttributePair(s)).filter(Boolean) as Attribute[],
+  ]).filter((a) => shouldShowAttributeForProduct(name, a.key));
 
   const ingredients =
     collectStrings(raw.ingredients).length
@@ -226,10 +281,10 @@ const normalizeProduct = (raw: Any) => {
     (typeof raw.comment === "string" && raw.comment) ||
     undefined;
 
-  return { name, price, quantity, addons, addonsDetailed, addonsTotalQty, ingredients, description, note, _raw: raw };
+  return { name, price, quantity, addons, addonsDetailed, addonsTotalQty, attributes, ingredients, description, note, _raw: raw };
 };
 
-/* --------------------------------- UI ------------------------------------ */
+/* ----------------------------------- UI ----------------------------------- */
 
 const Badge: React.FC<{ tone: "amber" | "blue" | "rose" | "slate" | "green" | "yellow"; children: React.ReactNode }> = ({ tone, children }) => {
   const cls =
@@ -316,7 +371,7 @@ export default function PickupOrdersPage() {
 
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
 
-  // AUDIO
+  // audio
   const newOrderAudio = useRef<HTMLAudioElement | null>(null);
   useEffect(() => {
     const a = new Audio("/new-order.mp3");
@@ -406,7 +461,7 @@ export default function PickupOrdersPage() {
     return () => { void supabase.removeChannel(ch); };
   }, [supabase]);
 
-  // polling statusu płatności dla oczekujących online
+  // polling płatności
   useEffect(() => {
     const hasPending = orders.some((o) => o.payment_method === "Online" && o.payment_status === "pending");
     if (!hasPending || editingOrderId) return;
@@ -542,10 +597,12 @@ export default function PickupOrdersPage() {
     o.status === "new" || o.status === "pending" || o.status === "placed"
   );
   const currList = filtered.filter((o) => o.status === "accepted");
-  const histList = filtered.filter((o) => o.status === "cancelled" || o.status === "completed");
+  const histList = filtered.filter((o) => o.status === "cancelled" || o.status === "completed"));
 
   const ProductItem: React.FC<{ raw: any; onDetails?: (p: any) => void }> = ({ raw, onDetails }) => {
     const p = normalizeProduct(raw);
+    const attrsLine =
+      p.attributes?.length ? `Warianty: ${p.attributes.map((a: Attribute) => `${a.key}: ${a.value}`).join(", ")}` : "";
     const addonsLine =
       p.addonsDetailed.length > 0
         ? `Dodatki: ${p.addonsDetailed.map((a) => `${a.name} ×${a.qty}`).join(", ")}`
@@ -555,10 +612,9 @@ export default function PickupOrdersPage() {
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="truncate text-sm font-semibold">{p.name}</div>
-            <div className="mt-0.5 text-[12px] text-slate-600">
-              Ilość: <b>{p.quantity}</b>
-              {addonsLine && <> <span className="text-slate-400"> · </span> {addonsLine}</>}
-            </div>
+            <div className="mt-0.5 text-[12px] text-slate-600">Ilość: <b>{p.quantity}</b></div>
+            {attrsLine && <div className="mt-0.5 text-[12px] text-slate-600">{attrsLine}</div>}
+            {addonsLine && <div className="mt-0.5 text-[12px] text-slate-600">{addonsLine}</div>}
             {p.ingredients.length > 0 && (
               <div className="mt-0.5 text-[12px] text-slate-600">Skład: {p.ingredients.join(", ")}</div>
             )}
@@ -587,6 +643,16 @@ export default function PickupOrdersPage() {
           </div>
           <div className="space-y-2 text-sm">
             <div><b>Cena:</b> {p.price.toFixed(2)} zł</div>
+            {p.attributes?.length > 0 && (
+              <div>
+                <b>Warianty:</b>
+                <ul className="ml-5 list-disc">
+                  {p.attributes.map((a: Attribute, i: number) => (
+                    <li key={i}>{a.key}: {a.value}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {p.description && <div><b>Opis:</b> {p.description}</div>}
             {p.ingredients.length > 0 && (
               <div>
