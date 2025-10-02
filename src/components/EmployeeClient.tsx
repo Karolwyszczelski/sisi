@@ -597,7 +597,7 @@ export default function PickupOrdersPage() {
     o.status === "new" || o.status === "pending" || o.status === "placed"
   );
   const currList = filtered.filter((o) => o.status === "accepted");
-  const histList = filtered.filter((o) => o.status === "cancelled" || o.status === "completed"));
+  const histList = filtered.filter((o) => o.status === "cancelled" || o.status === "completed");
 
   const ProductItem: React.FC<{ raw: any; onDetails?: (p: any) => void }> = ({ raw, onDetails }) => {
     const p = normalizeProduct(raw);
