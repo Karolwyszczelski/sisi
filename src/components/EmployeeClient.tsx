@@ -162,8 +162,6 @@ const collectAddonsDetailed = (val: any): Addon[] => {
 
     const qty = toNumber((val as any).qty ?? (val as any).quantity ?? (val as any).amount ?? 1, 1) || 1;
     if (name) return [{ name: cleanLabel(name), qty: Math.max(1, qty) }];
-
-    // nie schodzimy w .items
   }
   return [];
 };
@@ -226,57 +224,38 @@ const aggregateAttributes = (list: Attribute[]): Attribute[] => {
   return Array.from(map.values());
 };
 
-/* --------- wykrywanie rodzaju mięsa z różnych struktur opcji ---------- */
+/* ----------------------- helper do wykrywania mięsa ----------------------- */
 
 const MEAT_KEYS = [/^mi[eę]so/i, /meat/i];
 const cap = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 
 const pickMeat = (src: any): string | undefined => {
-  if (!src) return undefined;
-
+  if (!src) return;
   if (typeof src === "string") return src.trim() || undefined;
-
   if (Array.isArray(src)) {
-    for (const el of src) {
-      const v = pickMeat(el);
-      if (v) return v;
-    }
-    return undefined;
+    for (const el of src) { const v = pickMeat(el); if (v) return v; }
+    return;
   }
-
   if (typeof src === "object") {
-    const direct = [
-      "meatType", "meat", "meat_type", "meatLabel", "meat_value",
-      "meatOption", "meat_option", "meatSelected", "selected_meat"
-    ];
+    const direct = ["meatType","meat","meat_type","meatLabel","meat_value","meatOption","meat_option","meatSelected","selected_meat"];
     for (const k of direct) {
       const v = (src as any)[k];
       if (typeof v === "string" && v.trim()) return v.trim();
     }
-
-    if (
-      (typeof (src as any).label === "string" || typeof (src as any).name === "string") &&
-      typeof (src as any).value === "string"
-    ) {
-      const lbl = (src as any).label ?? (src as any).name;
-      if (MEAT_KEYS.some((re) => re.test(lbl))) return (src as any).value.trim();
+    if ((src as any).label && (src as any).value && MEAT_KEYS.some(re => re.test((src as any).label))) {
+      return String((src as any).value).trim();
     }
-
-    for (const [k, v] of Object.entries(src)) {
-      if (MEAT_KEYS.some((re) => re.test(k)) && typeof v === "string" && v.trim()) return (v as string).trim();
+    for (const [k,v] of Object.entries(src)) {
+      if (MEAT_KEYS.some(re => re.test(k)) && typeof v === "string" && v.trim()) return v.trim();
     }
-
     return (
-      pickMeat((src as any).options) ||
       pickMeat((src as any).selected_options) ||
       pickMeat((src as any).attributes) ||
+      pickMeat((src as any).options) ||
       pickMeat((src as any).variants) ||
-      pickMeat((src as any).choices) ||
-      pickMeat((src as any).selections)
+      pickMeat((src as any).choices)
     );
   }
-
-  return undefined;
 };
 
 /* ---------------------------- normalizacja pozycji ---------------------------- */
@@ -294,45 +273,46 @@ const normalizeProduct = (raw: Any) => {
   const price = toNumber(raw.price ?? raw.unit_price ?? raw.total_price ?? raw.amount_price ?? raw.item?.price ?? 0);
   const quantity = toNumber(raw.quantity ?? raw.qty ?? raw.amount ?? 1, 1) || 1;
 
-  const opts = typeof raw.options === "string"
-    ? (() => { try { return JSON.parse(raw.options); } catch { return {}; } })()
-    : (raw.options || {});
+  // options
+  const optionsRaw = raw.options;
+  const optionsWasString = typeof optionsRaw === "string";
+  let opts: any = {};
+  if (optionsWasString) { try { opts = JSON.parse(optionsRaw as string); } catch {} }
+  else { opts = optionsRaw || {}; }
 
-  let addonsDetailed = aggregateAddons([
-    ...collectAddonsDetailed(raw.addons),
-    ...collectAddonsDetailed(raw.extras),
-    ...collectAddonsDetailed(raw.options),
-    ...collectAddonsDetailed(raw.selected_addons),
-    ...collectAddonsDetailed(raw.toppings),
-    ...collectAddonsDetailed(opts?.addons),
-    ...collectStrings(raw.addons).map((s) => parseAddonString(s)).filter(Boolean) as Addon[],
-  ]).filter((a) => isAddonAllowed(a.name));
+  // dodatki – tylko konkretne pola, bez podwójnego liczenia
+  const addonArrays = [
+    raw.addons, raw.extras, raw.selected_addons, raw.toppings,
+    opts?.addons, opts?.extras, opts?.selected_addons, opts?.toppings,
+  ].filter(Boolean);
 
+  let addonsDetailed = aggregateAddons(
+    addonArrays.flatMap((v) => collectAddonsDetailed(v))
+  ).filter((a) => isAddonAllowed(a.name));
+
+  // „Dodatkowe mięso”
   const extraMeatCount = toNumber(opts?.extraMeatCount ?? raw.extraMeatCount ?? 0, 0);
   if (extraMeatCount > 0) addonsDetailed.push({ name: "Dodatkowe mięso", qty: extraMeatCount });
 
   const addons = addonsDetailed.map((a) => a.name);
   const addonsTotalQty = addonsDetailed.reduce((s, a) => s + a.qty, 0);
 
+  // warianty + mięso
   let attributes = aggregateAttributes([
-    ...collectAttributes(raw.options),
     ...collectAttributes(raw.selected_options),
     ...collectAttributes(raw.attributes),
-    ...collectAttributes(opts),
-    ...collectStrings(raw.options).map((s) => parseAttributePair(s)).filter(Boolean) as Attribute[],
-    ...collectStrings(raw.selected_addons).map((s) => parseAttributePair(s)).filter(Boolean) as Attribute[],
+    ...collectAttributes(opts?.selected_options),
+    ...collectAttributes(opts?.attributes),
+    ...(optionsWasString ? collectAttributes(optionsRaw) : []),
   ]);
 
-  const meatTypeRaw =
+  const meat =
     pickMeat(opts) ||
-    pickMeat(raw.options) ||
     pickMeat(raw.selected_options) ||
     pickMeat(raw.attributes) ||
-    pickMeat(raw);
+    (optionsWasString ? pickMeat(optionsRaw) : undefined);
 
-  if (typeof meatTypeRaw === "string" && meatTypeRaw.trim()) {
-    attributes.push({ key: "Mięso", value: cap(meatTypeRaw.trim()) });
-  }
+  if (meat) attributes.push({ key: "Mięso", value: cap(meat) });
 
   attributes = aggregateAttributes(attributes).filter((a) => shouldShowAttributeForProduct(name, a.key));
 
@@ -715,7 +695,7 @@ export default function PickupOrdersPage() {
     const p = normalizeProduct(product);
     const title = p.quantity > 1 ? `${p.name} x${p.quantity}` : p.name;
     return (
-      <div className="fixed inset-0 z-50 flex items:end justify-center bg-black/60 p-4 sm:items-center">
+      <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-4 sm:items-center">
         <div className="w-full max-w-lg rounded-md border bg-white p-5 shadow-2xl">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-lg font-bold">{title}</h2>
