@@ -45,6 +45,8 @@ const toNumber = (x: any, d = 0) => {
   return isFinite(n) ? n : d;
 };
 
+/* ---------------------------- PARSING PRODUKTÓW ---------------------------- */
+
 const parseProducts = (itemsData: any): any[] => {
   if (!itemsData) return [];
   if (typeof itemsData === "string") {
@@ -101,6 +103,75 @@ const deepFindName = (root: Any): string | undefined => {
   return undefined;
 };
 
+/* --------------------- DODATKI: LICZENIE I AGREGACJA ---------------------- */
+
+type Addon = { name: string; qty: number };
+
+const cleanLabel = (s: string) =>
+  s
+    .replace(/\s*[+\-]?\s*\d+[.,]?\d*\s*zł/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
+const parseAddonString = (s: string): Addon | null => {
+  if (!s) return null;
+  let raw = cleanLabel(String(s));
+
+  // 2x Bekon / 2 × Bekon
+  let m = raw.match(/^\s*(\d+)\s*[x×]\s*(.+)$/i);
+  if (m) return { name: cleanLabel(m[2]), qty: Math.max(1, Number(m[1])) };
+
+  // Bekon x2 / Bekon × 2
+  m = raw.match(/^(.+?)\s*[x×]\s*(\d+)\s*$/i);
+  if (m) return { name: cleanLabel(m[1]), qty: Math.max(1, Number(m[2])) };
+
+  // Bekon (x2) / Bekon (2)
+  m = raw.match(/^(.+?)\s*\(\s*(?:x\s*)?(\d+)\s*\)\s*$/i);
+  if (m) return { name: cleanLabel(m[1]), qty: Math.max(1, Number(m[2])) };
+
+  return { name: raw, qty: 1 };
+};
+
+const collectAddonsDetailed = (val: any): Addon[] => {
+  if (!val) return [];
+  if (typeof val === "string") {
+    const a = parseAddonString(val);
+    return a ? [a] : [];
+  }
+  if (Array.isArray(val)) return val.flatMap((v) => collectAddonsDetailed(v));
+  if (typeof val === "object") {
+    // słownik { "Bekon": true }
+    const truthy = Object.entries(val)
+      .filter(([, v]) => v === true || v === 1 || v === "1")
+      .map(([k]) => ({ name: cleanLabel(k), qty: 1 }));
+    if (truthy.length) return truthy;
+
+    const name =
+      (typeof (val as any).name === "string" && (val as any).name) ||
+      (typeof (val as any).title === "string" && (val as any).title) ||
+      (typeof (val as any).label === "string" && (val as any).label) ||
+      deepFindName(val);
+
+    const qty = toNumber((val as any).qty ?? (val as any).quantity ?? (val as any).amount ?? 1, 1) || 1;
+    if (name) return [{ name: cleanLabel(name), qty: Math.max(1, qty) }];
+
+    if ((val as any).items && Array.isArray((val as any).items)) return collectAddonsDetailed((val as any).items);
+  }
+  return [];
+};
+
+const aggregateAddons = (list: Addon[]): Addon[] => {
+  const map = new Map<string, Addon>();
+  for (const a of list) {
+    const key = cleanLabel(a.name).toLowerCase();
+    if (!key) continue;
+    const prev = map.get(key);
+    if (prev) prev.qty += a.qty;
+    else map.set(key, { name: cleanLabel(a.name), qty: a.qty });
+  }
+  return Array.from(map.values());
+};
+
 const normalizeProduct = (raw: Any) => {
   const shallow = [
     raw.name, raw.product_name, raw.productName, raw.title, raw.label, raw.menu_item_name, raw.item_name,
@@ -114,13 +185,18 @@ const normalizeProduct = (raw: Any) => {
   const price = toNumber(raw.price ?? raw.unit_price ?? raw.total_price ?? raw.amount_price ?? raw.item?.price ?? 0);
   const quantity = toNumber(raw.quantity ?? raw.qty ?? raw.amount ?? 1, 1) || 1;
 
-  const addons = [
-    ...collectStrings(raw.addons),
-    ...collectStrings(raw.extras),
-    ...collectStrings(raw.options),
-    ...collectStrings(raw.selected_addons),
-    ...collectStrings(raw.toppings),
-  ].filter((s) => s && s !== "0");
+  // szczegółowe dodatki z ilościami
+  const addonsDetailed = aggregateAddons([
+    ...collectAddonsDetailed(raw.addons),
+    ...collectAddonsDetailed(raw.extras),
+    ...collectAddonsDetailed(raw.options),
+    ...collectAddonsDetailed(raw.selected_addons),
+    ...collectAddonsDetailed(raw.toppings),
+    ...collectStrings(raw.addons).map((s) => parseAddonString(s)).filter(Boolean) as Addon[],
+  ]);
+
+  const addons = addonsDetailed.map((a) => a.name);
+  const addonsTotalQty = addonsDetailed.reduce((s, a) => s + a.qty, 0);
 
   const ingredients =
     collectStrings(raw.ingredients).length
@@ -140,8 +216,10 @@ const normalizeProduct = (raw: Any) => {
     (typeof raw.comment === "string" && raw.comment) ||
     undefined;
 
-  return { name, price, quantity, addons, ingredients, description, note, _raw: raw };
+  return { name, price, quantity, addons, addonsDetailed, addonsTotalQty, ingredients, description, note, _raw: raw };
 };
+
+/* --------------------------------- UI ------------------------------------ */
 
 const Badge: React.FC<{ tone: "amber" | "blue" | "rose" | "slate" | "green" | "yellow"; children: React.ReactNode }> = ({ tone, children }) => {
   const cls =
@@ -286,9 +364,8 @@ export default function PickupOrdersPage() {
       });
 
       const prev = prevIdsRef.current;
-      const newOnes = mapped.filter(
-        (o) => (o.status === "new" || o.status === "pending" || o.status === "placed") && !prev.has(o.id)
-      );
+      // dźwięk TYLKO dla nowych, które pojawiły się pierwszy raz
+      const newOnes = mapped.filter((o) => o.status === "new" && !prev.has(o.id));
       if (initializedRef.current && newOnes.length > 0) void playDing();
       prevIdsRef.current = new Set(mapped.map((o) => o.id));
       initializedRef.current = true;
@@ -354,6 +431,17 @@ export default function PickupOrdersPage() {
     }, 15000);
     return () => clearInterval(iv);
   }, [orders]);
+
+  // DŹWIĘK CO 30 s DOPÓKI ISTNIEJĄ ZAMÓWIENIA W STATUSIE "new"
+  const hasNew = useMemo(() => orders.some((o) => o.status === "new"), [orders]);
+  useEffect(() => {
+    if (!initializedRef.current) return;
+    if (!hasNew) return;
+    const iv = setInterval(() => {
+      if (document.visibilityState === "visible") void playDing();
+    }, 30000);
+    return () => clearInterval(iv);
+  }, [hasNew, playDing]);
 
   const updateLocal = (id: string, upd: Partial<Order>) =>
     setOrders((prev) => prev.map((o) => (o.id === id ? { ...o, ...upd } : o)));
@@ -427,7 +515,7 @@ export default function PickupOrdersPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(patch),
       });
-    if (!res.ok) return;
+      if (!res.ok) return;
       updateLocal(o.id, { payment_method: method, payment_status: patch.payment_status ?? o.payment_status });
     } finally { setEditingOrderId(null); }
   };
@@ -448,6 +536,10 @@ export default function PickupOrdersPage() {
 
   const ProductItem: React.FC<{ raw: any; onDetails?: (p: any) => void }> = ({ raw, onDetails }) => {
     const p = normalizeProduct(raw);
+    const addonsLine =
+      p.addonsDetailed.length > 0
+        ? `Dodatki: ${p.addonsDetailed.map((a) => `${a.name} ×${a.qty}`).join(", ")}`
+        : "";
     return (
       <div className="rounded-md border bg-white p-3 shadow-sm">
         <div className="flex items-start justify-between gap-3">
@@ -455,7 +547,7 @@ export default function PickupOrdersPage() {
             <div className="truncate text-sm font-semibold">{p.name}</div>
             <div className="mt-0.5 text-[12px] text-slate-600">
               Ilość: <b>{p.quantity}</b>
-              {p.addons.length > 0 && <> <span className="text-slate-400"> · </span> Dodatki: {p.addons.join(", ")}</>}
+              {addonsLine && <> <span className="text-slate-400"> · </span> {addonsLine}</>}
             </div>
             {p.ingredients.length > 0 && (
               <div className="mt-0.5 text-[12px] text-slate-600">Skład: {p.ingredients.join(", ")}</div>
@@ -492,7 +584,16 @@ export default function PickupOrdersPage() {
                 <ul className="ml-5 list-disc">{p.ingredients.map((x: string, i: number) => <li key={i}>{x}</li>)}</ul>
               </div>
             )}
-            {p.addons.length > 0 && <div><b>Dodatki:</b> {p.addons.join(", ")}</div>}
+            {p.addonsDetailed.length > 0 && (
+              <div>
+                <b>Dodatki:</b>
+                <ul className="ml-5 list-disc">
+                  {p.addonsDetailed.map((a, i) => (
+                    <li key={i}>{a.name} ×{a.qty}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {p.note && <div className="italic text-slate-700">Notatka: {p.note}</div>}
           </div>
         </div>
