@@ -43,8 +43,7 @@ const supabase = createClient(
 
 const TERMS_VERSION = process.env.NEXT_PUBLIC_TERMS_VERSION || "2025-09-15";
 const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || "";
-const THANKS_QR_URL =
-  process.env.NEXT_PUBLIC_REVIEW_QR_URL || "https://g.co/kgs/47NSDMH";
+const THANKS_QR_URL = process.env.NEXT_PUBLIC_REVIEW_QR_URL || "https://g.co/kgs/47NSDMH";
 
 type Zone = {
   id: string;
@@ -82,7 +81,7 @@ const AVAILABLE_ADDONS = [
   ...SAUCES,
 ];
 
-type Product = { id: number; name: string };
+type Product = { id: number; name: string; category: string | null; subcategory: string | null };
 
 /* helpers */
 const buildClientDeliveryTime = (
@@ -105,11 +104,7 @@ const safeFetch = async (url: string, opts: RequestInit) => {
   const res = await fetch(url, opts);
   const text = await res.text();
   let data: any;
-  try {
-    data = JSON.parse(text);
-  } catch {
-    data = { raw: text };
-  }
+  try { data = JSON.parse(text); } catch { data = { raw: text }; }
   if (!res.ok) {
     console.error("API error:", { url, status: res.status, body: data });
     throw new Error(data.error || data.message || `HTTP ${res.status}`);
@@ -117,9 +112,31 @@ const safeFetch = async (url: string, opts: RequestInit) => {
   return data;
 };
 
+/* inferencja mięsa na podstawie metadanych z Supabase */
+const inferDefaultMeat = (meta?: Product, name?: string): "wołowina" | "kurczak" | null => {
+  const n = (name || meta?.name || "").toLowerCase();
+  const cat = (meta?.category || "").toLowerCase();
+  const sub = (meta?.subcategory || "").toLowerCase();
+
+  // vege: brak mięsa
+  if (sub.includes("vege") || n.includes("vege")) return null;
+
+  // produkty kurczakowe z tabeli lub z nazwy
+  if (sub.includes("kurczak") || n.includes("chicken") || n.includes("kurczak")) return "kurczak";
+
+  // burger bez "vege" -> domyślnie wołowina
+  if (cat === "burger" || n.includes("burger")) return "wołowina";
+
+  return null;
+};
+
+const MEAT_OPTIONS: Array<"wołowina" | "kurczak"> = ["wołowina", "kurczak"];
+
 /* child */
 const ProductItem: React.FC<{
   prod: any;
+  meta?: Product | undefined;
+  defaultMeat: "wołowina" | "kurczak" | null;
   helpers: {
     changeMeatType: (name: string, type: string) => void;
     addExtraMeat: (name: string) => void;
@@ -130,7 +147,7 @@ const ProductItem: React.FC<{
     removeItem: (name: string) => void;
     removeWholeItem: (name: string) => void;
   };
-}> = ({ prod, helpers }) => {
+}> = ({ prod, meta, defaultMeat, helpers }) => {
   const { changeMeatType, addExtraMeat, removeExtraMeat, addAddon, removeAddon, swapIngredient, removeItem, removeWholeItem } =
     helpers;
 
@@ -139,22 +156,36 @@ const ProductItem: React.FC<{
   const extraMeatCost = (prod.extraMeatCount || 0) * 10;
   const lineTotal = (priceNum + addonsCost + extraMeatCost) * (prod.quantity || 1);
 
+  const selectedMeat = (prod.meatType as string | undefined) ?? defaultMeat ?? null;
+  const supportsMeat = selectedMeat !== null; // tylko dla burgerów i nie-vege
+
   return (
     <div className="border p-3 rounded bg-gray-50 relative">
       <div className="flex justify-between items-center font-semibold mb-2">
         <span>{prod.name} x{prod.quantity || 1}</span>
         <span>{lineTotal.toFixed(2).replace(".", ",")} zł</span>
       </div>
+
       <div className="text-xs text-gray-700 space-y-2">
-        <div className="font-semibold">Mięso:</div>
-        <div className="flex gap-2 flex-wrap">
-          <button
-            className={clsx("px-2 py-1 rounded text-xs border", prod.meatType === "wołowina" ? "bg-yellow-300 border-yellow-400" : "bg-gray-200 border-gray-300")}
-            onClick={() => changeMeatType(prod.name, "wołowina")}
-          >
-            Wołowina
-          </button>
-        </div>
+        {supportsMeat && (
+          <>
+            <div className="font-semibold">Mięso:</div>
+            <div className="flex gap-2 flex-wrap">
+              {MEAT_OPTIONS.map((opt) => (
+                <button
+                  key={opt}
+                  className={clsx(
+                    "px-2 py-1 rounded text-xs border",
+                    selectedMeat === opt ? "bg-yellow-300 border-yellow-400" : "bg-gray-200 border-gray-300"
+                  )}
+                  onClick={() => changeMeatType(prod.name, opt)}
+                >
+                  {opt === "wołowina" ? "Wołowina" : "Kurczak"}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
 
         <div className="font-semibold mt-2">Dodatki:</div>
         <div className="flex flex-wrap gap-2">
@@ -162,25 +193,32 @@ const ProductItem: React.FC<{
             <button
               key={add}
               onClick={() => (prod.addons?.includes(add) ? removeAddon(prod.name, add) : addAddon(prod.name, add))}
-              className={clsx("border text-xs px-2 py-1 rounded", prod.addons?.includes(add) ? "bg-gray-800 text-white border-gray-900" : "bg-white text-black hover:bg-gray-50")}
+              className={clsx(
+                "border text-xs px-2 py-1 rounded",
+                prod.addons?.includes(add) ? "bg-gray-800 text-white border-gray-900" : "bg-white text-black hover:bg-gray-50"
+              )}
             >
               {prod.addons?.includes(add) ? `✓ ${add}` : `+ ${add}`}
             </button>
           ))}
         </div>
 
-        <div className="font-semibold mt-2">Dodatkowe mięso:</div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <button onClick={() => addExtraMeat(prod.name)} className="px-2 py-1 text-xs bg-gray-200 rounded border border-gray-300">
-            +1 mięso (+10 zł)
-          </button>
-          {prod.extraMeatCount > 0 && (
-            <button onClick={() => removeExtraMeat(prod.name)} className="px-2 py-1 text-xs bg-red-100 text-red-700 rounded border border-red-200">
-              Usuń mięso
-            </button>
-          )}
-          <span className="text-xs text-gray-600">Ilość: {prod.extraMeatCount || 0}</span>
-        </div>
+        {supportsMeat && (
+          <>
+            <div className="font-semibold mt-2">Dodatkowe mięso:</div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button onClick={() => addExtraMeat(prod.name)} className="px-2 py-1 text-xs bg-gray-200 rounded border border-gray-300">
+                +1 mięso (+10 zł)
+              </button>
+              {prod.extraMeatCount > 0 && (
+                <button onClick={() => removeExtraMeat(prod.name)} className="px-2 py-1 text-xs bg-red-100 text-red-700 rounded border border-red-200">
+                  Usuń mięso
+                </button>
+              )}
+              <span className="text-xs text-gray-600">Ilość: {prod.extraMeatCount || 0}</span>
+            </div>
+          </>
+        )}
 
         {!!prod.availableSwaps?.length && (
           <>
@@ -200,6 +238,7 @@ const ProductItem: React.FC<{
           </>
         )}
       </div>
+
       <div className="flex justify-end items-center mt-2 gap-2 flex-wrap text-[11px]">
         <button onClick={() => removeItem(prod.name)} className="text-red-600 underline">Usuń 1 szt.</button>
         <button onClick={() => removeWholeItem(prod.name)} className="text-red-600 underline">Usuń produkt</button>
@@ -335,9 +374,7 @@ export default function CheckoutModal() {
   // ESC + blokada scrolla
   useEffect(() => {
     if (!isCheckoutOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") closeCheckoutModal();
-    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") closeCheckoutModal(); };
     window.addEventListener("keydown", onKey);
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -361,24 +398,25 @@ export default function CheckoutModal() {
   }, [isLoggedIn, session]);
 
   useEffect(() => {
-    supabase.from("products").select("id, name").then((r) => {
-      if (!r.error && r.data) setProducts((r.data as Product[]) || []);
-    });
+    supabase
+      .from("products")
+      .select("id,name,category,subcategory")
+      .then((r) => {
+        if (!r.error && r.data) setProducts((r.data as Product[]) || []);
+      });
+
     supabase
       .from("delivery_zones")
       .select("*")
       .order("min_distance_km", { ascending: true })
-      .then((r) => {
-        if (!r.error && r.data) setZones(r.data as Zone[]);
-      });
+      .then((r) => { if (!r.error && r.data) setZones(r.data as Zone[]); });
+
     supabase
       .from("restaurant_info")
       .select("lat,lng")
       .eq("id", 1)
       .single()
-      .then((r) => {
-        if (!r.error && r.data) setRestLoc({ lat: r.data.lat, lng: r.data.lng });
-      });
+      .then((r) => { if (!r.error && r.data) setRestLoc({ lat: r.data.lat, lng: r.data.lng }); });
   }, []);
 
   const isVisible = (el: HTMLDivElement | null) => !!el && !!el.offsetParent;
@@ -390,38 +428,24 @@ export default function CheckoutModal() {
       tsIdRef.current = window.turnstile.render(target!, {
         sitekey: TURNSTILE_SITE_KEY,
         callback: (t: string) => setTurnstileToken(t),
-        "error-callback": () => {
-          setTurnstileToken(null);
-          setTurnstileError(true);
-        },
-        "expired-callback": () => {
-          setTurnstileToken(null);
-          try { window.turnstile?.reset(tsIdRef.current); } catch {}
-        },
-        "timeout-callback": () => {
-          setTurnstileToken(null);
-          try { window.turnstile?.reset(tsIdRef.current); } catch {}
-        },
+        "error-callback": () => { setTurnstileToken(null); setTurnstileError(true); },
+        "expired-callback": () => { setTurnstileToken(null); try { window.turnstile?.reset(tsIdRef.current); } catch {} },
+        "timeout-callback": () => { setTurnstileToken(null); try { window.turnstile?.reset(tsIdRef.current); } catch {} },
         retry: "auto",
         theme: "auto",
         appearance: "always",
         ["refresh-expired"]: "auto",
       });
-    } catch {
-      setTurnstileError(true);
-    }
+    } catch { setTurnstileError(true); }
   };
 
   const removeTurnstile = () => {
-    try {
-      if (tsIdRef.current && window.turnstile) window.turnstile.remove(tsIdRef.current);
-    } catch {}
+    try { if (tsIdRef.current && window.turnstile) window.turnstile.remove(tsIdRef.current); } catch {}
     tsIdRef.current = null;
     setTurnstileToken(null);
     setTurnstileError(false);
   };
 
-  // czekaj aż skrypt się załaduje
   useEffect(() => {
     if (!isClient || !TURNSTILE_SITE_KEY || !tsReady) return;
     if (isCheckoutOpen && checkoutStep === 3) {
@@ -444,9 +468,7 @@ export default function CheckoutModal() {
       if (window.turnstile && tsIdRef.current) window.turnstile.reset(tsIdRef.current);
       await new Promise((r) => setTimeout(r, 400));
       return !!turnstileToken;
-    } catch {
-      return false;
-    }
+    } catch { return false; }
   };
 
   const baseTotal = useMemo<number>(() => {
@@ -538,6 +560,9 @@ export default function CheckoutModal() {
     removeWholeItem,
   };
 
+  // meta produktów po nazwie
+  const findMetaByName = (name: string) => products.find((p) => p.name === name);
+
   const buildOrderPayload = () => {
     const client_delivery_time = buildClientDeliveryTime(selectedOption, deliveryTimeOption, scheduledTime);
     const payload: any = {
@@ -572,14 +597,16 @@ export default function CheckoutModal() {
 
   const buildItemsPayload = () =>
     items.map((item: any, index: number) => {
-      const product = products.find((p) => (p as any).name === item.name);
+      const meta = findMetaByName(item.name);
+      const inferred = inferDefaultMeat(meta, item.name);
+      const product = meta;
       return {
         product_id: product?.id,
         name: item.name,
         quantity: item.quantity || 1,
         unit_price: item.price,
         options: {
-          meatType: item.meatType,
+          meatType: item.meatType ?? inferred, // zapisz wołowina/kurczak lub null
           extraMeatCount: item.extraMeatCount,
           addons: item.addons,
           swaps: item.swaps,
@@ -646,10 +673,7 @@ export default function CheckoutModal() {
     }
   };
 
-  const clearPromo = () => {
-    setPromo(null);
-    setPromoError(null);
-  };
+  const clearPromo = () => { setPromo(null); setPromoError(null); };
 
   const requireLegalBeforeConfirm = () => {
     if (!legalAccepted) {
@@ -754,11 +778,8 @@ export default function CheckoutModal() {
         }),
       });
 
-      if (pay.paymentUrl) {
-        window.location.href = pay.paymentUrl;
-      } else {
-        throw new Error("Brak URL do płatności");
-      }
+      if (pay.paymentUrl) window.location.href = pay.paymentUrl;
+      else throw new Error("Brak URL do płatności");
     } catch (e: any) {
       setErrorMessage(e.message || "Nie udało się zainicjować płatności.");
       try { if (window.turnstile && tsIdRef.current) window.turnstile.reset(tsIdRef.current); } catch {}
@@ -801,9 +822,7 @@ export default function CheckoutModal() {
         className="fixed inset-0 z-50 bg-black/60 flex items-start justify-center p-4 overflow-auto"
         role="dialog"
         aria-modal="true"
-        onMouseDown={(e) => {
-          if (e.target === e.currentTarget) closeCheckoutModal();
-        }}
+        onMouseDown={(e) => { if (e.target === e.currentTarget) closeCheckoutModal(); }}
       >
         <div className="relative flex flex-col lg:flex-row w-full max-w-4xl gap-6" onMouseDown={(e) => e.stopPropagation()}>
           {/* MAIN CARD */}
@@ -816,21 +835,17 @@ export default function CheckoutModal() {
 
             {orderSent ? (
               <div className="text-center space-y-4">
-                {/* QR */}
                 <div className="w-full flex justify-center">
                   <div className="bg-white p-3 rounded-xl shadow-sm">
                     <QRCode value={THANKS_QR_URL} size={160} />
                   </div>
                 </div>
-
                 <h2 className="text-2xl font-bold">Dziękujemy za zamówienie!</h2>
-
                 {showBurger ? (
                   <img src="/animations/Animationburger.gif" alt="Animacja burgera" className="mx-auto w-40 h-40 object-contain" />
                 ) : (
                   <p className="text-xl font-semibold text-yellow-600">Twoje zamówienie ląduje w kuchni...</p>
                 )}
-
                 <div className="flex justify-center gap-4 mt-2 flex-wrap">
                   <button onClick={() => window.open(THANKS_QR_URL, "_blank")} className="px-4 py-2 bg-blue-500 text-white rounded">
                     Zostaw opinię
@@ -966,12 +981,16 @@ export default function CheckoutModal() {
                     <div className="flex flex-col lg:flex-row gap-6">
                       {/* EDITOWALNE PRODUKTY */}
                       <div className="flex-1 space-y-3 max-h-[350px] overflow-y-auto">
-                        {items.map((item, idx) => (
-                          <div key={idx}>
-                            <ProductItem prod={item} helpers={productHelpers} />
-                            <textarea className="w-full text-xs border rounded px-2 py-1 mt-1" placeholder="Notatka do produktu" value={notes[idx] || ""} onChange={(e) => setNotes({ ...notes, [idx]: e.target.value })} />
-                          </div>
-                        ))}
+                        {items.map((item, idx) => {
+                          const meta = findMetaByName(item.name);
+                          const defaultMeat = inferDefaultMeat(meta, item.name);
+                          return (
+                            <div key={idx}>
+                              <ProductItem prod={item} meta={meta} defaultMeat={defaultMeat} helpers={productHelpers} />
+                              <textarea className="w-full text-xs border rounded px-2 py-1 mt-1" placeholder="Notatka do produktu" value={notes[idx] || ""} onChange={(e) => setNotes({ ...notes, [idx]: e.target.value })} />
+                            </div>
+                          );
+                        })}
                         {items.length === 0 && <p className="text-center text-gray-500">Brak produktów w koszyku.</p>}
                       </div>
 

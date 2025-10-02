@@ -111,18 +111,16 @@ type Attribute = { key: string; value: string };
 const cleanLabel = (s: string) =>
   s.replace(/\s*[+\-]?\s*\d+[.,]?\d*\s*zł/gi, "").replace(/\s{2,}/g, " ").trim();
 
-// atrybuty, które nie są dodatkami
 const ATTR_KEYS = [/^mi[eę]so$/i, /^stopie[nń]/i, /^rozmiar$/i, /^sos$/i, /^ostro/i];
 const ADDON_BLOCK = [/^mi[eę]so\b/i, /wysmaż/i, /^stopie[nń]/i, /^rozmiar\b/i];
 
 const isAddonAllowed = (label: string) => {
   const t = cleanLabel(label);
   if (!t || t === "-" || t === "0") return false;
-  if (t.includes(":")) return false; // „X: Y” to atrybut
+  if (t.includes(":")) return false;
   return !ADDON_BLOCK.some((re) => re.test(t));
 };
 
-// pokaż „Mięso: …” tylko dla pozycji typu burger/kebab/wrap
 const shouldShowAttributeForProduct = (productName: string, attrKey: string) => {
   const key = attrKey.toLowerCase();
   if (key.startsWith("mięso") || key.startsWith("mieso")) {
@@ -228,6 +226,8 @@ const aggregateAttributes = (list: Attribute[]): Attribute[] => {
   return Array.from(map.values());
 };
 
+/* ---------------------------- normalizacja pozycji ---------------------------- */
+
 const normalizeProduct = (raw: Any) => {
   const shallow = [
     raw.name, raw.product_name, raw.productName, raw.title, raw.label, raw.menu_item_name, raw.item_name,
@@ -241,27 +241,44 @@ const normalizeProduct = (raw: Any) => {
   const price = toNumber(raw.price ?? raw.unit_price ?? raw.total_price ?? raw.amount_price ?? raw.item?.price ?? 0);
   const quantity = toNumber(raw.quantity ?? raw.qty ?? raw.amount ?? 1, 1) || 1;
 
-  // dodatki
-  const addonsDetailed = aggregateAddons([
+  // options (JSON / string)
+  const opts = typeof raw.options === "string"
+    ? (() => { try { return JSON.parse(raw.options); } catch { return {}; } })()
+    : (raw.options || {});
+
+  // dodatki + ilości
+  let addonsDetailed = aggregateAddons([
     ...collectAddonsDetailed(raw.addons),
     ...collectAddonsDetailed(raw.extras),
     ...collectAddonsDetailed(raw.options),
     ...collectAddonsDetailed(raw.selected_addons),
     ...collectAddonsDetailed(raw.toppings),
+    ...collectAddonsDetailed(opts?.addons),
     ...collectStrings(raw.addons).map((s) => parseAddonString(s)).filter(Boolean) as Addon[],
   ]).filter((a) => isAddonAllowed(a.name));
+
+  // dodatkowe mięso (z options)
+  const extraMeatCount = toNumber(opts?.extraMeatCount ?? raw.extraMeatCount ?? 0, 0);
+  if (extraMeatCount > 0) addonsDetailed.push({ name: "Dodatkowe mięso", qty: extraMeatCount });
 
   const addons = addonsDetailed.map((a) => a.name);
   const addonsTotalQty = addonsDetailed.reduce((s, a) => s + a.qty, 0);
 
-  // warianty
-  const attributes = aggregateAttributes([
+  // warianty + mięso z options
+  let attributes = aggregateAttributes([
     ...collectAttributes(raw.options),
     ...collectAttributes(raw.selected_options),
     ...collectAttributes(raw.attributes),
+    ...collectAttributes(opts),
     ...collectStrings(raw.options).map((s) => parseAttributePair(s)).filter(Boolean) as Attribute[],
     ...collectStrings(raw.selected_addons).map((s) => parseAttributePair(s)).filter(Boolean) as Attribute[],
-  ]).filter((a) => shouldShowAttributeForProduct(name, a.key));
+  ]);
+
+  const meatType = (opts?.meatType ?? raw.meatType ?? raw.meat_type) as string | undefined;
+  if (typeof meatType === "string" && meatType.trim()) {
+    attributes.push({ key: "Mięso", value: meatType.trim().replace(/^./, (c) => c.toUpperCase()) });
+  }
+  attributes = aggregateAttributes(attributes).filter((a) => shouldShowAttributeForProduct(name, a.key));
 
   const ingredients =
     collectStrings(raw.ingredients).length
@@ -277,11 +294,18 @@ const normalizeProduct = (raw: Any) => {
     undefined;
 
   const note =
+    (typeof opts?.note === "string" && opts.note) ||
+    (typeof opts?.comments === "string" && opts.comments) ||
     (typeof raw.note === "string" && raw.note) ||
     (typeof raw.comment === "string" && raw.comment) ||
+    (typeof raw.notes === "string" && raw.notes) ||
     undefined;
 
-  return { name, price, quantity, addons, addonsDetailed, addonsTotalQty, attributes, ingredients, description, note, _raw: raw };
+  return {
+    name, price, quantity,
+    addons, addonsDetailed, addonsTotalQty,
+    attributes, ingredients, description, note, _raw: raw
+  };
 };
 
 /* ----------------------------------- UI ----------------------------------- */
