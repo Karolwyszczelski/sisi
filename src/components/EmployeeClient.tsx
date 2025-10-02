@@ -226,6 +226,59 @@ const aggregateAttributes = (list: Attribute[]): Attribute[] => {
   return Array.from(map.values());
 };
 
+/* --------- wykrywanie rodzaju mięsa z różnych struktur opcji ---------- */
+
+const MEAT_KEYS = [/^mi[eę]so/i, /meat/i];
+const cap = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
+
+const pickMeat = (src: any): string | undefined => {
+  if (!src) return undefined;
+
+  if (typeof src === "string") return src.trim() || undefined;
+
+  if (Array.isArray(src)) {
+    for (const el of src) {
+      const v = pickMeat(el);
+      if (v) return v;
+    }
+    return undefined;
+  }
+
+  if (typeof src === "object") {
+    const direct = [
+      "meatType", "meat", "meat_type", "meatLabel", "meat_value",
+      "meatOption", "meat_option", "meatSelected", "selected_meat"
+    ];
+    for (const k of direct) {
+      const v = (src as any)[k];
+      if (typeof v === "string" && v.trim()) return v.trim();
+    }
+
+    if (
+      (typeof (src as any).label === "string" || typeof (src as any).name === "string") &&
+      typeof (src as any).value === "string"
+    ) {
+      const lbl = (src as any).label ?? (src as any).name;
+      if (MEAT_KEYS.some((re) => re.test(lbl))) return (src as any).value.trim();
+    }
+
+    for (const [k, v] of Object.entries(src)) {
+      if (MEAT_KEYS.some((re) => re.test(k)) && typeof v === "string" && v.trim()) return (v as string).trim();
+    }
+
+    return (
+      pickMeat((src as any).options) ||
+      pickMeat((src as any).selected_options) ||
+      pickMeat((src as any).attributes) ||
+      pickMeat((src as any).variants) ||
+      pickMeat((src as any).choices) ||
+      pickMeat((src as any).selections)
+    );
+  }
+
+  return undefined;
+};
+
 /* ---------------------------- normalizacja pozycji ---------------------------- */
 
 const normalizeProduct = (raw: Any) => {
@@ -241,12 +294,10 @@ const normalizeProduct = (raw: Any) => {
   const price = toNumber(raw.price ?? raw.unit_price ?? raw.total_price ?? raw.amount_price ?? raw.item?.price ?? 0);
   const quantity = toNumber(raw.quantity ?? raw.qty ?? raw.amount ?? 1, 1) || 1;
 
-  // options (JSON / string)
   const opts = typeof raw.options === "string"
     ? (() => { try { return JSON.parse(raw.options); } catch { return {}; } })()
     : (raw.options || {});
 
-  // dodatki + ilości
   let addonsDetailed = aggregateAddons([
     ...collectAddonsDetailed(raw.addons),
     ...collectAddonsDetailed(raw.extras),
@@ -257,14 +308,12 @@ const normalizeProduct = (raw: Any) => {
     ...collectStrings(raw.addons).map((s) => parseAddonString(s)).filter(Boolean) as Addon[],
   ]).filter((a) => isAddonAllowed(a.name));
 
-  // dodatkowe mięso (z options)
   const extraMeatCount = toNumber(opts?.extraMeatCount ?? raw.extraMeatCount ?? 0, 0);
   if (extraMeatCount > 0) addonsDetailed.push({ name: "Dodatkowe mięso", qty: extraMeatCount });
 
   const addons = addonsDetailed.map((a) => a.name);
   const addonsTotalQty = addonsDetailed.reduce((s, a) => s + a.qty, 0);
 
-  // warianty + mięso z options
   let attributes = aggregateAttributes([
     ...collectAttributes(raw.options),
     ...collectAttributes(raw.selected_options),
@@ -274,10 +323,17 @@ const normalizeProduct = (raw: Any) => {
     ...collectStrings(raw.selected_addons).map((s) => parseAttributePair(s)).filter(Boolean) as Attribute[],
   ]);
 
-  const meatType = (opts?.meatType ?? raw.meatType ?? raw.meat_type) as string | undefined;
-  if (typeof meatType === "string" && meatType.trim()) {
-    attributes.push({ key: "Mięso", value: meatType.trim().replace(/^./, (c) => c.toUpperCase()) });
+  const meatTypeRaw =
+    pickMeat(opts) ||
+    pickMeat(raw.options) ||
+    pickMeat(raw.selected_options) ||
+    pickMeat(raw.attributes) ||
+    pickMeat(raw);
+
+  if (typeof meatTypeRaw === "string" && meatTypeRaw.trim()) {
+    attributes.push({ key: "Mięso", value: cap(meatTypeRaw.trim()) });
   }
+
   attributes = aggregateAttributes(attributes).filter((a) => shouldShowAttributeForProduct(name, a.key));
 
   const ingredients =
@@ -659,7 +715,7 @@ export default function PickupOrdersPage() {
     const p = normalizeProduct(product);
     const title = p.quantity > 1 ? `${p.name} x${p.quantity}` : p.name;
     return (
-      <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-4 sm:items-center">
+      <div className="fixed inset-0 z-50 flex items:end justify-center bg-black/60 p-4 sm:items-center">
         <div className="w-full max-w-lg rounded-md border bg-white p-5 shadow-2xl">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-lg font-bold">{title}</h2>
