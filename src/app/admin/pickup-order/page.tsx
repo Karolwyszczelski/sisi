@@ -303,6 +303,9 @@ const normalizeProduct = (raw: Any) => {
     ...collectAttributes(raw.attributes),
     ...collectAttributes(opts?.selected_options),
     ...collectAttributes(opts?.attributes),
+    ...collectStrings(raw.addons).map((s) => parseAttributePair(s)).filter(Boolean) as Attribute[],
+    ...collectStrings(raw.options).map((s) => parseAttributePair(s)).filter(Boolean) as Attribute[],
+    ...collectStrings(raw.selected_addons).map((s) => parseAttributePair(s)).filter(Boolean) as Attribute[],
     ...(optionsWasString ? collectAttributes(optionsRaw) : []),
   ]);
 
