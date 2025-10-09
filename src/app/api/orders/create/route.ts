@@ -38,7 +38,7 @@ const PRIVACY_VERSION = process.env.PRIVACY_VERSION || "2025-01";
 const TERMS_URL =
   process.env.TERMS_URL || "https://www.sisiciechanow.pl/regulamin";
 const PRIVACY_URL =
-  process.env.TERMS_URL || "https://www.sisiciechanow.pl/polityka-prywatnosci";
+   process.env.PRIVACY_URL || "https://www.sisiciechanow.pl/polityka-prywatnosci";
 
 /* ============== Typy i utils =============== */
 type Any = Record<string, any>;

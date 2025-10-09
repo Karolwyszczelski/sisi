@@ -327,7 +327,7 @@ export default function CheckoutModal() {
   const [flatNumber, setFlatNumber] = useState("");
   const [optionalAddress, setOptionalAddress] = useState("");
   const [selectedOption, setSelectedOption] = useState<"local" | "takeaway" | "delivery" | null>(null);
-  const [paymentMethod, setPaymentMethod] = useState<"Gotówka" | "Terminal" | "Online">("");
+  const [paymentMethod, setPaymentMethod] = useState<("Gotówka" | "Terminal" | "Online") | null>(null);
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [orderSent, setOrderSent] = useState(false);
   const [showBurger, setShowBurger] = useState(true);
@@ -350,7 +350,7 @@ export default function CheckoutModal() {
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const [turnstileError, setTurnstileError] = useState(false);
   const [tsReady, setTsReady] = useState(false);
-  const tsIdRef = useRef<any>(null);
+  const tsIdsRef = useRef<any[]>([]);
   const tsMobileRef = useRef<HTMLDivElement | null>(null);
   const tsDesktopRef = useRef<HTMLDivElement | null>(null);
 
@@ -425,23 +425,25 @@ export default function CheckoutModal() {
     if (!TURNSTILE_SITE_KEY || !window.turnstile || !isVisible(target)) return;
     try {
       setTurnstileError(false);
-      tsIdRef.current = window.turnstile.render(target!, {
+      const id = window.turnstile.render(target!, {
         sitekey: TURNSTILE_SITE_KEY,
         callback: (t: string) => setTurnstileToken(t),
         "error-callback": () => { setTurnstileToken(null); setTurnstileError(true); },
-        "expired-callback": () => { setTurnstileToken(null); try { window.turnstile?.reset(tsIdRef.current); } catch {} },
-        "timeout-callback": () => { setTurnstileToken(null); try { window.turnstile?.reset(tsIdRef.current); } catch {} },
+        "expired-callback": () => { setTurnstileToken(null); try { window.turnstile?.reset(id); } catch {} },
+        "timeout-callback": () => { setTurnstileToken(null); try { window.turnstile?.reset(id); } catch {} },
         retry: "auto",
         theme: "auto",
         appearance: "always",
         ["refresh-expired"]: "auto",
       });
+      // zapamiętaj widget, żeby móc go resetować/usunąć
+      tsIdsRef.current.push(id);
     } catch { setTurnstileError(true); }
   };
 
   const removeTurnstile = () => {
-    try { if (tsIdRef.current && window.turnstile) window.turnstile.remove(tsIdRef.current); } catch {}
-    tsIdRef.current = null;
+    try { tsIdsRef.current.forEach((id) => window.turnstile?.remove(id)); } catch {}
+    tsIdsRef.current = [];
     setTurnstileToken(null);
     setTurnstileError(false);
   };
@@ -465,9 +467,12 @@ export default function CheckoutModal() {
     if (!TURNSTILE_SITE_KEY) return true;
     if (turnstileToken) return true;
     try {
-      if (window.turnstile && tsIdRef.current) window.turnstile.reset(tsIdRef.current);
-      await new Promise((r) => setTimeout(r, 400));
-      return !!turnstileToken;
+      tsIdsRef.current.forEach((id) => window.turnstile?.reset(id));
+      for (let i = 0; i < 10; i++) {           // ~2s na wygenerowanie tokenu
+        await new Promise((r) => setTimeout(r, 200));
+        if (turnstileToken) return true;
+      }
+      return false;
     } catch { return false; }
   };
 
@@ -567,7 +572,7 @@ export default function CheckoutModal() {
     const client_delivery_time = buildClientDeliveryTime(selectedOption, deliveryTimeOption, scheduledTime);
     const payload: any = {
       selected_option: selectedOption,
-      payment_method: paymentMethod,
+      payment_method: paymentMethod || "Gotówka",
       user: isLoggedIn ? session!.user.id : null,
       name,
       phone,
@@ -729,7 +734,7 @@ export default function CheckoutModal() {
       setOrderSent(true);
     } catch (err: any) {
       setErrorMessage(err.message || "Wystąpił błąd podczas składania zamówienia.");
-      try { if (window.turnstile && tsIdRef.current) window.turnstile.reset(tsIdRef.current); } catch {}
+      try { tsIdsRef.current.forEach((id) => window.turnstile?.reset(id)); } catch {}
     }
   };
 
@@ -738,7 +743,7 @@ export default function CheckoutModal() {
     if (!selectedOption) return setErrorMessage("Wybierz sposób odbioru.");
     if (!paymentMethod) return setErrorMessage("Wybierz metodę płatności.");
     if (!requireLegalBeforeConfirm()) return;
-    if (hoursGuardFail()) return setErrorMessage("Zamówienia przyjmujemy tylko w godz. 11:30–21:45.");
+    if (hoursGuardFail()) return setErrorMessage("Zamówienia przyjmujemy tylko w godz. 10:40–21:45.");
     if (!guardEmail()) return;
 
     if (TURNSTILE_SITE_KEY) {
