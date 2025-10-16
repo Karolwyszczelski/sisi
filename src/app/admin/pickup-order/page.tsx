@@ -273,14 +273,12 @@ const normalizeProduct = (raw: Any) => {
   const price = toNumber(raw.price ?? raw.unit_price ?? raw.total_price ?? raw.amount_price ?? raw.item?.price ?? 0);
   const quantity = toNumber(raw.quantity ?? raw.qty ?? raw.amount ?? 1, 1) || 1;
 
-  // options
   const optionsRaw = raw.options;
   const optionsWasString = typeof optionsRaw === "string";
   let opts: any = {};
   if (optionsWasString) { try { opts = JSON.parse(optionsRaw as string); } catch {} }
   else { opts = optionsRaw || {}; }
 
-  // dodatki – tylko konkretne pola, bez podwójnego liczenia
   const addonArrays = [
     raw.addons, raw.extras, raw.selected_addons, raw.toppings,
     opts?.addons, opts?.extras, opts?.selected_addons, opts?.toppings,
@@ -290,14 +288,12 @@ const normalizeProduct = (raw: Any) => {
     addonArrays.flatMap((v) => collectAddonsDetailed(v))
   ).filter((a) => isAddonAllowed(a.name));
 
-  // „Dodatkowe mięso”
   const extraMeatCount = toNumber(opts?.extraMeatCount ?? raw.extraMeatCount ?? 0, 0);
   if (extraMeatCount > 0) addonsDetailed.push({ name: "Dodatkowe mięso", qty: extraMeatCount });
 
   const addons = addonsDetailed.map((a) => a.name);
   const addonsTotalQty = addonsDetailed.reduce((s, a) => s + a.qty, 0);
 
-  // warianty + mięso
   let attributes = aggregateAttributes([
     ...collectAttributes(raw.selected_options),
     ...collectAttributes(raw.attributes),
@@ -452,8 +448,7 @@ export default function PickupOrdersPage() {
   const prevIdsRef = useRef<Set<string>>(new Set());
   const initializedRef = useRef(false);
 
-  // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-  // ZMIANA: fetchOrders z opcją "silent" (bez pokazywania loadera)
+  // fetchOrders z opcją "silent"
   const fetchOrders = useCallback(async (opts?: { silent?: boolean }) => {
     const silent = !!opts?.silent;
     try {
@@ -505,7 +500,6 @@ export default function PickupOrdersPage() {
       if (!silent && !editingOrderId) setLoading(false);
     }
   }, [page, perPage, sortOrder, editingOrderId, playDing]);
-  // <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
   useEffect(() => {
     fetchOrders();
@@ -528,7 +522,7 @@ export default function PickupOrdersPage() {
     return () => { void supabase.removeChannel(ch); };
   }, [supabase]);
 
-  // polling płatności
+  // polling płatności (pełny refresh)
   useEffect(() => {
     const hasPending = orders.some((o) => o.payment_method === "Online" && o.payment_status === "pending");
     if (!hasPending || editingOrderId) return;
@@ -575,19 +569,18 @@ export default function PickupOrdersPage() {
     return () => clearInterval(iv);
   }, [hasNew, playDing]);
 
-  // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-  // ZMIANA: cichy polling co 5s + odśwież po powrocie na kartę/okno
+  // AUTO-refresh co 5s (taki sam jak przycisk) + odśwież po powrocie
   useEffect(() => {
     const iv = setInterval(() => {
       if (document.hidden) return;
       if (editingOrderId) return;
-      void fetchOrders({ silent: true });
+      void fetchOrders(); // pełny (bez "silent")
     }, 5000);
     return () => clearInterval(iv);
   }, [fetchOrders, editingOrderId]);
 
   useEffect(() => {
-    const onWake = () => { void fetchOrders({ silent: true }); };
+    const onWake = () => { void fetchOrders(); };
     window.addEventListener("focus", onWake);
     document.addEventListener("visibilitychange", onWake);
     return () => {
@@ -595,7 +588,6 @@ export default function PickupOrdersPage() {
       document.removeEventListener("visibilitychange", onWake);
     };
   }, [fetchOrders]);
-  // <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
   const updateLocal = (id: string, upd: Partial<Order>) =>
     setOrders((prev) => prev.map((o) => (o.id === id ? { ...o, ...upd } : o)));
