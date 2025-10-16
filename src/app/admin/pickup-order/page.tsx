@@ -452,9 +452,12 @@ export default function PickupOrdersPage() {
   const prevIdsRef = useRef<Set<string>>(new Set());
   const initializedRef = useRef(false);
 
-  const fetchOrders = useCallback(async () => {
+  // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+  // ZMIANA: fetchOrders z opcją "silent" (bez pokazywania loadera)
+  const fetchOrders = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = !!opts?.silent;
     try {
-      if (!editingOrderId) setLoading(true);
+      if (!silent && !editingOrderId) setLoading(true);
       const offset = (page - 1) * perPage;
       const res = await fetch(`/api/orders/current?limit=${perPage}&offset=${offset}`, { cache: "no-store" });
       if (!res.ok) return;
@@ -493,15 +496,16 @@ export default function PickupOrdersPage() {
 
       const prev = prevIdsRef.current;
       const newOnes = mapped.filter((o) => o.status === "new" && !prev.has(o.id));
-      if (initializedRef.current && newOnes.length > 0) void playDing();
+      if (!silent && initializedRef.current && newOnes.length > 0) void playDing();
       prevIdsRef.current = new Set(mapped.map((o) => o.id));
       initializedRef.current = true;
 
       setOrders(mapped);
     } finally {
-      if (!editingOrderId) setLoading(false);
+      if (!silent && !editingOrderId) setLoading(false);
     }
   }, [page, perPage, sortOrder, editingOrderId, playDing]);
+  // <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
   useEffect(() => {
     fetchOrders();
@@ -570,6 +574,28 @@ export default function PickupOrdersPage() {
     }, 30000);
     return () => clearInterval(iv);
   }, [hasNew, playDing]);
+
+  // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+  // ZMIANA: cichy polling co 5s + odśwież po powrocie na kartę/okno
+  useEffect(() => {
+    const iv = setInterval(() => {
+      if (document.hidden) return;
+      if (editingOrderId) return;
+      void fetchOrders({ silent: true });
+    }, 5000);
+    return () => clearInterval(iv);
+  }, [fetchOrders, editingOrderId]);
+
+  useEffect(() => {
+    const onWake = () => { void fetchOrders({ silent: true }); };
+    window.addEventListener("focus", onWake);
+    document.addEventListener("visibilitychange", onWake);
+    return () => {
+      window.removeEventListener("focus", onWake);
+      document.removeEventListener("visibilitychange", onWake);
+    };
+  }, [fetchOrders]);
+  // <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
   const updateLocal = (id: string, upd: Partial<Order>) =>
     setOrders((prev) => prev.map((o) => (o.id === id ? { ...o, ...upd } : o)));
