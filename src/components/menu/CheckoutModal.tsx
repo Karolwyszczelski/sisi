@@ -579,7 +579,7 @@ export default function CheckoutModal() {
       contact_email: effectiveEmail,
       delivery_cost: deliveryInfo?.cost || 0,
       total_price: totalWithDelivery,
-      discount_amount: discount || 0,
+      discount_amount: 0,
       promo_code: promo?.code || null,
       legal_accept: { terms_version: TERMS_VERSION, privacy_version: TERMS_VERSION, marketing_opt_in: false },
       status: "placed",
@@ -637,46 +637,63 @@ export default function CheckoutModal() {
     return true;
   };
 
-  const applyPromo = async (codeRaw: string) => {
-    setPromoError(null);
-    const code = codeRaw.trim();
-    if (!code) return;
-    const currentBase = subtotal + (deliveryInfo?.cost || 0);
-    try {
-      const { data, error } = await supabase
-        .from("discount_codes")
-        .select("*")
-        .ilike("code", code)
-        .eq("active", true)
-        .maybeSingle();
+ const applyPromo = async (codeRaw: string) => {
+  setPromoError(null);
+  const code = codeRaw.trim();
+  if (!code) return;
 
-      if (!error && data) {
-        const nowIso = new Date().toISOString();
-        if (data.expires_at && data.expires_at < nowIso) throw new Error("Kod wygasł.");
-        if (typeof data.min_order === "number" && currentBase < data.min_order) {
-          throw new Error(`Minimalna wartość zamówienia to ${data.min_order.toFixed(2)} zł.`);
-        }
-        const type = data.type === "amount" ? "amount" : "percent";
-        const value = Number(data.value || 0);
-        if (value <= 0) throw new Error("Nieprawidłowa wartość kodu.");
-        setPromo({ code: data.code, type, value });
-        return;
+  const currentBase = subtotal + (deliveryInfo?.cost || 0);
+
+  try {
+    // 1) Szybka walidacja po publicznej tabeli
+    const { data, error } = await supabase
+      .from("discount_codes")
+      .select("*")
+      .ilike("code", code)
+      .eq("active", true)
+      .maybeSingle();
+
+    if (!error && data) {
+      const nowIso = new Date().toISOString();
+
+      if (data.starts_at && data.starts_at > nowIso) throw new Error("Kod jeszcze nieaktywny.");
+      if (data.expires_at && data.expires_at < nowIso) throw new Error("Kod wygasł.");
+
+      // JEDNORAZOWOŚĆ / LIMIT UŻYĆ
+      if (data.max_uses !== null && Number(data.used_count || 0) >= Number(data.max_uses)) {
+        throw new Error("Kod został już wykorzystany.");
       }
-      const resp = await safeFetch("/api/promo/validate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code, total: currentBase }),
-      });
-      if (resp?.valid) {
-        setPromo({ code: resp.code, type: resp.type, value: Number(resp.value) });
-        return;
+
+      if (typeof data.min_order === "number" && currentBase < data.min_order) {
+        throw new Error(`Minimalna wartość zamówienia to ${Number(data.min_order).toFixed(2)} zł.`);
       }
-      throw new Error(resp?.message || "Kod nieprawidłowy.");
-    } catch (e: any) {
-      setPromo(null);
-      setPromoError(e.message || "Nie udało się zastosować kodu.");
+
+      const type = data.type === "amount" ? "amount" : "percent";
+      const value = Number(data.value || 0);
+      if (value <= 0) throw new Error("Nieprawidłowa wartość kodu.");
+
+      setPromo({ code: data.code, type, value });
+      return;
     }
-  };
+
+    // 2) Fallback: walidacja po backendzie (spójna z serwerem)
+    const resp = await safeFetch("/api/promo/validate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code, total: currentBase }),
+    });
+
+    if (resp?.valid) {
+      setPromo({ code: resp.code, type: resp.type, value: Number(resp.value) });
+      return;
+    }
+
+    throw new Error(resp?.message || "Kod nieprawidłowy.");
+  } catch (e: any) {
+    setPromo(null);
+    setPromoError(e.message || "Nie udało się zastosować kodu.");
+  }
+};
 
   const clearPromo = () => { setPromo(null); setPromoError(null); };
 
@@ -943,19 +960,66 @@ export default function CheckoutModal() {
                   <div className="space-y-6">
                     <h2 className="text-2xl font-bold text-center">Dane kontaktowe</h2>
                     {selectedOption === "delivery" && (
-                      <>
-                        <AddressAutocomplete onAddressSelect={onAddressSelect} setCity={setCity} setPostalCode={setPostalCode} setFlatNumber={setFlatNumber} />
-                        <p className="text-xs text-gray-500">Wybierz adres z listy, aby obliczyć koszt dostawy</p>
-                        <div className="grid grid-cols-1 gap-2">
-                          <input type="text" placeholder="Adres" className="w-full px-3 py-2 border rounded" value={street} onChange={(e) => setStreet(e.target.value)} />
-                          <div className="flex gap-2">
-                            <input type="text" placeholder="Nr mieszkania" className="flex-1 px-3 py-2 border rounded" value={flatNumber} onChange={(e) => setFlatNumber(e.target.value)} />
-                            <input type="text" placeholder="Kod pocztowy" className="flex-1 px-3 py-2 border rounded" value={postalCode} onChange={(e) => setPostalCode(e.target.value)} />
-                          </div>
-                          <input type="text" placeholder="Miasto" className="w-full px-3 py-2 border rounded" value={city} onChange={(e) => setCity(e.target.value)} />
-                        </div>
-                      </>
-                    )}
+  <div className="space-y-3">
+    {/* najpierw wybór adresu z wyszukiwarki */}
+    <AddressAutocomplete
+      onAddressSelect={onAddressSelect}
+      setCity={setCity}
+      setPostalCode={setPostalCode}
+      setFlatNumber={setFlatNumber}
+    />
+
+    {!custCoords ? (
+      <p className="text-xs text-red-600">
+        Najpierw wyszukaj i wybierz adres z listy powyżej.
+      </p>
+    ) : null}
+
+    {/* pola odblokują się dopiero po wyborze adresu */}
+    <div className={clsx("grid grid-cols-1 gap-2", !custCoords && "opacity-50 pointer-events-none")}>
+      <input
+        type="text"
+        placeholder="Adres"
+        className="w-full px-3 py-2 border rounded"
+        value={street}
+        onChange={(e) => setStreet(e.target.value)}
+        disabled={!custCoords}
+      />
+      <div className="flex gap-2">
+        <input
+          type="text"
+          placeholder="Nr mieszkania"
+          className="flex-1 px-3 py-2 border rounded"
+          value={flatNumber}
+          onChange={(e) => setFlatNumber(e.target.value)}
+          disabled={!custCoords}
+        />
+        <input
+          type="text"
+          placeholder="Kod pocztowy"
+          className="flex-1 px-3 py-2 border rounded"
+          value={postalCode}
+          onChange={(e) => setPostalCode(e.target.value)}
+          disabled={!custCoords}
+        />
+      </div>
+      <input
+        type="text"
+        placeholder="Miasto"
+        className="w-full px-3 py-2 border rounded"
+        value={city}
+        onChange={(e) => setCity(e.target.value)}
+        disabled={!custCoords}
+      />
+    </div>
+
+    {deliveryInfo && (
+      <p className="text-xs text-gray-600">
+        Koszt dostawy: {deliveryInfo.cost.toFixed(2)} zł • ETA {deliveryInfo.eta}
+      </p>
+    )}
+  </div>
+)}
                     <div className="grid grid-cols-1 gap-2">
                       <input type="text" placeholder="Imię" className="w-full px-3 py-2 border rounded" value={name} onChange={(e) => setName(e.target.value)} />
                       <input type="tel" placeholder="Telefon" className="w-full px-3 py-2 border rounded" value={phone} onChange={(e) => setPhone(e.target.value)} />
@@ -969,7 +1033,7 @@ export default function CheckoutModal() {
                       <button onClick={() => goToStep(1)} className="px-4 py-2 bg-gray-200 rounded">← Wstecz</button>
                       <button
                         onClick={nextStep}
-                        disabled={!name || !phone || !validEmail || (selectedOption === "delivery" && (!street || !postalCode || !city))}
+                        disabled={!name || !phone || !validEmail || (selectedOption === "delivery" && (!custCoords || !deliveryInfo))}
                         className="px-4 py-2 bg-yellow-400 rounded font-semibold disabled:opacity-50"
                       >
                         Dalej →

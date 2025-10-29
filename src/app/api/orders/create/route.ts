@@ -427,7 +427,7 @@ export async function POST(req: Request) {
 
     // 2.1) Subtotal po stronie serwera
     const baseFromItems = calcSubtotalFromItems(n.selected_option, n.itemsArray);
-    const discount = Math.max(0, Number(n.discount_amount || 0));
+    const discount = 0;
 
     // 2.2) Dostawa: wymagaj współrzędnych, dopasuj strefę z <= max, policz koszt
     if (n.selected_option === "delivery") {
@@ -528,8 +528,8 @@ export async function POST(req: Request) {
         deliveryTime: n.deliveryTime,
         eta: n.eta,
         user: n.user,
-        promo_code: n.promo_code,
-        discount_amount: n.discount_amount,
+        promo_code: null,         // zmiana: nie ufamy klientowi
+        discount_amount: 0,       // zmiana: policzymy po redeem
         legal_accept: n.legal_accept,
       })
       .select("id, selected_option, total_price, name")
@@ -545,6 +545,60 @@ export async function POST(req: Request) {
 
     const newOrderId = orderRow.id;
 
+    // [NOWE] Atomowe zużycie kodu i aktualizacja zamówienia
+    let currentTotal = n.total_price;
+
+    if (n.promo_code) {
+      const baseTotal = Math.max(
+        0,
+        Math.round((baseFromItems + (n.delivery_cost ?? 0)) * 100) / 100
+      );
+
+      const { data: redeemed, error: redeemErr } = await supabaseAdmin.rpc(
+        "redeem_discount_code",
+        {
+          p_code: n.promo_code,
+          p_total: baseTotal,
+          p_order_id: newOrderId,
+          p_user_id: n.user ?? null,
+          p_email: n.contact_email ?? null,
+        }
+      );
+
+      if (redeemErr || !Array.isArray(redeemed) || !redeemed[0]) {
+        await supabaseAdmin.from("orders").delete().eq("id", newOrderId);
+        return NextResponse.json(
+          { error: "Kod promocyjny jest nieważny lub został już wykorzystany." },
+          { status: 400 }
+        );
+      }
+
+      const applied = Number(redeemed[0].applied_discount || 0);
+      if (applied > 0) {
+        const newTotal = Math.max(0, Math.round((baseTotal - applied) * 100) / 100);
+
+        const { error: updErr } = await supabaseAdmin
+          .from("orders")
+          .update({
+            promo_code: redeemed[0].code,
+            discount_amount: applied,
+            total_price: newTotal,
+          })
+          .eq("id", newOrderId);
+
+        if (updErr) {
+          await supabaseAdmin.from("discount_redemptions").delete().eq("order_id", newOrderId);
+          await supabaseAdmin.from("orders").delete().eq("id", newOrderId);
+          return NextResponse.json(
+            { error: "Nie udało się zapisać rabatu do zamówienia." },
+            { status: 500 }
+          );
+        }
+
+        currentTotal = newTotal;
+      }
+    }
+
     // 6) order_items
     if (Array.isArray(n.itemsArray) && n.itemsArray.length > 0) {
       try {
@@ -558,7 +612,7 @@ export async function POST(req: Request) {
             name: ni.name,
             quantity: ni.quantity,
             unit_price: ni.price,
-            line_no: i + 1, // kolumna może być dodana przez IF NOT EXISTS
+            line_no: i + 1,
           };
         });
         const { error: oiErr } = await supabaseAdmin.from("order_items").insert(shaped);
@@ -575,9 +629,9 @@ export async function POST(req: Request) {
         const url = trackingUrl(origin, String(newOrderId));
 
         const total =
-          typeof orderRow.total_price === "number"
-            ? orderRow.total_price.toFixed(2).replace(".", ",")
-            : String(orderRow.total_price ?? "0");
+          typeof currentTotal === "number"
+            ? currentTotal.toFixed(2).replace(".", ",")
+            : String(currentTotal ?? "0");
 
         const html = `
           <div style="font-family:Inter,Arial,sans-serif;line-height:1.5;color:#111">
@@ -614,13 +668,12 @@ export async function POST(req: Request) {
         const to = normalizePhone(STAFF_PHONE_NUMBER);
         const from = TWILIO_FROM_NUMBER;
         if (to && from) {
-          // podgląd nazw z pozycji
           const previewNames = normalizedItems.slice(0, 3).map((x) => x.name).join(", ");
           const more = normalizedItems.length > 3 ? ` +${normalizedItems.length - 3}` : "";
           const total =
-            typeof orderRow.total_price === "number"
-              ? orderRow.total_price.toFixed(2).replace(".", ",")
-              : String(orderRow.total_price ?? "0");
+            typeof currentTotal === "number"
+              ? currentTotal.toFixed(2).replace(".", ",")
+              : String(currentTotal ?? "0");
           const body =
             `Nowe zamówienie #${newOrderId}\n` +
             `Typ: ${optLabel(orderRow.selected_option)}\n` +
