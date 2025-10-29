@@ -7,11 +7,10 @@ import useCartStore from "@/store/cartStore";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
 import clsx from "clsx";
 
-const BG_URL = "/graffitiburger2.webp";      // tło desktop/tablet (jak wcześniej)
+const BG_URL = "/graffitiburger2.webp";      // tło desktop/tablet
 const MONTH_IMG = "/burgermiesiaca.png";     // burger miesiąca
 const HALLOWEEN_IMG = "/halloween.png";      // burger halloween
 
-// Ikony
 const PlusSVG = (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M12 5v14M5 12h14" />
@@ -24,18 +23,22 @@ const CheckSVG = (
 );
 
 type Slide = "month" | "halloween";
+const pad2 = (n: number) => String(n).padStart(2, "0");
 
 export default function BurgerMiesiaca() {
   const { addItem } = useCartStore();
   const supabase = getSupabaseBrowser();
 
-  const [burgerName, setBurgerName] = useState<string>("");
-  const [burgerDesc, setBurgerDesc] = useState<string>("");
-  const [loading, setLoading] = useState<boolean>(true);
+  const [burgerName, setBurgerName] = useState("");
+  const [burgerDesc, setBurgerDesc] = useState("");
+  const [loading, setLoading] = useState(true);
 
   const [slide, setSlide] = useState<Slide>("month");
   const autoTimer = useRef<NodeJS.Timeout | null>(null);
   const [added, setAdded] = useState(false);
+
+  // stan licznika
+  const [countdown, setCountdown] = useState<{ d: number; h: number; m: number; s: number } | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -63,6 +66,26 @@ export default function BurgerMiesiaca() {
     return () => { if (autoTimer.current) clearInterval(autoTimer.current); };
   }, []);
 
+  // Odliczanie do 31.10, 21:45 czasu PL (CET po zmianie czasu, więc +01:00)
+  useEffect(() => {
+    const year = new Date().getFullYear();
+    const targetUtc = Date.parse(`${year}-10-31T21:45:00+01:00`);
+
+    const tick = () => {
+      const now = Date.now();
+      let diff = Math.max(0, targetUtc - now);
+      const d = Math.floor(diff / 86400000); diff -= d * 86400000;
+      const h = Math.floor(diff / 3600000);  diff -= h * 3600000;
+      const m = Math.floor(diff / 60000);    diff -= m * 60000;
+      const s = Math.floor(diff / 1000);
+      setCountdown({ d, h, m, s });
+    };
+
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, []);
+
   const addMonth = () => {
     addItem({ name: `Burger Miesiąca – ${burgerName || "—"}`, price: 34.9, quantity: 1 });
     setAdded(true); setTimeout(() => setAdded(false), 1800);
@@ -83,7 +106,6 @@ export default function BurgerMiesiaca() {
     "Idealne przełamanie smaku: czerwona cebula i ogórek kiszony.",
   ];
 
-  /** POJEDYNCZY SLAJD — bez tła, przezroczysty */
   const SlideView = ({ kind }: { kind: Slide }) => {
     const isHalloween = kind === "halloween";
     const priceText = "34,90";
@@ -92,12 +114,9 @@ export default function BurgerMiesiaca() {
 
     return (
       <div className="flex-none w-screen">
-        {/* marginesy jak w Twojej wersji mobile + desktop */}
         <div className="pt-12 px-6 pb-[calc(env(safe-area-inset-bottom)+56px)] md:py-20 md:px-0">
           <div className="relative z-10 max-w-6xl mx-auto md:px-0">
-            {/* obraz lewo, opis prawo */}
             <div className="flex flex-col md:flex-row items-center md:items-start gap-8 md:gap-12">
-              {/* Obraz + cena + plus (desktop) */}
               <div className="relative w-full md:w-[50%] flex justify-center md:justify-start">
                 <div className="relative">
                   <Image
@@ -108,22 +127,17 @@ export default function BurgerMiesiaca() {
                     className="object-contain md:max-h-[520px]"
                     priority
                   />
-
-                  {/* Cena (bez błędnych klas jak -top-50) */}
                   <div
                     className={clsx(
                       "absolute -right-3 -top-3 md:-right-6 md:-top-6 w-20 h-20 md:w-24 md:h-24 rounded-full flex items-center justify-center shadow-xl border border-black/10",
                       priceCircleBg
                     )}
-                    aria-label={`Cena ${priceText} zł`}
                   >
                     <div className="text-center leading-tight">
                       <div className="text-sm md:text-base font-bold">{priceText}</div>
                       <div className="text-[10px] md:text-xs opacity-90">zł</div>
                     </div>
                   </div>
-
-                  {/* Plus przy obrazie — tylko desktop (jak wcześniej) */}
                   <button
                     onClick={isHalloween ? addHalloween : addMonth}
                     className={clsx(
@@ -142,23 +156,27 @@ export default function BurgerMiesiaca() {
               {/* Opis — mobile center, desktop left */}
               <div className="w-full md:w-[50%] flex flex-col items-center md:items-start text-center md:text-left md:pt-4">
                 {isHalloween ? (
-                  <div className="relative mb-3">
-                    <span className="absolute -left-2 -top-1 w-6 h-6 bg-orange-500" aria-hidden />
-                    <span className="relative z-10 text-[12px] tracking-widest font-extrabold">OFERTA CZASOWA</span>
-                  </div>
-                ) : (
-                  <h3 className="text-[12px] tracking-widest font-bold mb-1">BURGER MIESIĄCA</h3>
-                )}
-
-                {isHalloween ? (
                   <>
+                    <div className="relative mb-1 md:mb-2">
+                      <span className="absolute -left-2 -top-1 w-6 h-6 bg-orange-500" aria-hidden />
+                      <span className="relative z-10 text-[12px] tracking-widest font-extrabold">OFERTA CZASOWA</span>
+                    </div>
+
+                    {countdown && (
+                      <div className="mb-3 text-xs md:text-sm text-orange-200/90">
+                        Do końca:{" "}
+                        <b>
+                          {countdown.d}d {pad2(countdown.h)}:{pad2(countdown.m)}:{pad2(countdown.s)}
+                        </b>
+                      </div>
+                    )}
+
                     <h2 className="text-[40px] md:text-[56px] leading-none font-extrabold text-orange-400">BURGER HALLOWEEN</h2>
                     <ul className="mt-3 space-y-1 text-sm md:text-base text-orange-100/90">
                       {halloweenLines.map((l, i) => (
                         <li key={i} className="leading-snug">{l}</li>
                       ))}
                     </ul>
-                    {/* CTA mobile center */}
                     <button
                       onClick={addHalloween}
                       className="mt-5 inline-flex items-center justify-center rounded-md px-5 py-2 text-sm font-semibold bg-white text-black md:hidden mx-auto"
@@ -168,6 +186,7 @@ export default function BurgerMiesiaca() {
                   </>
                 ) : (
                   <>
+                    <h3 className="text-[12px] tracking-widest font-bold mb-1">BURGER MIESIĄCA</h3>
                     <h2 className="text-[36px] md:text-[56px] leading-none font-extrabold text-yellow-400">
                       {loading ? "…" : monthLabel.toUpperCase()}
                     </h2>
@@ -182,7 +201,6 @@ export default function BurgerMiesiaca() {
                             </span>
                           ))}
                     </p>
-                    {/* CTA mobile center */}
                     <button
                       onClick={addMonth}
                       className="mt-5 inline-flex items-center justify-center rounded-md px-5 py-2 text-sm font-semibold bg-white text-black md:hidden mx-auto"
@@ -200,19 +218,13 @@ export default function BurgerMiesiaca() {
   };
 
   return (
-    /**
-     * WSPÓLNE TŁO:
-     * - mobile: jak wcześniej — BRAK tła (bg-transparent), żadnego overlay
-     * - desktop: tło graffiti + przyciemnienie (spójne dla obu slajdów)
-     */
+    // Desktop: wspólne tło + overlay; Mobile: brak tła
     <section className="relative w-full overflow-hidden text-white">
-      {/* DESKTOP/TABLET BACKGROUND + overlay */}
       <div className="hidden md:block absolute inset-0 -z-10">
         <Image src={BG_URL} alt="" fill priority className="object-cover" />
         <div className="absolute inset-0 bg-black/80" />
       </div>
 
-      {/* Tor slidera */}
       <div className="relative z-10 w-screen overflow-hidden">
         <div
           className="flex flex-nowrap transition-transform duration-500 ease-out"
@@ -222,7 +234,6 @@ export default function BurgerMiesiaca() {
           <SlideView kind="halloween" />
         </div>
 
-        {/* Nawigacja na dole, na tle (desktop) / na treści (mobile) */}
         <div className="pointer-events-none absolute inset-x-0 bottom-4 z-20">
           <div className="absolute left-4 bottom-0 pointer-events-auto">
             <button
