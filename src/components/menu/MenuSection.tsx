@@ -51,7 +51,13 @@ function normalizeSupabaseData(data: SupabaseProduct[]): RawMenuCategory[] {
     if (!map[cat]) map[cat] = {};
     const itemObj = {
       name: p.name,
-      price: parseFloat(p.price),
+      price: typeof p.price === "number"
+  ? Math.round(p.price * 100) / 100
+  : (() => {
+      const s = String(p.price ?? "0").replace(/[^0-9,.\-]/g, "").replace(",", ".");
+      const n = Number(s);
+      return Number.isFinite(n) ? Math.round(n * 100) / 100 : 0;
+    })(),
       description: p.description || undefined,
       ingredients: Array.isArray(p.ingredients) ? p.ingredients : [],
       imageUrl: p.image_url || undefined,

@@ -81,6 +81,17 @@ const AVAILABLE_ADDONS = [
   ...SAUCES,
 ];
 
+/* helper ceny: zamienia "20,90" -> 20.90 */
+const toPrice = (v: any): number => {
+  if (typeof v === "number" && Number.isFinite(v)) return Math.round(v * 100) / 100;
+  if (typeof v === "string") {
+    const s = v.replace(/[^0-9,.\-]/g, "").replace(",", ".");
+    const n = Number(s);
+    return Number.isFinite(n) ? Math.round(n * 100) / 100 : 0;
+  }
+  return 0;
+};
+
 type Product = { id: number; name: string; category: string | null; subcategory: string | null };
 
 /* helpers */
@@ -151,7 +162,7 @@ const ProductItem: React.FC<{
   const { changeMeatType, addExtraMeat, removeExtraMeat, addAddon, removeAddon, swapIngredient, removeItem, removeWholeItem } =
     helpers;
 
-  const priceNum = typeof prod.price === "string" ? parseFloat(prod.price) : prod.price || 0;
+  const priceNum = toPrice(prod.price);
   const addonsCost = (prod.addons ?? []).reduce((sum: number, addon: string) => sum + (SAUCES.includes(addon) ? 3 : 4), 0);
   const extraMeatCost = (prod.extraMeatCount || 0) * 10;
   const lineTotal = (priceNum + addonsCost + extraMeatCost) * (prod.quantity || 1);
@@ -479,7 +490,7 @@ export default function CheckoutModal() {
   const baseTotal = useMemo<number>(() => {
     return items.reduce((acc: number, it: any) => {
       const qty = it.quantity || 1;
-      const priceNum = typeof it.price === "string" ? parseFloat(it.price) : it.price || 0;
+      const priceNum = toPrice(it.price);
       const addonsCost = (it.addons ?? []).reduce((sum: number, addon: string) => sum + (SAUCES.includes(addon) ? 3 : 4), 0);
       const extraMeatCost = (it.extraMeatCount || 0) * 10;
       return acc + (priceNum + addonsCost + extraMeatCost) * qty;
@@ -609,7 +620,7 @@ export default function CheckoutModal() {
         product_id: product?.id,
         name: item.name,
         quantity: item.quantity || 1,
-        unit_price: item.price,
+        unit_price: toPrice(item.price),
         options: {
           meatType: item.meatType ?? inferred, // zapisz wołowina/kurczak lub null
           extraMeatCount: item.extraMeatCount,

@@ -60,6 +60,17 @@ const num = (v: any, d: number | null = null): number | null => {
   return Number.isFinite(n) ? n : d;
 };
 
+/** Normalizacja ceny: przyjmuje "20,90" i "20.90" */
+const money = (v: any): number => {
+  if (typeof v === "number" && Number.isFinite(v)) return Math.round(v * 100) / 100;
+  if (typeof v === "string") {
+    const s = v.replace(/[^0-9,.\-]/g, "").replace(",", ".");
+    const n = Number(s);
+    return Number.isFinite(n) ? Math.round(n * 100) / 100 : 0;
+  }
+  return 0;
+};
+
 const optLabel = (v?: string) =>
   v === "delivery" ? "DOSTAWA" : v === "takeaway" ? "NA WYNOS" : "NA MIEJSCU";
 
@@ -167,7 +178,7 @@ function buildItemFromDbAndOptions(dbRow: ProductRow | undefined, raw: Any): Nor
     "(bez nazwy)";
 
   const quantity = (num(raw.quantity ?? raw.qty ?? 1, 1) ?? 1) as number;
-  const price = (num(raw.price ?? raw.unit_price ?? raw.total_price ?? 0, 0) ?? 0) as number;
+  const price = money(raw.price ?? raw.unit_price ?? raw.total_price ?? 0);
 
   const opt = raw.options ?? {};
   const addons: string[] = [
@@ -327,7 +338,7 @@ function calcSubtotalFromItems(selected_option: string, itemsArray: Any[]): numb
   const packaging = (selected_option === "delivery" || selected_option === "takeaway") ? 2 : 0;
   const itemsSum = itemsArray.reduce((acc, it) => {
     const qty = Number(it.quantity ?? 1) || 1;
-    const basePrice = Number(it.price ?? it.unit_price ?? 0) || 0;
+    const basePrice = money(it.price ?? it.unit_price ?? 0);
     const addons = Array.isArray(it?.options?.addons) ? it.options.addons : (Array.isArray(it.addons) ? it.addons : []);
     const addonsCost = (addons ?? []).reduce((s: number, a: any) => s + (SAUCES.includes(String(a)) ? 3 : 4), 0);
     const extraMeat = Number(it?.options?.extraMeatCount ?? 0) || 0;
