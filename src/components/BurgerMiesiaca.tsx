@@ -7,8 +7,9 @@ import useCartStore from "@/store/cartStore";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
 import clsx from "clsx";
 
-const BG_URL = "/graffitiburger2.webp";   // to samo tło jak wcześniej
-const MONTH_IMG = "/halloween.png";       // obraz burgera miesiąca
+const BG_DESKTOP = "/graffitiburger2.webp";     // tło desktop/tablet
+const BG_MOBILE  = "/heromobileburger.jpg";     // tło mobile jak wcześniej
+const MONTH_IMG  = "/halloween.png";            // obraz burgera miesiąca
 
 const PlusSVG = (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -58,18 +59,8 @@ export default function BurgerMiesiaca() {
   const monthLabel = monthPl.charAt(0).toUpperCase() + monthPl.slice(1);
 
   return (
-    <section
-      className="relative w-full overflow-hidden text-white"
-      style={{
-        backgroundImage: `url('${BG_URL}')`,
-        backgroundPosition: "center top",
-        backgroundRepeat: "no-repeat",
-        backgroundSize: "cover",
-        backgroundAttachment: "fixed",
-      }}
-    >
-      {/* jednolite przyciemnienie na całej sekcji */}
-      <div className="absolute inset-0 bg-black/80" />
+    <section className="burger-sec relative w-full overflow-hidden text-white">
+      <div className="overlay" />
 
       <div className="relative z-10 max-w-6xl mx-auto px-6 md:px-0 pt-12 pb-[calc(env(safe-area-inset-bottom)+56px)] md:py-20">
         <div className="flex flex-col md:flex-row items-center md:items-start gap-8 md:gap-12">
@@ -129,7 +120,7 @@ export default function BurgerMiesiaca() {
                   ))}
             </p>
 
-            {/* CTA mobile center */}
+            {/* CTA mobile */}
             <button
               onClick={addMonth}
               className="mt-5 inline-flex items-center justify-center rounded-md px-5 py-2 text-sm font-semibold bg-white text-black md:hidden mx-auto"
@@ -149,6 +140,28 @@ export default function BurgerMiesiaca() {
           </div>
         </div>
       </div>
+
+      {/* różne tła dla mobile i desktop; desktop z fixed dla ciągłości z następną sekcją */}
+      <style jsx>{`
+        .burger-sec {
+          background-image: url('${BG_MOBILE}');
+          background-position: center top;
+          background-repeat: no-repeat;
+          background-size: cover;
+          background-attachment: fixed;
+        }
+        @media (min-width: 768px) {
+          .burger-sec {
+            background-image: url('${BG_DESKTOP}');
+          }
+        }
+        .overlay {
+          position: absolute;
+          inset: 0;
+          background: rgba(0, 0, 0, 0.8);
+          pointer-events: none;
+        }
+      `}</style>
     </section>
   );
 }
