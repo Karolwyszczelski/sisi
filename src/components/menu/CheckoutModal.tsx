@@ -648,65 +648,46 @@ export default function CheckoutModal() {
     return true;
   };
 
- const applyPromo = async (codeRaw: string) => {
-  setPromoError(null);
-  const code = codeRaw.trim();
-  if (!code) return;
+  /* >>> POPRAWIONE: walidacja wyłącznie przez backend, jednorazowość po stronie API <<< */
+  const applyPromo = async (codeRaw: string) => {
+    setPromoError(null);
+    setErrorMessage(null);
 
-  const currentBase = subtotal + (deliveryInfo?.cost || 0);
+    const code = codeRaw.trim();
+    if (!code) return;
 
-  try {
-    // 1) Szybka walidacja po publicznej tabeli
-    const { data, error } = await supabase
-      .from("discount_codes")
-      .select("*")
-      .ilike("code", code)
-      .eq("active", true)
-      .maybeSingle();
+    const base = subtotal + (deliveryInfo?.cost || 0);
 
-    if (!error && data) {
-      const nowIso = new Date().toISOString();
+    try {
+      const resp = await safeFetch("/api/promo/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          code,
+          total: base,
+          email: effectiveEmail || null,
+          userId: isLoggedIn ? session!.user.id : null,
+        }),
+      });
 
-      if (data.starts_at && data.starts_at > nowIso) throw new Error("Kod jeszcze nieaktywny.");
-      if (data.expires_at && data.expires_at < nowIso) throw new Error("Kod wygasł.");
-
-      // JEDNORAZOWOŚĆ / LIMIT UŻYĆ
-      if (data.max_uses !== null && Number(data.used_count || 0) >= Number(data.max_uses)) {
-        throw new Error("Kod został już wykorzystany.");
+      if (resp?.valid) {
+        setPromo({ code: resp.code, type: resp.type, value: Number(resp.value) });
+        return;
       }
 
-      if (typeof data.min_order === "number" && currentBase < data.min_order) {
-        throw new Error(`Minimalna wartość zamówienia to ${Number(data.min_order).toFixed(2)} zł.`);
-      }
-
-      const type = data.type === "amount" ? "amount" : "percent";
-      const value = Number(data.value || 0);
-      if (value <= 0) throw new Error("Nieprawidłowa wartość kodu.");
-
-      setPromo({ code: data.code, type, value });
-      return;
+      throw new Error(resp?.message || "Kod nieprawidłowy.");
+    } catch (e: any) {
+      setPromo(null);
+      setPromoError(e.message || "Nie udało się zastosować kodu.");
     }
+  };
 
-    // 2) Fallback: walidacja po backendzie (spójna z serwerem)
-    const resp = await safeFetch("/api/promo/validate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code, total: currentBase }),
-    });
-
-    if (resp?.valid) {
-      setPromo({ code: resp.code, type: resp.type, value: Number(resp.value) });
-      return;
-    }
-
-    throw new Error(resp?.message || "Kod nieprawidłowy.");
-  } catch (e: any) {
+  const clearPromo = () => {
     setPromo(null);
-    setPromoError(e.message || "Nie udało się zastosować kodu.");
-  }
-};
-
-  const clearPromo = () => { setPromo(null); setPromoError(null); };
+    setPromoError(null);
+    setErrorMessage(null);
+  };
+  /* <<< KONIEC POPRAWKI >>> */
 
   const requireLegalBeforeConfirm = () => {
     if (!legalAccepted) {
@@ -1139,7 +1120,7 @@ export default function CheckoutModal() {
                             ) : (
                               !shouldHideOrderActions && (
                                 <div className="flex flex-col gap-2 mt-2">
-                                  <button onClick={paymentMethod === "Online" ? handleOnlinePayment : handleSubmitOrder} className="w-full py-2 bg-black text-white rounded font-semibold hover:opacity-95" disabled={confirmDisabled}>
+                                  <button onClick={paymentMethod === "Online" ? handleOnlinePayment : handleSubmitOrder} className="w-full py-2 bg-black text:white rounded font-semibold hover:opacity-95" disabled={confirmDisabled}>
                                     ✅ Zamawiam i płacę ({paymentMethod})
                                   </button>
                                   <button onClick={() => setShowConfirmation(false)} className="text-xs underline">Zmień metodę</button>
