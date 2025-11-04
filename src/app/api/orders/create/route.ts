@@ -571,7 +571,7 @@ export async function POST(req: Request) {
           p_code: n.promo_code,
           p_total: baseTotal,
           p_order_id: newOrderId,
-          p_user_id: n.user ?? null,
+          p_user_id: null,  
           p_email: n.contact_email ?? null,
           p_phone: n.phone ?? null,
         }
