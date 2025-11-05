@@ -440,7 +440,7 @@ export async function POST(req: Request) {
     const baseFromItems = calcSubtotalFromItems(n.selected_option, n.itemsArray);
     const discount = 0;
 
-    // 2.2) Dostawa: wymagaj współrzędnych, dopasuj strefę z <= max, policz koszt
+    // 2.2) Dostawa
     if (n.selected_option === "delivery") {
       if (n.delivery_lat == null || n.delivery_lng == null) {
         return NextResponse.json(
@@ -471,7 +471,6 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "Adres poza zasięgiem dostawy." }, { status: 400 });
       }
 
-      // Minimum zamówienia dla dostawy z DB (np. 40 zł)
       if (baseFromItems < Number(zone.min_order_value || 0)) {
         return NextResponse.json(
           { error: `Minimalna wartość zamówienia dla dostawy to ${Number(zone.min_order_value).toFixed(2)} zł.` },
@@ -496,19 +495,18 @@ export async function POST(req: Request) {
       n.delivery_cost = rounded;
       n.total_price = Math.max(0, Math.round((baseFromItems + rounded - Math.min(discount, baseFromItems + rounded)) * 100) / 100);
     } else {
-      // brak dostawy
       n.delivery_cost = 0;
       n.total_price = Math.max(0, Math.round((baseFromItems - Math.min(discount, baseFromItems)) * 100) / 100);
     }
 
-    // 3) Dociągnij produkty po STRING id
+    // 3) Dociągnij produkty
     const productIds = n.itemsArray
       .map((it) => it.product_id ?? it.productId ?? it.id ?? null)
       .filter(Boolean)
       .map((x: any) => String(x));
     const productsMap = await fetchProductsByIds(productIds);
 
-    // 4) Zbuduj pozycje
+    // 4) Pozycje
     const normalizedItems: NormalizedItem[] = n.itemsArray.map((it) => {
       const key = String(it.product_id ?? it.productId ?? it.id ?? "");
       const db = productsMap.get(key);
@@ -539,8 +537,8 @@ export async function POST(req: Request) {
         deliveryTime: n.deliveryTime,
         eta: n.eta,
         user: n.user,
-        promo_code: null,         // zmiana: nie ufamy klientowi
-        discount_amount: 0,       // zmiana: policzymy po redeem
+        promo_code: null,         // nie ufamy klientowi
+        discount_amount: 0,       // policzymy po redeem
         legal_accept: n.legal_accept,
       })
       .select("id, selected_option, total_price, name")
@@ -565,19 +563,20 @@ export async function POST(req: Request) {
         Math.round((baseFromItems + (n.delivery_cost ?? 0)) * 100) / 100
       );
 
+      // ✅ poprawione parametry: (text, numeric, uuid, uuid, text)
       const { data: redeemed, error: redeemErr } = await supabaseAdmin.rpc(
         "redeem_discount_code",
         {
           p_code: n.promo_code,
           p_total: baseTotal,
           p_order_id: newOrderId,
-          p_user_id: null,  
+          p_user_id: n.user ?? null,
           p_email: n.contact_email ?? null,
-          p_phone: null
         }
       );
 
       if (redeemErr || !Array.isArray(redeemed) || !redeemed[0]) {
+        console.error("[orders.create] redeem error:", redeemErr?.message, redeemed);
         await supabaseAdmin.from("orders").delete().eq("id", newOrderId);
         return NextResponse.json(
           { error: "Kod promocyjny jest nieważny lub został już wykorzystany." },
