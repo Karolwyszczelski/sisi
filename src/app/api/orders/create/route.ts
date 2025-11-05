@@ -573,7 +573,7 @@ export async function POST(req: Request) {
           p_order_id: newOrderId,
           p_user_id: null,  
           p_email: n.contact_email ?? null,
-          p_phone: n.phone ?? null,
+          p_phone: null
         }
       );
 
