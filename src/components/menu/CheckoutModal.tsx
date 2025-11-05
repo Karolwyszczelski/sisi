@@ -675,6 +675,8 @@ export default function CheckoutModal() {
 
       if (resp?.valid) {
         setPromo({ code: resp.code, type: resp.type, value: Number(resp.value) });
+         setPromoError(null);           // <= czyści lokalny błąd
+         setErrorMessage(null);  
         return;
       }
 
@@ -877,7 +879,7 @@ export default function CheckoutModal() {
               </div>
             ) : (
               <>
-                {errorMessage && <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-2 rounded">{errorMessage}</div>}
+                {errorMessage && !promo && <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-2 rounded">{errorMessage}</div>}
 
                 {/* STEP 1 */}
                 {checkoutStep === 1 && (

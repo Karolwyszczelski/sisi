@@ -7,49 +7,40 @@ import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,   // service role, bez RLS
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
   { auth: { persistSession: false } }
 );
 
-type DcRow = {
-  code: string;
-  active: boolean;
-  starts_at: string | null;
-  expires_at: string | null;
-  min_order: number | null;
-  max_uses: number | null;
-  type: "percent" | "amount";
-  value: number;
-};
-
 export async function POST(req: Request) {
-  // 1) parse
-  let body: any;
-  try { body = await req.json(); }
-  catch { return NextResponse.json({ valid: false, message: "Invalid JSON" }, { status: 400 }); }
+  let body: any = {};
+  try { body = await req.json(); } catch {}
+  const codeRaw = String(body.code || "").trim();
+  const total = Number(body.total || 0);
+  const userId: string | null = body.userId ? String(body.userId) : null;
+  const emailLower: string | null = body.email ? String(body.email).toLowerCase() : null;
 
-  const code = String(body.code ?? "").trim();
-  const total = Number(body.total ?? 0);
-  const userId = body.userId ? String(body.userId) : null;
-  const email = body.email ? String(body.email).trim().toLowerCase() : null;
+  if (!codeRaw) {
+    return NextResponse.json({ valid: false, message: "Brak kodu." }, { status: 400 });
+  }
 
-  if (!code) return NextResponse.json({ valid: false, message: "Brak kodu." }, { status: 400 });
+  const now = new Date().toISOString();
 
-  // 2) znajdź kod (CITEXT → używamy eq)
+  // CITEXT => eq/ilike działa bez rozróżnienia wielkości
   const { data: dc, error: dcErr } = await supabase
     .from("discount_codes")
-    .select("code, active, starts_at, expires_at, min_order, max_uses, type, value")
-    .eq("code", code)
-    .single<DcRow>();
+    .select("id, code, active, starts_at, expires_at, min_order, type, value, max_uses")
+    .ilike("code", codeRaw)
+    .eq("active", true)
+    .or(`starts_at.is.null,starts_at.lte.${now}`)
+    .or(`expires_at.is.null,expires_at.gte.${now}`)
+    .maybeSingle();
 
-  if (dcErr || !dc) return NextResponse.json({ valid: false, message: "Kod nieprawidłowy." }, { status: 404 });
-  if (!dc.active) return NextResponse.json({ valid: false, message: "Kod jest wyłączony." }, { status: 400 });
-
-  const now = new Date();
-  if (dc.starts_at && new Date(dc.starts_at) > now)
-    return NextResponse.json({ valid: false, message: "Kod jeszcze nieaktywny." }, { status: 400 });
-  if (dc.expires_at && new Date(dc.expires_at) < now)
-    return NextResponse.json({ valid: false, message: "Kod wygasł." }, { status: 400 });
+  if (dcErr) {
+    return NextResponse.json({ valid: false, message: "Błąd bazy." }, { status: 500 });
+  }
+  if (!dc) {
+    return NextResponse.json({ valid: false, message: "Kod nieprawidłowy lub nieaktywny." }, { status: 404 });
+  }
 
   if (typeof dc.min_order === "number" && total < Number(dc.min_order)) {
     return NextResponse.json(
@@ -58,38 +49,46 @@ export async function POST(req: Request) {
     );
   }
 
-  // 3) jednorazowość per user
+  // jednorazowość po użytkowniku
   if (userId) {
     const { count } = await supabase
       .from("discount_redemptions")
       .select("*", { count: "exact", head: true })
-      .eq("code", dc.code)         // jeśli masz kolumnę code_id → zamień na .eq("code_id", dc.id)
+      .eq("code", dc.code)
       .eq("user_id", userId);
-    if ((count ?? 0) > 0)
+    if ((count || 0) > 0) {
       return NextResponse.json({ valid: false, message: "Kod został już przez Ciebie wykorzystany." }, { status: 400 });
+    }
   }
 
-  // 4) jednorazowość per email (obsługuje email_lower lub email)
-  if (email) {
+  // jednorazowość po e-mailu (kolumna CITEXT: email_lower)
+  if (emailLower) {
     const { count } = await supabase
       .from("discount_redemptions")
       .select("*", { count: "exact", head: true })
       .eq("code", dc.code)
-      .or(`email_lower.eq.${email},email.eq.${email}`);
-    if ((count ?? 0) > 0)
+      .eq("email_lower", emailLower);
+    if ((count || 0) > 0) {
       return NextResponse.json({ valid: false, message: "Kod został już przez Ciebie wykorzystany." }, { status: 400 });
+    }
   }
 
-  // 5) globalny limit
+  // globalny limit
   if (dc.max_uses !== null) {
     const { count } = await supabase
       .from("discount_redemptions")
       .select("*", { count: "exact", head: true })
       .eq("code", dc.code);
-    if ((count ?? 0) >= Number(dc.max_uses))
+    if ((count || 0) >= Number(dc.max_uses)) {
       return NextResponse.json({ valid: false, message: "Limit użyć kodu został wyczerpany." }, { status: 400 });
+    }
   }
 
-  // OK
-  return NextResponse.json({ valid: true, code: dc.code, type: dc.type, value: Number(dc.value) });
+  const type: "amount" | "percent" = dc.type === "amount" ? "amount" : "percent";
+  const value = Number(dc.value || 0);
+  if (value <= 0) {
+    return NextResponse.json({ valid: false, message: "Nieprawidłowa wartość kodu." }, { status: 400 });
+  }
+
+  return NextResponse.json({ valid: true, code: dc.code, type, value });
 }
