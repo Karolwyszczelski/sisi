@@ -666,9 +666,8 @@ export default function CheckoutModal() {
           code,
           total: base,
           email: effectiveEmail || null,
-          userId: isLoggedIn ? session!.user.id : null,
-          email: effectiveEmail || null,
           phone: (phone || "").trim() || null,
+          userId: session?.user?.id || null
         }),
       });
 
