@@ -12,6 +12,7 @@ import AddressAutocomplete from "@/components/menu/AddressAutocomplete";
 import { useSession } from "@supabase/auth-helpers-react";
 import { toZonedTime } from "date-fns-tz";
 import clsx from "clsx";
+import { createPortal } from "react-dom";
 
 declare global {
   interface Window {
@@ -796,7 +797,7 @@ export default function CheckoutModal() {
       else throw new Error("Brak URL do płatności");
     } catch (e: any) {
       setErrorMessage(e.message || "Nie udało się zainicjować płatności.");
-      try { if (window.turnstile && tsIdRef.current) window.turnstile.reset(tsIdRef.current); } catch {}
+      try { tsIdsRef.current.forEach((id) => window.turnstile?.reset(id)); } catch {}
     }
   };
 
@@ -818,8 +819,10 @@ export default function CheckoutModal() {
 
   const confirmDisabled = !paymentMethod || !legalAccepted || (TURNSTILE_SITE_KEY ? !turnstileToken : false) ||
     (selectedOption === "delivery" && (!!outOfRange || !deliveryMinOk || !custCoords || !deliveryInfo));
+    
 
-  return (
+  // === PORTAL: budujemy JSX i zwracamy przez createPortal ===
+  const modal = (
     <>
       {TURNSTILE_SITE_KEY && (
         <Script
@@ -1112,7 +1115,7 @@ export default function CheckoutModal() {
                                     setShowConfirmation(true);
                                   }}
                                   disabled={confirmDisabled}
-                                  className="w-full mt-3 py-2 bg-yellow-400 text-black rounded font-semibold disabled:opacity-50"
+                                  className="w-full mt-3 py-2 bg-yellow-400 text-black rounded font-semibold disabled:opacity-50 touch-manipulation"
                                 >
                                   Potwierdź płatność
                                 </button>
@@ -1120,7 +1123,7 @@ export default function CheckoutModal() {
                             ) : (
                               !shouldHideOrderActions && (
                                 <div className="flex flex-col gap-2 mt-2">
-                                  <button onClick={paymentMethod === "Online" ? handleOnlinePayment : handleSubmitOrder} className="w-full py-2 bg-black text:white rounded font-semibold hover:opacity-95" disabled={confirmDisabled}>
+                                  <button onClick={paymentMethod === "Online" ? handleOnlinePayment : handleSubmitOrder} className="w-full py-2 bg-black text-white rounded font-semibold hover:opacity-95 touch-manipulation" disabled={confirmDisabled}>
                                     ✅ Zamawiam i płacę ({paymentMethod})
                                   </button>
                                   <button onClick={() => setShowConfirmation(false)} className="text-xs underline">Zmień metodę</button>
@@ -1235,4 +1238,6 @@ export default function CheckoutModal() {
       </div>
     </>
   );
+
+  return createPortal(modal, document.body);
 }
