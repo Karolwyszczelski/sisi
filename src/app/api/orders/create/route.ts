@@ -623,54 +623,65 @@ let currentTotal = n.total_price;
 
 if (n.promo_code) {
   try {
-    const dc = await getDiscountByCode(n.promo_code);
+    const dc = await getDiscountByCode(n.promo_code); // rzuca błąd jeśli brak/nieaktywny
 
-    const baseTotal = Math.max(0, Math.round((baseFromItems + (n.delivery_cost ?? 0)) * 100) / 100);
+    const baseTotal = Math.max(
+      0,
+      Math.round((baseFromItems + (n.delivery_cost ?? 0)) * 100) / 100
+    );
 
-    if (dc.min_order != null && baseTotal < dc.min_order) {
-      throw new Error(`min_order:${dc.min_order.toFixed(2)}`);
+    if (dc.min_order != null && baseTotal < Number(dc.min_order)) {
+      throw new Error(`min_order:${Number(dc.min_order).toFixed(2)}`);
     }
 
     const emailLower = (n.contact_email || "").toLowerCase() || null;
-    const { all, byUser, byEmail } = await getUsageCounts(dc.id, n.user ?? null, emailLower);
+    const { all, byUser, byEmail } = await getUsageCounts(
+      dc.id,
+      n.user ?? null,
+      emailLower
+    );
 
-    if (dc.max_uses != null && all >= dc.max_uses) throw new Error("limit_exhausted");
+    if (dc.max_uses != null && all >= Number(dc.max_uses)) throw new Error("limit_exhausted");
     if (byUser > 0) throw new Error("used_by_user");
-    if (byEmail > 0) throw new Error("used_by_email");
+    if (emailLower && byEmail > 0) throw new Error("used_by_email");
 
     const applied = computeDiscount(baseTotal, dc);
     const newTotal = Math.max(0, Math.round((baseTotal - applied) * 100) / 100);
 
-    // zapis redempcji po code_id (ZERO joinów po 'code')
+    // zapis redempcji po code_id
     const { error: redErr } = await supabaseAdmin.from("discount_redemptions").insert({
       code_id: dc.id,
-      code: dc.code,                 // kopia tekstowa dla raportów
+      code: dc.code,           // kopia tekstowa do raportów
       order_id: newOrderId,
       user_id: n.user ?? null,
       email_lower: emailLower,
+      amount: applied,         // NOT NULL w tabeli
     });
     if (redErr) throw redErr;
 
+    // aktualizacja zamówienia
     const { error: updErr } = await supabaseAdmin
       .from("orders")
       .update({ promo_code: dc.code, discount_amount: applied, total_price: newTotal })
       .eq("id", newOrderId);
 
-    if (updErr) throw updErr;
+    if (updErr) {
+      // rollback redempcji jeśli update zamówienia się nie uda
+      await supabaseAdmin.from("discount_redemptions").delete().eq("order_id", newOrderId);
+      throw updErr;
+    }
 
     currentTotal = newTotal;
   } catch (e: any) {
     console.error("[orders.create] promo apply error:", e?.message || e);
-
-    // porządkowanie: usuń zamówienie aby nie zostawić sieroty
+    // porządkowanie: usuń zamówienie-sierotę
     await supabaseAdmin.from("orders").delete().eq("id", newOrderId);
     return NextResponse.json(
       { error: "Kod promocyjny jest nieważny lub został już wykorzystany." },
       { status: 400 }
-        );
-      }
-    }
-
+    );
+  }
+}
 
     // 6) order_items
     if (Array.isArray(n.itemsArray) && n.itemsArray.length > 0) {
