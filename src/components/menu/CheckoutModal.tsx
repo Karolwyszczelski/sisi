@@ -308,6 +308,8 @@ export default function CheckoutModal() {
   const isClient = useIsClient();
   const session = useSession();
   const isLoggedIn = !!session?.user;
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); return () => setMounted(false); }, []);
 
   const {
     isCheckoutOpen,
@@ -840,6 +842,7 @@ export default function CheckoutModal() {
         role="dialog"
         aria-modal="true"
         onMouseDown={(e) => { if (e.target === e.currentTarget) closeCheckoutModal(); }}
+        style={{ transform: "none", WebkitTransform: "none" }}
       >
         <div className="relative flex flex-col lg:flex-row w-full max-w-4xl gap-6" onMouseDown={(e) => e.stopPropagation()}>
           {/* MAIN CARD */}
@@ -1239,5 +1242,5 @@ export default function CheckoutModal() {
     </>
   );
 
-  return createPortal(modal, document.body);
+  return mounted ? createPortal(modal, document.body) : null;
 }
