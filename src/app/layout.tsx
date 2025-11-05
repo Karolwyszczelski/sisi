@@ -7,6 +7,7 @@ import ClientWrapper from "@/components/ClientWrapper";
 import ClientProvider from "@/components/ClientProvider";
 import Footer from "@/components/Footer";
 import CookieBanner from "@/components/legal/CookieBanner";
+import PromoTickerMount from "@/components/PromoTickerMount";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_URL || "https://www.sisiciechanow.pl";
 
@@ -97,6 +98,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           className="hidden md:block object-cover opacity-20 pointer-events-none select-none -z-10"
         />
         <ClientProvider>
+          <PromoTickerMount />
           <ClientWrapper>{children}</ClientWrapper>
         </ClientProvider>
         <Footer />
