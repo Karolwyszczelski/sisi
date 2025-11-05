@@ -504,6 +504,8 @@ function computeDiscount(base: number, dc: DiscountCode): number {
     const baseFromItems = calcSubtotalFromItems(n.selected_option, n.itemsArray);
     const discount = 0;
 
+    let deliveryMinRequired = 0; // << DODAJ TO
+
     // 2.2) Dostawa
     if (n.selected_option === "delivery") {
       if (n.delivery_lat == null || n.delivery_lng == null) {
@@ -534,6 +536,8 @@ function computeDiscount(base: number, dc: DiscountCode): number {
       if (!zone) {
         return NextResponse.json({ error: "Adres poza zasięgiem dostawy." }, { status: 400 });
       }
+
+      deliveryMinRequired = Number(zone.min_order_value || 0);
 
       if (baseFromItems < Number(zone.min_order_value || 0)) {
         return NextResponse.json(
@@ -578,9 +582,7 @@ function computeDiscount(base: number, dc: DiscountCode): number {
     });
 
    // >>> USTAW MINIMA (przed insertem do orders)
-const baseBeforeDiscount = baseFromItems; // koszyk + opakowanie, bez dostawy i bez rabatu
-const deliveryMinRequired =
-  n.selected_option === "delivery" ? Number((zone as any)?.min_order_value || 0) : 0;
+const baseBeforeDiscount = baseFromItems;
 // <<<
 
 // 5) Zapis do orders
@@ -769,3 +771,8 @@ try {
 
 // 8) OK
 return NextResponse.json({ orderId: newOrderId }, { status: 201 });
+} catch (e: any) {
+  console.error("[orders.create] unexpected:", e?.message ?? e);
+  return NextResponse.json({ error: "Wystąpił nieoczekiwany błąd." }, { status: 500 });
+}
+} // <-- domknięcie export async function POST
