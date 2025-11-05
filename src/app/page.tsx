@@ -8,6 +8,7 @@ import OnasSection from "@/components/OnasSection";
 import ContactSection from "@/components/ContactSection";
 import FloatingAuthButtons from "@/components/FloatingLoginButton";
 import ReservationFloatingButton from "@/components/ReservationFloatingButton";
+import PromoTickerMount from "@/components/PromoTickerMount";
 
 export const metadata: Metadata = {
   alternates: { canonical: "/" },
@@ -17,6 +18,7 @@ export default function Home() {
   return (
     <>
       <main>
+        <PromoTickerMount />
         <Hero />
         <BurgerMiesiaca />
         <MenuSection />
@@ -25,6 +27,7 @@ export default function Home() {
       </main>
 
       {/* pływające guziki tylko na stronie głównej */}
+      <PromoTickerMount />
       <FloatingAuthButtons />
       <ReservationFloatingButton />
     </>
