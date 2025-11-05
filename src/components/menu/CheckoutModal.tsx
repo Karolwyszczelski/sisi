@@ -27,13 +27,18 @@ declare global {
           "timeout-callback"?: () => void;
           retry?: "never" | "auto";
           theme?: "auto" | "light" | "dark";
-          appearance?: "always" | "execute" | "interaction-only";
+          appearance?: "always" | "execute" | "interaction-only" | "invisible";
           ["refresh-expired"]?: "auto" | "manual";
+          action?: string;
         }
       ) => any;
       reset: (id?: any) => void;
       remove: (id: any) => void;
+      // ↓ używane do JIT tokenu
+      execute?: (id: any) => void;
+      getResponse?: (id: any) => string | null;
     };
+    onTsReady?: () => void;
   }
 }
 
@@ -60,27 +65,9 @@ type Zone = {
 };
 
 const SAUCES = [
-  "Amerykański",
-  "Ketchup",
-  "Majonez",
-  "Musztarda",
-  "Meksykański",
-  "Serowy chili",
-  "Czosnkowy",
-  "Musztardowo-miodowy",
-  "BBQ",
+  "Amerykański","Ketchup","Majonez","Musztarda","Meksykański","Serowy chili","Czosnkowy","Musztardowo-miodowy","BBQ",
 ];
-const AVAILABLE_ADDONS = [
-  "Ser",
-  "Bekon",
-  "Jalapeño",
-  "Ogórek",
-  "Rukola",
-  "Czerwona cebula",
-  "Pomidor",
-  "Pikle",
-  ...SAUCES,
-];
+const AVAILABLE_ADDONS = ["Ser","Bekon","Jalapeño","Ogórek","Rukola","Czerwona cebula","Pomidor","Pikle", ...SAUCES];
 
 /* helper ceny: zamienia "20,90" -> 20.90 */
 const toPrice = (v: any): number => {
@@ -130,15 +117,9 @@ const inferDefaultMeat = (meta?: Product, name?: string): "wołowina" | "kurczak
   const cat = (meta?.category || "").toLowerCase();
   const sub = (meta?.subcategory || "").toLowerCase();
 
-  // vege: brak mięsa
   if (sub.includes("vege") || n.includes("vege")) return null;
-
-  // produkty kurczakowe z tabeli lub z nazwy
   if (sub.includes("kurczak") || n.includes("chicken") || n.includes("kurczak")) return "kurczak";
-
-  // burger bez "vege" -> domyślnie wołowina
   if (cat === "burger" || n.includes("burger")) return "wołowina";
-
   return null;
 };
 
@@ -169,7 +150,7 @@ const ProductItem: React.FC<{
   const lineTotal = (priceNum + addonsCost + extraMeatCost) * (prod.quantity || 1);
 
   const selectedMeat = (prod.meatType as string | undefined) ?? defaultMeat ?? null;
-  const supportsMeat = selectedMeat !== null; // tylko dla burgerów i nie-vege
+  const supportsMeat = selectedMeat !== null;
 
   return (
     <div className="border p-3 rounded bg-gray-50 relative">
@@ -367,6 +348,7 @@ export default function CheckoutModal() {
   const tsIdsRef = useRef<any[]>([]);
   const tsMobileRef = useRef<HTMLDivElement | null>(null);
   const tsDesktopRef = useRef<HTMLDivElement | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   // dodatkowe stany dostawy
   const [deliveryMinOk, setDeliveryMinOk] = useState(true);
@@ -412,24 +394,14 @@ export default function CheckoutModal() {
   }, [isLoggedIn, session]);
 
   useEffect(() => {
-    supabase
-      .from("products")
-      .select("id,name,category,subcategory")
-      .then((r) => {
-        if (!r.error && r.data) setProducts((r.data as Product[]) || []);
-      });
+    supabase.from("products").select("id,name,category,subcategory").then((r) => {
+      if (!r.error && r.data) setProducts((r.data as Product[]) || []);
+    });
 
-    supabase
-      .from("delivery_zones")
-      .select("*")
-      .order("min_distance_km", { ascending: true })
+    supabase.from("delivery_zones").select("*").order("min_distance_km", { ascending: true })
       .then((r) => { if (!r.error && r.data) setZones(r.data as Zone[]); });
 
-    supabase
-      .from("restaurant_info")
-      .select("lat,lng")
-      .eq("id", 1)
-      .single()
+    supabase.from("restaurant_info").select("lat,lng").eq("id", 1).single()
       .then((r) => { if (!r.error && r.data) setRestLoc({ lat: r.data.lat, lng: r.data.lng }); });
   }, []);
 
@@ -441,16 +413,17 @@ export default function CheckoutModal() {
       setTurnstileError(false);
       const id = window.turnstile.render(target!, {
         sitekey: TURNSTILE_SITE_KEY,
+        // niewidoczny widget → token na żądanie
+        appearance: "invisible",
+        action: "order",
+        retry: "auto",
+        theme: "auto",
+        ["refresh-expired"]: "auto",
         callback: (t: string) => setTurnstileToken(t),
         "error-callback": () => { setTurnstileToken(null); setTurnstileError(true); },
         "expired-callback": () => { setTurnstileToken(null); try { window.turnstile?.reset(id); } catch {} },
         "timeout-callback": () => { setTurnstileToken(null); try { window.turnstile?.reset(id); } catch {} },
-        retry: "auto",
-        theme: "auto",
-        appearance: "always",
-        ["refresh-expired"]: "auto",
       });
-      // zapamiętaj widget, żeby móc go resetować/usunąć
       tsIdsRef.current.push(id);
     } catch { setTurnstileError(true); }
   };
@@ -460,6 +433,30 @@ export default function CheckoutModal() {
     tsIdsRef.current = [];
     setTurnstileToken(null);
     setTurnstileError(false);
+  };
+
+  // wybierz pierwszy aktywny widget
+  const getActiveWidgetId = () => tsIdsRef.current[tsIdsRef.current.length - 1] ?? tsIdsRef.current[0];
+
+  // uzyskaj świeży token tuż przed POST
+  const getFreshTurnstileToken = async (): Promise<string> => {
+    if (!TURNSTILE_SITE_KEY) return "";
+    if (!window.turnstile) throw new Error("Weryfikacja niedostępna");
+    const id = getActiveWidgetId();
+    if (!id) throw new Error("Weryfikacja niedostępna");
+    setTurnstileToken(null);
+    try {
+      window.turnstile.execute?.(id);
+      // czekamy maksymalnie ~2s na callback
+      for (let i = 0; i < 10; i++) {
+        await new Promise((r) => setTimeout(r, 200));
+        const t = window.turnstile.getResponse?.(id) || turnstileToken;
+        if (t) return String(t);
+      }
+      throw new Error("timeout");
+    } catch {
+      throw new Error("Nieudana weryfikacja");
+    }
   };
 
   useEffect(() => {
@@ -476,19 +473,6 @@ export default function CheckoutModal() {
   useEffect(() => {
     if (TURNSTILE_SITE_KEY && turnstileError) setShowConfirmation(false);
   }, [turnstileError]);
-
-  const ensureFreshToken = async () => {
-    if (!TURNSTILE_SITE_KEY) return true;
-    if (turnstileToken) return true;
-    try {
-      tsIdsRef.current.forEach((id) => window.turnstile?.reset(id));
-      for (let i = 0; i < 10; i++) {           // ~2s na wygenerowanie tokenu
-        await new Promise((r) => setTimeout(r, 200));
-        if (turnstileToken) return true;
-      }
-      return false;
-    } catch { return false; }
-  };
 
   const baseTotal = useMemo<number>(() => {
     return items.reduce((acc: number, it: any) => {
@@ -625,7 +609,7 @@ export default function CheckoutModal() {
         quantity: item.quantity || 1,
         unit_price: toPrice(item.price),
         options: {
-          meatType: item.meatType ?? inferred, // zapisz wołowina/kurczak lub null
+          meatType: item.meatType ?? inferred,
           extraMeatCount: item.extraMeatCount,
           addons: item.addons,
           swaps: item.swaps,
@@ -651,14 +635,12 @@ export default function CheckoutModal() {
     return true;
   };
 
-  /* >>> POPRAWIONE: walidacja wyłącznie przez backend, jednorazowość po stronie API <<< */
+  /* walidacja kodu po backendzie */
   const applyPromo = async (codeRaw: string) => {
     setPromoError(null);
     setErrorMessage(null);
-
     const code = codeRaw.trim();
     if (!code) return;
-
     const base = subtotal + (deliveryInfo?.cost || 0);
 
     try {
@@ -675,11 +657,10 @@ export default function CheckoutModal() {
 
       if (resp?.valid) {
         setPromo({ code: resp.code, type: resp.type, value: Number(resp.value) });
-         setPromoError(null);           // <= czyści lokalny błąd
-         setErrorMessage(null);  
+        setPromoError(null);
+        setErrorMessage(null);
         return;
       }
-
       throw new Error(resp?.message || "Kod nieprawidłowy.");
     } catch (e: any) {
       setPromo(null);
@@ -687,12 +668,7 @@ export default function CheckoutModal() {
     }
   };
 
-  const clearPromo = () => {
-    setPromo(null);
-    setPromoError(null);
-    setErrorMessage(null);
-  };
-  /* <<< KONIEC POPRAWKI >>> */
+  const clearPromo = () => { setPromo(null); setPromoError(null); setErrorMessage(null); };
 
   const requireLegalBeforeConfirm = () => {
     if (!legalAccepted) {
@@ -702,88 +678,84 @@ export default function CheckoutModal() {
     return true;
   };
 
-  const requireCaptchaBeforeConfirm = () => {
-    if (!TURNSTILE_SITE_KEY) return true;
-    if (!turnstileToken) {
-      setErrorMessage("Potwierdź, że nie jesteś robotem.");
-      return false;
-    }
-    return true;
-  };
-
   const handleSubmitOrder = async () => {
+    if (submitting) return;
+    setSubmitting(true);
     setErrorMessage(null);
-    if (!selectedOption) return setErrorMessage("Wybierz sposób odbioru.");
-    if (!paymentMethod) return setErrorMessage("Wybierz metodę płatności.");
-    if (!requireLegalBeforeConfirm()) return;
-    if (hoursGuardFail()) return setErrorMessage("Zamówienia przyjmujemy tylko w godz. 10:40–21:45.");
-    if (!guardEmail()) return;
-
-    if (TURNSTILE_SITE_KEY) {
-      const ok = await ensureFreshToken();
-      if (!ok) return setErrorMessage("Potwierdź, że nie jesteś robotem.");
-    }
-
-    if (selectedOption === "delivery") {
-      if (outOfRange) return setErrorMessage("Adres jest poza zasięgiem dostawy.");
-      if (!deliveryMinOk) return setErrorMessage(`Minimalna wartość zamówienia dla tej strefy to ${deliveryMinRequired.toFixed(2)} zł.`);
-      if (!custCoords) return setErrorMessage("Wybierz adres z listy, aby ustawić lokalizację dostawy.");
-      if (!deliveryInfo) return setErrorMessage("Poczekaj na przeliczenie kosztu dostawy.");
-    }
-
     try {
+      if (!selectedOption) throw new Error("Wybierz sposób odbioru.");
+      if (!paymentMethod) throw new Error("Wybierz metodę płatności.");
+      if (!requireLegalBeforeConfirm()) throw new Error("Brak zgody prawnej.");
+      if (hoursGuardFail()) throw new Error("Zamówienia przyjmujemy tylko w godz. 10:40–21:45.");
+      if (!guardEmail()) throw new Error("Niepoprawny e-mail.");
+
+      if (selectedOption === "delivery") {
+        if (outOfRange) throw new Error("Adres jest poza zasięgiem dostawy.");
+        if (!deliveryMinOk) throw new Error(`Minimalna wartość zamówienia dla tej strefy to ${deliveryMinRequired.toFixed(2)} zł.`);
+        if (!custCoords) throw new Error("Wybierz adres z listy, aby ustawić lokalizację dostawy.");
+        if (!deliveryInfo) throw new Error("Poczekaj na przeliczenie kosztu dostawy.");
+      }
+
       const orderPayload = buildOrderPayload();
       const itemsPayload = buildItemsPayload();
+
+      // świeży token tuż przed POST
+      const tsToken = TURNSTILE_SITE_KEY ? await getFreshTurnstileToken() : "";
 
       await safeFetch("/api/orders/create", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "cf-turnstile-response": turnstileToken || "",
+          "CF-Turnstile-Response": tsToken || "",
         },
-        body: JSON.stringify({ orderPayload, itemsPayload, turnstileToken }),
+        body: JSON.stringify({ orderPayload, itemsPayload, turnstileToken: tsToken }),
+        cache: "no-store",
       });
 
+      try { tsIdsRef.current.forEach((id) => window.turnstile?.reset(id)); } catch {}
       clearCart();
       setOrderSent(true);
     } catch (err: any) {
       setErrorMessage(err.message || "Wystąpił błąd podczas składania zamówienia.");
       try { tsIdsRef.current.forEach((id) => window.turnstile?.reset(id)); } catch {}
+    } finally {
+      setSubmitting(false);
     }
   };
 
   const handleOnlinePayment = async () => {
+    if (submitting) return;
+    setSubmitting(true);
     setErrorMessage(null);
-    if (!selectedOption) return setErrorMessage("Wybierz sposób odbioru.");
-    if (!paymentMethod) return setErrorMessage("Wybierz metodę płatności.");
-    if (!requireLegalBeforeConfirm()) return;
-    if (hoursGuardFail()) return setErrorMessage("Zamówienia przyjmujemy tylko w godz. 10:40–21:45.");
-    if (!guardEmail()) return;
-
-    if (TURNSTILE_SITE_KEY) {
-      const ok = await ensureFreshToken();
-      if (!ok) return setErrorMessage("Potwierdź, że nie jesteś robotem.");
-    }
-
-    if (selectedOption === "delivery") {
-      if (outOfRange) return setErrorMessage("Adres jest poza zasięgiem dostawy.");
-      if (!deliveryMinOk) return setErrorMessage(`Minimalna wartość zamówienia dla tej strefy to ${deliveryMinRequired.toFixed(2)} zł.`);
-      if (!custCoords) return setErrorMessage("Wybierz adres z listy, aby ustawić lokalizację dostawy.");
-      if (!deliveryInfo) return setErrorMessage("Poczekaj na przeliczenie kosztu dostawy.");
-    }
-
     try {
+      if (!selectedOption) throw new Error("Wybierz sposób odbioru.");
+      if (!paymentMethod) throw new Error("Wybierz metodę płatności.");
+      if (!requireLegalBeforeConfirm()) throw new Error("Brak zgody prawnej.");
+      if (hoursGuardFail()) throw new Error("Zamówienia przyjmujemy tylko w godz. 10:40–21:45.");
+      if (!guardEmail()) throw new Error("Niepoprawny e-mail.");
+
+      if (selectedOption === "delivery") {
+        if (outOfRange) throw new Error("Adres jest poza zasięgiem dostawy.");
+        if (!deliveryMinOk) throw new Error(`Minimalna wartość zamówienia dla tej strefy to ${deliveryMinRequired.toFixed(2)} zł.`);
+        if (!custCoords) throw new Error("Wybierz adres z listy, aby ustawić lokalizację dostawy.");
+        if (!deliveryInfo) throw new Error("Poczekaj na przeliczenie kosztu dostawy.");
+      }
+
       const orderPayload = buildOrderPayload();
       const itemsPayload = buildItemsPayload();
+      const tsToken = TURNSTILE_SITE_KEY ? await getFreshTurnstileToken() : "";
 
       const data = await safeFetch("/api/orders/create", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "cf-turnstile-response": turnstileToken || "",
+          "CF-Turnstile-Response": tsToken || "",
         },
-        body: JSON.stringify({ orderPayload, itemsPayload, turnstileToken }),
+        body: JSON.stringify({ orderPayload, itemsPayload, turnstileToken: tsToken }),
+        cache: "no-store",
       });
+
+      try { tsIdsRef.current.forEach((id) => window.turnstile?.reset(id)); } catch {}
 
       const newOrderId = data.orderId;
       const pay = await safeFetch("/api/payments/create-transaction", {
@@ -802,6 +774,8 @@ export default function CheckoutModal() {
     } catch (e: any) {
       setErrorMessage(e.message || "Nie udało się zainicjować płatności.");
       try { tsIdsRef.current.forEach((id) => window.turnstile?.reset(id)); } catch {}
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -821,21 +795,24 @@ export default function CheckoutModal() {
     </label>
   );
 
-  const confirmDisabled = !paymentMethod || !legalAccepted || (TURNSTILE_SITE_KEY ? !turnstileToken : false) ||
-    (selectedOption === "delivery" && (!!outOfRange || !deliveryMinOk || !custCoords || !deliveryInfo));
-    
+  // UWAGA: nie blokujemy przycisku brakiem tokenu. Token generujemy JIT.
+  const confirmDisabled =
+    !paymentMethod ||
+    !legalAccepted ||
+    (selectedOption === "delivery" && (!!outOfRange || !deliveryMinOk || !custCoords || !deliveryInfo)) ||
+    submitting;
 
-  // === PORTAL: budujemy JSX i zwracamy przez createPortal ===
+  // === PORTAL ===
   const modal = (
     <>
       {TURNSTILE_SITE_KEY && (
         <Script
           id="cf-turnstile"
-          src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"
+          src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=onTsReady"
           async
           defer
           strategy="afterInteractive"
-          onLoad={() => setTsReady(true)}
+          onLoad={() => { window.onTsReady = () => setTsReady(true); setTsReady(true); }}
         />
       )}
 
@@ -960,66 +937,27 @@ export default function CheckoutModal() {
                   <div className="space-y-6">
                     <h2 className="text-2xl font-bold text-center">Dane kontaktowe</h2>
                     {selectedOption === "delivery" && (
-  <div className="space-y-3">
-    {/* najpierw wybór adresu z wyszukiwarki */}
-    <AddressAutocomplete
-      onAddressSelect={onAddressSelect}
-      setCity={setCity}
-      setPostalCode={setPostalCode}
-      setFlatNumber={setFlatNumber}
-    />
+                      <div className="space-y-3">
+                        <AddressAutocomplete onAddressSelect={onAddressSelect} setCity={setCity} setPostalCode={setPostalCode} setFlatNumber={setFlatNumber} />
 
-    {!custCoords ? (
-      <p className="text-xs text-red-600">
-        Najpierw wyszukaj i wybierz adres z listy powyżej.
-      </p>
-    ) : null}
+                        {!custCoords ? <p className="text-xs text-red-600">Najpierw wyszukaj i wybierz adres z listy powyżej.</p> : null}
 
-    {/* pola odblokują się dopiero po wyborze adresu */}
-    <div className={clsx("grid grid-cols-1 gap-2", !custCoords && "opacity-50 pointer-events-none")}>
-      <input
-        type="text"
-        placeholder="Adres"
-        className="w-full px-3 py-2 border rounded"
-        value={street}
-        onChange={(e) => setStreet(e.target.value)}
-        disabled={!custCoords}
-      />
-      <div className="flex gap-2">
-        <input
-          type="text"
-          placeholder="Nr mieszkania"
-          className="flex-1 px-3 py-2 border rounded"
-          value={flatNumber}
-          onChange={(e) => setFlatNumber(e.target.value)}
-          disabled={!custCoords}
-        />
-        <input
-          type="text"
-          placeholder="Kod pocztowy"
-          className="flex-1 px-3 py-2 border rounded"
-          value={postalCode}
-          onChange={(e) => setPostalCode(e.target.value)}
-          disabled={!custCoords}
-        />
-      </div>
-      <input
-        type="text"
-        placeholder="Miasto"
-        className="w-full px-3 py-2 border rounded"
-        value={city}
-        onChange={(e) => setCity(e.target.value)}
-        disabled={!custCoords}
-      />
-    </div>
+                        <div className={clsx("grid grid-cols-1 gap-2", !custCoords && "opacity-50 pointer-events-none")}>
+                          <input type="text" placeholder="Adres" className="w-full px-3 py-2 border rounded" value={street} onChange={(e) => setStreet(e.target.value)} disabled={!custCoords} />
+                          <div className="flex gap-2">
+                            <input type="text" placeholder="Nr mieszkania" className="flex-1 px-3 py-2 border rounded" value={flatNumber} onChange={(e) => setFlatNumber(e.target.value)} disabled={!custCoords} />
+                            <input type="text" placeholder="Kod pocztowy" className="flex-1 px-3 py-2 border rounded" value={postalCode} onChange={(e) => setPostalCode(e.target.value)} disabled={!custCoords} />
+                          </div>
+                          <input type="text" placeholder="Miasto" className="w-full px-3 py-2 border rounded" value={city} onChange={(e) => setCity(e.target.value)} disabled={!custCoords} />
+                        </div>
 
-    {deliveryInfo && (
-      <p className="text-xs text-gray-600">
-        Koszt dostawy: {deliveryInfo.cost.toFixed(2)} zł • ETA {deliveryInfo.eta}
-      </p>
-    )}
-  </div>
-)}
+                        {deliveryInfo && (
+                          <p className="text-xs text-gray-600">
+                            Koszt dostawy: {deliveryInfo.cost.toFixed(2)} zł • ETA {deliveryInfo.eta}
+                          </p>
+                        )}
+                      </div>
+                    )}
                     <div className="grid grid-cols-1 gap-2">
                       <input type="text" placeholder="Imię" className="w-full px-3 py-2 border rounded" value={name} onChange={(e) => setName(e.target.value)} />
                       <input type="tel" placeholder="Telefon" className="w-full px-3 py-2 border rounded" value={phone} onChange={(e) => setPhone(e.target.value)} />
@@ -1115,10 +1053,7 @@ export default function CheckoutModal() {
                             {!showConfirmation ? (
                               !shouldHideOrderActions && (
                                 <button
-                                  onClick={async () => {
-                                    if (!(await ensureFreshToken())) return setErrorMessage("Potwierdź, że nie jesteś robotem.");
-                                    setShowConfirmation(true);
-                                  }}
+                                  onClick={() => setShowConfirmation(true)}
                                   disabled={confirmDisabled}
                                   className="w-full mt-3 py-2 bg-yellow-400 text-black rounded font-semibold disabled:opacity-50 touch-manipulation"
                                 >
@@ -1144,10 +1079,9 @@ export default function CheckoutModal() {
                     <div className="mt-2 flex justify-between">
                       <button onClick={() => goToStep(2)} className="px-4 py-2 bg-gray-200 rounded">← Wstecz</button>
                       <button
-                        onClick={async () => {
+                        onClick={() => {
                           if (!paymentMethod) setErrorMessage("Wybierz metodę płatności.");
                           else if (!legalAccepted) setErrorMessage("Zaznacz akceptację regulaminu i polityki prywatności.");
-                          else if (TURNSTILE_SITE_KEY && !(await ensureFreshToken())) setErrorMessage("Potwierdź, że nie jesteś robotem.");
                           document.getElementById("paymentBox")?.scrollIntoView({ behavior: "smooth", block: "start" });
                           setShowConfirmation(true);
                         }}
@@ -1215,10 +1149,7 @@ export default function CheckoutModal() {
                   {!showConfirmation ? (
                     !shouldHideOrderActions && (
                       <button
-                        onClick={async () => {
-                          if (!(await ensureFreshToken())) return setErrorMessage("Potwierdź, że nie jesteś robotem.");
-                          setShowConfirmation(true);
-                        }}
+                        onClick={() => setShowConfirmation(true)}
                         disabled={confirmDisabled}
                         className="w-full mt-3 py-2 bg-yellow-400 text-black rounded font-semibold disabled:opacity-50"
                       >

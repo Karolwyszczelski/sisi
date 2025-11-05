@@ -577,53 +577,58 @@ function computeDiscount(base: number, dc: DiscountCode): number {
       return buildItemFromDbAndOptions(db, it);
     });
 
-    // 5) Zapis do orders
-    const itemsForOrdersColumn = JSON.stringify(normalizedItems);
-    const { data: orderRow, error: orderErr } = await supabaseAdmin
-      .from("orders")
-      .insert({
-        name: n.name,
-        phone: n.phone,
-        contact_email: n.contact_email,
-        address: n.address,
-        street: n.street,
-        postal_code: n.postal_code,
-        city: n.city,
-        flat_number: n.flat_number,
-        selected_option: n.selected_option,
-        payment_method: n.payment_method,
-        payment_status: n.payment_status,
-        items: itemsForOrdersColumn,
-        total_price: n.total_price,
-        delivery_cost: n.delivery_cost,
-        status: n.status,
-        client_delivery_time: n.client_delivery_time,
-        deliveryTime: n.deliveryTime,
-        eta: n.eta,
-        user: n.user,
-        promo_code: null,         // nie ufamy klientowi
-        discount_amount: 0,       // policzymy po redeem
-        legal_accept: n.legal_accept,
-      })
-      .select("id, selected_option, total_price, name")
-      .single();
+   // >>> USTAW MINIMA (przed insertem do orders)
+const baseBeforeDiscount = baseFromItems; // koszyk + opakowanie, bez dostawy i bez rabatu
+const deliveryMinRequired =
+  n.selected_option === "delivery" ? Number((zone as any)?.min_order_value || 0) : 0;
+// <<<
 
-    if (orderErr || !orderRow) {
-      console.error("[orders.create] insert orders error:", orderErr?.message);
-      return NextResponse.json(
-        { error: "Nie udało się zapisać zamówienia." },
-        { status: 500 }
-      );
-    }
+// 5) Zapis do orders
+const itemsForOrdersColumn = JSON.stringify(normalizedItems);
+const { data: orderRow, error: orderErr } = await supabaseAdmin
+  .from("orders")
+  .insert({
+    name: n.name,
+    phone: n.phone,
+    contact_email: n.contact_email,
+    address: n.address,
+    street: n.street,
+    postal_code: n.postal_code,
+    city: n.city,
+    flat_number: n.flat_number,
+    selected_option: n.selected_option,
+    payment_method: n.payment_method,
+    payment_status: n.payment_status,
+    items: itemsForOrdersColumn,
+    total_price: n.total_price,
+    delivery_cost: n.delivery_cost,
+    base_before_discount: baseBeforeDiscount,     // NOWE
+    delivery_min_required: deliveryMinRequired,   // NOWE
+    status: n.status,
+    client_delivery_time: n.client_delivery_time,
+    deliveryTime: n.deliveryTime,
+    eta: n.eta,
+    user: n.user,
+    promo_code: null,       // policzymy niżej
+    discount_amount: 0,     // policzymy niżej
+    legal_accept: n.legal_accept,
+  })
+  .select("id, selected_option, total_price, name")
+  .single();
 
-    const newOrderId = orderRow.id;
+if (orderErr || !orderRow) {
+  console.error("[orders.create] insert orders error:", orderErr?.message);
+  return NextResponse.json({ error: "Nie udało się zapisać zamówienia." }, { status: 500 });
+}
 
-    // [NOWE] Zużycie kodu bez RPC i bez niejednoznacznych kolumn
+const newOrderId = orderRow.id;
+
+// [NOWE] Zużycie kodu bez RPC i z amount
 let currentTotal = n.total_price;
 
 if (n.promo_code) {
   try {
-    const dc = await getDiscountByCode(n.promo_code); // rzuca błąd jeśli brak/nieaktywny
+    const dc = await getDiscountByCode(n.promo_code); // rzuci jeśli brak/nieaktywny
 
     const baseTotal = Math.max(
       0,
@@ -635,11 +640,7 @@ if (n.promo_code) {
     }
 
     const emailLower = (n.contact_email || "").toLowerCase() || null;
-    const { all, byUser, byEmail } = await getUsageCounts(
-      dc.id,
-      n.user ?? null,
-      emailLower
-    );
+    const { all, byUser, byEmail } = await getUsageCounts(dc.id, n.user ?? null, emailLower);
 
     if (dc.max_uses != null && all >= Number(dc.max_uses)) throw new Error("limit_exhausted");
     if (byUser > 0) throw new Error("used_by_user");
@@ -648,25 +649,25 @@ if (n.promo_code) {
     const applied = computeDiscount(baseTotal, dc);
     const newTotal = Math.max(0, Math.round((baseTotal - applied) * 100) / 100);
 
-    // zapis redempcji po code_id
+    // zapis redempcji z amount (NOT NULL)
     const { error: redErr } = await supabaseAdmin.from("discount_redemptions").insert({
       code_id: dc.id,
-      code: dc.code,           // kopia tekstowa do raportów
+      code: dc.code,              // kopia tekstowa do raportów
       order_id: newOrderId,
       user_id: n.user ?? null,
       email_lower: emailLower,
-      amount: applied,         // NOT NULL w tabeli
+      amount: applied,            // WAŻNE
     });
     if (redErr) throw redErr;
 
-    // aktualizacja zamówienia
+    // aktualizacja zamówienia po rabacie
     const { error: updErr } = await supabaseAdmin
       .from("orders")
       .update({ promo_code: dc.code, discount_amount: applied, total_price: newTotal })
       .eq("id", newOrderId);
 
     if (updErr) {
-      // rollback redempcji jeśli update zamówienia się nie uda
+      // rollback redempcji, gdyby update nie przeszedł
       await supabaseAdmin.from("discount_redemptions").delete().eq("order_id", newOrderId);
       throw updErr;
     }
@@ -683,98 +684,88 @@ if (n.promo_code) {
   }
 }
 
-    // 6) order_items
-    if (Array.isArray(n.itemsArray) && n.itemsArray.length > 0) {
-      try {
-        const shaped = n.itemsArray.map((rawIt: Any, i: number) => {
-          const key = String(rawIt.product_id ?? rawIt.productId ?? rawIt.id ?? "");
-          const db = productsMap.get(key);
-          const ni = buildItemFromDbAndOptions(db, rawIt);
-          return {
-            order_id: newOrderId,
-            product_id: key || null,
-            name: ni.name,
-            quantity: ni.quantity,
-            unit_price: ni.price,
-            line_no: i + 1,
-          };
-        });
-        const { error: oiErr } = await supabaseAdmin.from("order_items").insert(shaped);
-        if (oiErr) console.warn("[orders.create] order_items insert skipped:", oiErr.message);
-      } catch (e: any) {
-        console.warn("[orders.create] order_items insert not executed:", e?.message);
-      }
-    }
-
-    // 6.1) E-mail do klienta
-    try {
-      if (n.contact_email) {
-        const origin = process.env.APP_BASE_URL || new URL(req.url).origin;
-        const url = trackingUrl(origin, String(newOrderId));
-
-        const total =
-          typeof currentTotal === "number"
-            ? currentTotal.toFixed(2).replace(".", ",")
-            : String(currentTotal ?? "0");
-
-        const html = `
-          <div style="font-family:Inter,Arial,sans-serif;line-height:1.5;color:#111">
-            <h2 style="margin:0 0 8px">Potwierdzenie zamówienia #${newOrderId}</h2>
-            <p style="margin:0 0 16px">Dziękujemy za zamówienie w SISI.</p>
-            <p style="margin:16px 0">
-              <a href="${url}" style="display:inline-block;padding:12px 18px;background:#111;color:#fff;border-radius:8px;text-decoration:none">
-                Sprawdź status i czas dostawy
-              </a>
-            </p>
-            <p style="margin:8px 0">Kwota: <strong>${total} zł</strong></p>
-            <p style="margin:8px 0">Opcja: <strong>${optLabel(orderRow.selected_option)}</strong></p>
-            <hr style="margin:20px 0;border:none;border-top:1px solid #eee" />
-            <p style="font-size:12px;color:#555;margin:0">
-              Akceptacja: Regulamin v${TERMS_VERSION} (<a href="${TERMS_URL}">link</a>),
-              Polityka prywatności v${PRIVACY_VERSION} (<a href="${PRIVACY_URL}">link</a>)
-            </p>
-          </div>
-        `;
-
-        await sendEmail({
-          to: n.contact_email,
-          subject: `SISI • Potwierdzenie zamówienia #${newOrderId}`,
-          html,
-        });
-      }
-    } catch (mailErr) {
-      console.error("[orders.create] email to client error:", mailErr);
-    }
-
-    // 7) SMS do personelu
-    try {
-      if (twilioClient && TWILIO_FROM_NUMBER && STAFF_PHONE_NUMBER) {
-        const to = normalizePhone(STAFF_PHONE_NUMBER);
-        const from = TWILIO_FROM_NUMBER;
-        if (to && from) {
-          const previewNames = normalizedItems.slice(0, 3).map((x) => x.name).join(", ");
-          const more = normalizedItems.length > 3 ? ` +${normalizedItems.length - 3}` : "";
-          const total =
-            typeof currentTotal === "number"
-              ? currentTotal.toFixed(2).replace(".", ",")
-              : String(currentTotal ?? "0");
-          const body =
-            `Nowe zamówienie #${newOrderId}\n` +
-            `Typ: ${optLabel(orderRow.selected_option)}\n` +
-            `Klient: ${orderRow.name ?? "—"}\n` +
-            `Kwota: ${total} zł\n` +
-            (previewNames ? `Pozycje: ${previewNames}${more}` : "");
-          await twilioClient.messages.create({ to, from, body });
-        }
-      }
-    } catch (smsErr) {
-      console.error("[orders.create] SMS staff error:", smsErr);
-    }
-
-    // 8) OK
-    return NextResponse.json({ orderId: newOrderId }, { status: 201 });
+// 6) order_items
+if (Array.isArray(n.itemsArray) && n.itemsArray.length > 0) {
+  try {
+    const shaped = n.itemsArray.map((rawIt: Any, i: number) => {
+      const key = String(rawIt.product_id ?? rawIt.productId ?? rawIt.id ?? "");
+      const db = productsMap.get(key);
+      const ni = buildItemFromDbAndOptions(db, rawIt);
+      return {
+        order_id: newOrderId,
+        product_id: key || null,
+        name: ni.name,
+        quantity: ni.quantity,
+        unit_price: ni.price,
+        line_no: i + 1,
+      };
+    });
+    const { error: oiErr } = await supabaseAdmin.from("order_items").insert(shaped);
+    if (oiErr) console.warn("[orders.create] order_items insert skipped:", oiErr.message);
   } catch (e: any) {
-    console.error("[orders.create] unexpected:", e?.message ?? e);
-    return NextResponse.json({ error: "Wystąpił nieoczekiwany błąd." }, { status: 500 });
+    console.warn("[orders.create] order_items insert not executed:", e?.message);
   }
 }
+
+// 6.1) e-mail
+try {
+  if (n.contact_email) {
+    const origin = process.env.APP_BASE_URL || new URL(req.url).origin;
+    const url = trackingUrl(origin, String(newOrderId));
+    const total =
+      typeof currentTotal === "number"
+        ? currentTotal.toFixed(2).replace(".", ",")
+        : String(currentTotal ?? "0");
+
+    const html = `
+      <div style="font-family:Inter,Arial,sans-serif;line-height:1.5;color:#111">
+        <h2 style="margin:0 0 8px">Potwierdzenie zamówienia #${newOrderId}</h2>
+        <p style="margin:0 0 16px">Dziękujemy za zamówienie w SISI.</p>
+        <p style="margin:16px 0">
+          <a href="${url}" style="display:inline-block;padding:12px 18px;background:#111;color:#fff;border-radius:8px;text-decoration:none">
+            Sprawdź status i czas dostawy
+          </a>
+        </p>
+        <p style="margin:8px 0">Kwota: <strong>${total} zł</strong></p>
+        <p style="margin:8px 0">Opcja: <strong>${optLabel(orderRow.selected_option)}</strong></p>
+        <hr style="margin:20px 0;border:none;border-top:1px solid #eee" />
+        <p style="font-size:12px;color:#555;margin:0">
+          Akceptacja: Regulamin v${TERMS_VERSION} (<a href="${TERMS_URL}">link</a>),
+          Polityka prywatności v${PRIVACY_VERSION} (<a href="${PRIVACY_URL}">link</a>)
+        </p>
+      </div>
+    `;
+
+    await sendEmail({ to: n.contact_email, subject: `SISI • Potwierdzenie zamówienia #${newOrderId}`, html });
+  }
+} catch (mailErr) {
+  console.error("[orders.create] email to client error:", mailErr);
+}
+
+// 7) SMS do personelu
+try {
+  if (twilioClient && TWILIO_FROM_NUMBER && STAFF_PHONE_NUMBER) {
+    const to = normalizePhone(STAFF_PHONE_NUMBER);
+    const from = TWILIO_FROM_NUMBER;
+    if (to && from) {
+      const previewNames = normalizedItems.slice(0, 3).map((x) => x.name).join(", ");
+      const more = normalizedItems.length > 3 ? ` +${normalizedItems.length - 3}` : "";
+      const total =
+        typeof currentTotal === "number"
+          ? currentTotal.toFixed(2).replace(".", ",")
+          : String(currentTotal ?? "0");
+      const body =
+        `Nowe zamówienie #${newOrderId}\n` +
+        `Typ: ${optLabel(orderRow.selected_option)}\n` +
+        `Klient: ${orderRow.name ?? "—"}\n` +
+        `Kwota: ${total} zł\n` +
+        (previewNames ? `Pozycje: ${previewNames}${more}` : "");
+      await twilioClient.messages.create({ to, from, body });
+    }
+  }
+} catch (smsErr) {
+  console.error("[orders.create] SMS staff error:", smsErr);
+}
+
+// 8) OK
+return NextResponse.json({ orderId: newOrderId }, { status: 201 });
