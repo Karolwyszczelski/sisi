@@ -27,14 +27,13 @@ declare global {
           "timeout-callback"?: () => void;
           retry?: "never" | "auto";
           theme?: "auto" | "light" | "dark";
-          appearance?: "always" | "execute" | "interaction-only" | "invisible";
+          appearance?: "always" | "execute" | "interaction-only";
           ["refresh-expired"]?: "auto" | "manual";
           action?: string;
         }
       ) => any;
       reset: (id?: any) => void;
       remove: (id: any) => void;
-      // ↓ używane do JIT tokenu
       execute?: (id: any) => void;
       getResponse?: (id: any) => string | null;
     };
@@ -381,6 +380,12 @@ export default function CheckoutModal() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isCheckoutOpen]);
 
+  // Guard: jeśli skrypt był już wstrzyknięty wcześniej
+  useEffect(() => {
+    if (!TURNSTILE_SITE_KEY) return;
+    if (typeof window !== "undefined" && (window as any).turnstile) setTsReady(true);
+  }, []);
+
   useEffect(() => {
     if (isLoggedIn && session) {
       setName(session.user.user_metadata?.full_name || "");
@@ -407,14 +412,15 @@ export default function CheckoutModal() {
 
   const isVisible = (el: HTMLDivElement | null) => !!el && !!el.offsetParent;
 
+  // === Turnstile: poprawione renderowanie i lifecycle ===
   const renderTurnstile = (target: HTMLDivElement | null) => {
-    if (!TURNSTILE_SITE_KEY || !window.turnstile || !isVisible(target)) return;
+    if (!TURNSTILE_SITE_KEY || !window.turnstile || !target) return;
+    if ((target as any)._tsId) return; // nie renderuj drugi raz w ten sam element
     try {
       setTurnstileError(false);
-      const id = window.turnstile.render(target!, {
+      const id = window.turnstile.render(target, {
         sitekey: TURNSTILE_SITE_KEY,
-        // niewidoczny widget → token na żądanie
-        appearance: "invisible",
+        appearance: "execute",
         action: "order",
         retry: "auto",
         theme: "auto",
@@ -424,32 +430,54 @@ export default function CheckoutModal() {
         "expired-callback": () => { setTurnstileToken(null); try { window.turnstile?.reset(id); } catch {} },
         "timeout-callback": () => { setTurnstileToken(null); try { window.turnstile?.reset(id); } catch {} },
       });
-      tsIdsRef.current.push(id);
+      (target as any)._tsId = id;
+      tsIdsRef.current.push({ id, el: target });
     } catch { setTurnstileError(true); }
   };
 
   const removeTurnstile = () => {
-    try { tsIdsRef.current.forEach((id) => window.turnstile?.remove(id)); } catch {}
+    try {
+      tsIdsRef.current.forEach(({ id, el }) => {
+        try { window.turnstile?.remove(id); } catch {}
+        if (el) { (el as any)._tsId = undefined; el.innerHTML = ""; }
+      });
+    } catch {}
     tsIdsRef.current = [];
     setTurnstileToken(null);
     setTurnstileError(false);
   };
 
-  // wybierz pierwszy aktywny widget
-  const getActiveWidgetId = () => tsIdsRef.current[tsIdsRef.current.length - 1] ?? tsIdsRef.current[0];
+  const getActiveWidgetId = () => {
+    const last = tsIdsRef.current[tsIdsRef.current.length - 1];
+    return last?.id;
+  };
 
   // uzyskaj świeży token tuż przed POST
   const getFreshTurnstileToken = async (): Promise<string> => {
     if (!TURNSTILE_SITE_KEY) return "";
     if (!window.turnstile) throw new Error("Weryfikacja niedostępna");
+
+    if (!tsIdsRef.current.length) {
+      const target =
+        (tsMobileRef.current && isVisible(tsMobileRef.current) ? tsMobileRef.current : null) ??
+        (tsDesktopRef.current && isVisible(tsDesktopRef.current) ? tsDesktopRef.current : null);
+      renderTurnstile(target);
+    }
+
     const id = getActiveWidgetId();
     if (!id) throw new Error("Weryfikacja niedostępna");
+
     setTurnstileToken(null);
     try {
       window.turnstile.execute?.(id);
-      // czekamy maksymalnie ~2s na callback
-      for (let i = 0; i < 10; i++) {
-        await new Promise((r) => setTimeout(r, 200));
+      for (let i = 0; i < 30; i++) {
+        await new Promise((r) => setTimeout(r, 100));
+        const t = window.turnstile.getResponse?.(id) || turnstileToken;
+        if (t) return String(t);
+      }
+      try { window.turnstile.reset(id); window.turnstile.execute?.(id); } catch {}
+      for (let i = 0; i < 20; i++) {
+        await new Promise((r) => setTimeout(r, 100));
         const t = window.turnstile.getResponse?.(id) || turnstileToken;
         if (t) return String(t);
       }
@@ -461,11 +489,13 @@ export default function CheckoutModal() {
 
   useEffect(() => {
     if (!isClient || !TURNSTILE_SITE_KEY || !tsReady) return;
+
     if (isCheckoutOpen && checkoutStep === 3) {
-      renderTurnstile(tsMobileRef.current);
-      renderTurnstile(tsDesktopRef.current);
+      if (tsMobileRef.current && isVisible(tsMobileRef.current)) renderTurnstile(tsMobileRef.current);
+      if (tsDesktopRef.current && isVisible(tsDesktopRef.current)) renderTurnstile(tsDesktopRef.current);
       return () => removeTurnstile();
     }
+
     removeTurnstile();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isClient, isCheckoutOpen, checkoutStep, tsReady]);
@@ -712,12 +742,12 @@ export default function CheckoutModal() {
         cache: "no-store",
       });
 
-      try { tsIdsRef.current.forEach((id) => window.turnstile?.reset(id)); } catch {}
+      try { tsIdsRef.current.forEach(({ id }) => window.turnstile?.reset(id)); } catch {}
       clearCart();
       setOrderSent(true);
     } catch (err: any) {
       setErrorMessage(err.message || "Wystąpił błąd podczas składania zamówienia.");
-      try { tsIdsRef.current.forEach((id) => window.turnstile?.reset(id)); } catch {}
+      try { tsIdsRef.current.forEach(({ id }) => window.turnstile?.reset(id)); } catch {}
     } finally {
       setSubmitting(false);
     }
@@ -755,7 +785,7 @@ export default function CheckoutModal() {
         cache: "no-store",
       });
 
-      try { tsIdsRef.current.forEach((id) => window.turnstile?.reset(id)); } catch {}
+      try { tsIdsRef.current.forEach(({ id }) => window.turnstile?.reset(id)); } catch {}
 
       const newOrderId = data.orderId;
       const pay = await safeFetch("/api/payments/create-transaction", {
@@ -773,7 +803,7 @@ export default function CheckoutModal() {
       else throw new Error("Brak URL do płatności");
     } catch (e: any) {
       setErrorMessage(e.message || "Nie udało się zainicjować płatności.");
-      try { tsIdsRef.current.forEach((id) => window.turnstile?.reset(id)); } catch {}
+      try { tsIdsRef.current.forEach(({ id }) => window.turnstile?.reset(id)); } catch {}
     } finally {
       setSubmitting(false);
     }
@@ -808,11 +838,11 @@ export default function CheckoutModal() {
       {TURNSTILE_SITE_KEY && (
         <Script
           id="cf-turnstile"
-          src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=onTsReady"
+          src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"
+          strategy="afterInteractive"
           async
           defer
-          strategy="afterInteractive"
-          onLoad={() => { window.onTsReady = () => setTsReady(true); setTsReady(true); }}
+          onLoad={() => setTsReady(true)}
         />
       )}
 
