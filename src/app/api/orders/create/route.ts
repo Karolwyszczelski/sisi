@@ -445,11 +445,9 @@ function computeDiscount(base: number, dc: DiscountCode): number {
 
     // 2.0) Turnstile
     if (TURNSTILE_SECRET_KEY) {
-      const headerToken =
+      const token =
         req.headers.get("cf-turnstile-response") ||
-        req.headers.get("CF-Turnstile-Response") ||
-        req.headers.get("x-turnstile-token");
-      const token = raw?.turnstileToken || raw?.token || raw?.cf_turnstile_token || headerToken;
+        req.headers.get("CF-Turnstile-Response");
 
       if (!token) {
         return NextResponse.json({ error: "Brak weryfikacji antybot." }, { status: 400 });
@@ -466,7 +464,11 @@ function computeDiscount(base: number, dc: DiscountCode): number {
         });
         const jr = await ver.json();
         if (!jr?.success) {
+          const codes = new Set<string>((jr?.["error-codes"] || []) as string[]);
           console.error("[turnstile.verify] fail", jr?.["error-codes"] || jr);
+          if (codes.has("timeout-or-duplicate")) {
+            return NextResponse.json({ error: "duplicate" }, { status: 409 });
+          }
           return NextResponse.json({ error: "Nieudana weryfikacja formularza." }, { status: 400 });
         }
       } catch (e) {
