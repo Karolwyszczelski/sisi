@@ -471,13 +471,13 @@ export default function CheckoutModal() {
     try {
       window.turnstile.execute?.(id);
       for (let i = 0; i < 30; i++) {
-        await new Promise((r) => setTimeout(r, 100));
+        await new Promise((r) => setTimeout(r, 200));
         const t = window.turnstile.getResponse?.(id) || turnstileToken;
         if (t) return String(t);
       }
       try { window.turnstile.reset(id); window.turnstile.execute?.(id); } catch {}
       for (let i = 0; i < 20; i++) {
-        await new Promise((r) => setTimeout(r, 100));
+        await new Promise((r) => setTimeout(r, 200));
         const t = window.turnstile.getResponse?.(id) || turnstileToken;
         if (t) return String(t);
       }
@@ -736,9 +736,9 @@ export default function CheckoutModal() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "CF-Turnstile-Response": tsToken || "",
+          "CF-Turnstile-Response": tsToken,
         },
-        body: JSON.stringify({ orderPayload, itemsPayload, turnstileToken: tsToken }),
+        body: JSON.stringify({ orderPayload, itemsPayload }),
         cache: "no-store",
       });
 
@@ -779,9 +779,9 @@ export default function CheckoutModal() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "CF-Turnstile-Response": tsToken || "",
+          "CF-Turnstile-Response": tsToken,
         },
-        body: JSON.stringify({ orderPayload, itemsPayload, turnstileToken: tsToken }),
+        body: JSON.stringify({ orderPayload, itemsPayload }),
         cache: "no-store",
       });
 
