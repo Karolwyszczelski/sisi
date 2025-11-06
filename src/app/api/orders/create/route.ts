@@ -5,7 +5,6 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { toZonedTime } from "date-fns-tz";
-import Twilio from "twilio";
 
 /* === email + link śledzenia === */
 import { trackingUrl } from "@/lib/orderLink";
@@ -20,17 +19,6 @@ const supabaseAdmin = createClient(
 
 /* ================= Turnstile =================== */
 const TURNSTILE_SECRET_KEY = process.env.TURNSTILE_SECRET_KEY || "";
-
-/* ================= Twilio =================== */
-const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID || "";
-const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN || "";
-const STAFF_PHONE_NUMBER = process.env.STAFF_PHONE_NUMBER || "";
-const TWILIO_FROM_NUMBER =
-  process.env.TWILIO_FROM_NUMBER || process.env.TWILIO_PHONE_NUMBER || "";
-const twilioClient =
-  TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN
-    ? Twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-    : null;
 
 /* ====== Wersje/Linki regulaminów (do maili) ====== */
 const TERMS_VERSION = process.env.TERMS_VERSION || "2025-01";
@@ -744,32 +732,7 @@ try {
   console.error("[orders.create] email to client error:", mailErr);
 }
 
-// 7) SMS do personelu
-try {
-  if (twilioClient && TWILIO_FROM_NUMBER && STAFF_PHONE_NUMBER) {
-    const to = normalizePhone(STAFF_PHONE_NUMBER);
-    const from = TWILIO_FROM_NUMBER;
-    if (to && from) {
-      const previewNames = normalizedItems.slice(0, 3).map((x) => x.name).join(", ");
-      const more = normalizedItems.length > 3 ? ` +${normalizedItems.length - 3}` : "";
-      const total =
-        typeof currentTotal === "number"
-          ? currentTotal.toFixed(2).replace(".", ",")
-          : String(currentTotal ?? "0");
-      const body =
-        `Nowe zamówienie #${newOrderId}\n` +
-        `Typ: ${optLabel(orderRow.selected_option)}\n` +
-        `Klient: ${orderRow.name ?? "—"}\n` +
-        `Kwota: ${total} zł\n` +
-        (previewNames ? `Pozycje: ${previewNames}${more}` : "");
-      await twilioClient.messages.create({ to, from, body });
-    }
-  }
-} catch (smsErr) {
-  console.error("[orders.create] SMS staff error:", smsErr);
-}
-
-// 8) OK
+// 7) OK
 return NextResponse.json({ orderId: newOrderId }, { status: 201 });
 } catch (e: any) {
   console.error("[orders.create] unexpected:", e?.message ?? e);
