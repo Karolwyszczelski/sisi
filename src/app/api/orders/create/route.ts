@@ -26,7 +26,7 @@ const PRIVACY_VERSION = process.env.PRIVACY_VERSION || "2025-01";
 const TERMS_URL =
   process.env.TERMS_URL || "https://www.sisiciechanow.pl/regulamin";
 const PRIVACY_URL =
-   process.env.PRIVACY_URL || "https://www.sisiciechanow.pl/polityka-prywatnosci";
+  process.env.PRIVACY_URL || "https://www.sisiciechanow.pl/polityka-prywatnosci";
 
 /* ============== Typy i utils =============== */
 type Any = Record<string, any>;
@@ -237,6 +237,18 @@ const haversineKm = (a:{lat:number;lng:number}, b:{lat:number;lng:number}) => {
 };
 
 /* ============== Normalizacja BODY ============== */
+function pickPromo(v: any): string | null {
+  const src = v || {};
+  const keys = [
+    "promo_code","promoCode","code","coupon","coupon_code","couponCode",
+    "discount_code","discountCode","voucher","voucher_code","voucherCode"
+  ];
+  for (const k of keys) {
+    const val = src?.[k];
+    if (typeof val === "string" && val.trim()) return val.trim();
+  }
+  return null;
+}
 function normalizeBody(raw: any, req: Request) {
   const base = raw?.orderPayload ? raw.orderPayload : raw;
   const rawItems =
@@ -302,7 +314,7 @@ function normalizeBody(raw: any, req: Request) {
     payment_status:
       (base?.payment_method ?? "Gotówka") === "Online" ? "pending" : null,
     total_price: num(base?.total_price, 0),
-    promo_code: base?.promo_code ?? null,
+    promo_code: pickPromo(base) ?? pickPromo(raw),
     discount_amount: num(base?.discount_amount, 0) ?? 0,
     delivery_cost: num(base?.delivery_cost, null),
     delivery_lat: num(base?.delivery_lat ?? base?.lat, null),
@@ -399,7 +411,7 @@ async function getDiscountByCode(codeInput: string): Promise<DiscountCode> {
 }
 
 async function getUsageCounts(codeId: string, userId: string | null, emailLower: string | null) {
-  const [allQ, userQ, emailQ] = await Promise.all([
+  const [allQ, userQ, emailLowerQ, emailPlainQ] = await Promise.all([
     supabaseAdmin.from("discount_redemptions").select("*", { head: true, count: "exact" }).eq("code_id", codeId),
     userId
       ? supabaseAdmin.from("discount_redemptions").select("*", { head: true, count: "exact" }).eq("code_id", codeId).eq("user_id", userId)
@@ -407,12 +419,15 @@ async function getUsageCounts(codeId: string, userId: string | null, emailLower:
     emailLower
       ? supabaseAdmin.from("discount_redemptions").select("*", { head: true, count: "exact" }).eq("code_id", codeId).eq("email_lower", emailLower)
       : Promise.resolve({ count: 0 }),
+    emailLower
+      ? supabaseAdmin.from("discount_redemptions").select("*", { head: true, count: "exact" }).eq("code_id", codeId).eq("email", emailLower)
+      : Promise.resolve({ count: 0 }),
   ]);
 
   return {
     all: Number(allQ.count || 0),
     byUser: Number((userQ as any).count || 0),
-    byEmail: Number((emailQ as any).count || 0),
+    byEmail: Number((emailLowerQ as any).count || 0) + Number((emailPlainQ as any).count || 0),
   };
 }
 
@@ -601,8 +616,8 @@ const { data: orderRow, error: orderErr } = await supabaseAdmin
     deliveryTime: n.deliveryTime,
     eta: n.eta,
     user: n.user,
-    promo_code: null,       // policzymy niżej
-    discount_amount: 0,     // policzymy niżej
+    promo_code: n.promo_code,   // widoczny od razu; kwotę ustawimy niżej
+    discount_amount: 0,         // policzymy niżej
     legal_accept: n.legal_accept,
   })
   .select("id, selected_option, total_price, name")
