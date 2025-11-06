@@ -6,7 +6,6 @@ import { cookies } from "next/headers";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 import { createClient } from "@supabase/supabase-js";
 import { getSessionAndRole } from "@/lib/serverAuth";
-import { sendSms } from "@/lib/sms";
 import { getTransport } from "@/lib/mailer";
 import { trackingUrl } from "@/lib/orderLink";
 import type { Database } from "@/types/supabase";
@@ -29,7 +28,7 @@ const EMAIL_FROM =
   (process.env.EMAIL_FROM || process.env.RESEND_FROM || "SISI Burger <no-reply@sisiciechanow.pl>")
     .replace(/^['"\s]+|['"\s]+$/g, "");
 
-/** Wymuszona strefa czasowa – żeby maile/SMS miały lokalną godzinę */
+/** Wymuszona strefa czasowa – żeby maile miały lokalną godzinę */
 const APP_TZ = process.env.APP_TIMEZONE || "Europe/Warsaw";
 const timeFmt = new Intl.DateTimeFormat("pl-PL", {
   hour: "2-digit",
@@ -40,14 +39,6 @@ const timeFmt = new Intl.DateTimeFormat("pl-PL", {
 const fmtTime = (iso?: string | null) =>
   iso && !Number.isNaN(Date.parse(iso)) ? timeFmt.format(new Date(iso)) : null;
 
-function normalizePhone(phone?: string | null) {
-  if (!phone) return null;
-  let d = String(phone).replace(/\D/g, "");
-  if (d.length === 9) return "+48" + d;
-  if (d.startsWith("00")) return "+" + d.slice(2);
-  if (!String(phone).startsWith("+") && d.length > 9) return "+" + d;
-  return String(phone);
-}
 const optLabel = (v?: string) =>
   v === "delivery" ? "DOSTAWA" : v === "takeaway" ? "NA WYNOS" : "NA MIEJSCU";
 
@@ -63,8 +54,11 @@ export async function PATCH(
   const supabase = createRouteHandlerClient<Database>({ cookies });
 
   let body: any;
-  try { body = await request.json(); }
-  catch { return NextResponse.json({ error: "Invalid JSON" }, { status: 400 }); }
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
 
   const orderId = params.orderId;
 
@@ -109,29 +103,8 @@ export async function PATCH(
   const updated = data as any;
   const when: string | null = updated.deliveryTime ?? updated.client_delivery_time ?? null;
 
-  // ===== SMS =====
+  // Przydatne w sekcji e-maili
   const onlyTimeUpdate = !!employeeTime && updated.status === "accepted" && body.status !== "accepted";
-  let smsBody = "";
-  if (onlyTimeUpdate) {
-    const t = fmtTime(when);
-    smsBody = t ? `⏰ Aktualizacja: zamówienie ${orderId} będzie gotowe ok. ${t}.`
-                : `⏰ Zaktualizowano czas dla zamówienia ${orderId}.`;
-  } else {
-    switch (updated.status) {
-      case "accepted": {
-        const t = fmtTime(when);
-        smsBody = t ? `👍 Zamówienie ${orderId} przyjęte. Odbiór ok. ${t}.` : `👍 Zamówienie ${orderId} przyjęte.`;
-        break;
-      }
-      case "completed": smsBody = `✅ Zamówienie ${orderId} zrealizowane.`; break;
-      case "cancelled": smsBody = `❌ Zamówienie ${orderId} anulowane.`; break;
-    }
-  }
-  const shouldSms = !!updated.phone && (["accepted", "completed", "cancelled"].includes(updated.status) || onlyTimeUpdate);
-  if (shouldSms && smsBody) {
-    const to = normalizePhone(updated.phone);
-    if (to) { try { await sendSms(to, smsBody); } catch (e) { console.error("[orders.patch] sms error:", e); } }
-  }
 
   // ===== E-MAIL =====
   try {
@@ -162,7 +135,6 @@ export async function PATCH(
       const trackUrl = origin ? trackingUrl(origin, String(orderId)) : null;
 
       const timeStr = fmtTime(when);
-
       const optionTxt = optLabel(updated.selected_option);
       const changingPaymentStatus = body.payment_status !== undefined;
 
