@@ -14,6 +14,8 @@ interface Order {
   name?: string;
   total_price: number;
   delivery_cost?: number | null;
+  discount_amount?: number | null;
+  promo_code?: string | null;
   created_at: string;
   status: "new" | "pending" | "placed" | "accepted" | "cancelled" | "completed";
   clientDelivery?: string;
@@ -463,6 +465,8 @@ export default function PickupOrdersPage() {
         name: o.name ?? o.customer_name ?? o.client_name ?? undefined,
         total_price: toNumber(o.total_price),
         delivery_cost: o.delivery_cost ?? null,
+        discount_amount: o.discount_amount ?? null,
+        promo_code: o.promo_code ?? null,
         created_at: o.created_at,
         status: o.status,
         clientDelivery: o.client_delivery_time ?? o.delivery_time ?? o.clientDelivery,
@@ -778,6 +782,9 @@ export default function PickupOrdersPage() {
                         {o.status.toUpperCase()}
                       </Badge>
                       {paymentBadge(o)}
+                      {toNumber(o.discount_amount) > 0 && (
+                        <Badge tone="green">RABAT{o.promo_code ? `: ${o.promo_code}` : ""}</Badge>
+                      )}
                     </div>
                     <div className="text-sm text-slate-700">
                       <b>Klient:</b> {o.name || "—"}
@@ -796,6 +803,12 @@ export default function PickupOrdersPage() {
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                   <div className="space-y-1 text-sm">
                     <div><b>Kwota:</b> {o.total_price.toFixed(2)} zł</div>
+                    {toNumber(o.discount_amount) > 0 && (
+                      <div>
+                       <b>Rabat:</b> -{toNumber(o.discount_amount).toFixed(2)} zł
+                       {o.promo_code ? <span className="ml-1 text-xs text-emerald-700">(kod: {o.promo_code})</span> : null}
+                      </div>
+                    )}
                     {o.selected_option === "delivery" && typeof o.delivery_cost === "number" && <div><b>Dostawa:</b> {o.delivery_cost.toFixed(2)} zł</div>}
                     {o.selected_option === "delivery" && o.address && <div><b>Adres:</b> {o.address}</div>}
                     {o.phone && <div><b>Telefon:</b> {o.phone}</div>}
