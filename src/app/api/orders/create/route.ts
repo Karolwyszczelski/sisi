@@ -616,7 +616,7 @@ const { data: orderRow, error: orderErr } = await supabaseAdmin
     deliveryTime: n.deliveryTime,
     eta: n.eta,
     user: n.user,
-    promo_code: n.promo_code,   // widoczny od razu; kwotę ustawimy niżej
+    promo_code: null,   // widoczny od razu; kwotę ustawimy niżej
     discount_amount: 0,         // policzymy niżej
     legal_accept: n.legal_accept,
   })
