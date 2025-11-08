@@ -41,6 +41,13 @@ declare global {
   }
 }
 
+const Spinner = () => (
+  <svg className="h-5 w-5 animate-spin" viewBox="0 0 24 24" aria-hidden="true">
+    <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" className="opacity-25" />
+    <path d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" fill="currentColor" className="opacity-75" />
+  </svg>
+);
+
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -348,6 +355,13 @@ export default function CheckoutModal() {
   const tsMobileRef = useRef<HTMLDivElement | null>(null);
   const tsDesktopRef = useRef<HTMLDivElement | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // Idempotency key for create/charge requests
+  const makeIdem = () =>
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const idemKeyRef = useRef<string>(makeIdem());
 
   // dodatkowe stany dostawy
   const [deliveryMinOk, setDeliveryMinOk] = useState(true);
@@ -737,6 +751,7 @@ export default function CheckoutModal() {
         headers: {
           "Content-Type": "application/json",
           "CF-Turnstile-Response": tsToken,
+          "X-Idempotency-Key": idemKeyRef.current,
         },
         body: JSON.stringify({ orderPayload, itemsPayload }),
         cache: "no-store",
@@ -750,6 +765,7 @@ export default function CheckoutModal() {
       try { tsIdsRef.current.forEach(({ id }) => window.turnstile?.reset(id)); } catch {}
     } finally {
       setSubmitting(false);
+      idemKeyRef.current = makeIdem(); // nowy klucz po próbie
     }
   };
 
@@ -780,6 +796,7 @@ export default function CheckoutModal() {
         headers: {
           "Content-Type": "application/json",
           "CF-Turnstile-Response": tsToken,
+          "X-Idempotency-Key": idemKeyRef.current,
         },
         body: JSON.stringify({ orderPayload, itemsPayload }),
         cache: "no-store",
@@ -790,7 +807,10 @@ export default function CheckoutModal() {
       const newOrderId = data.orderId;
       const pay = await safeFetch("/api/payments/create-transaction", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "X-Idempotency-Key": idemKeyRef.current, // ta sama idempotencja dla pary create+charge
+        },
         body: JSON.stringify({
           orderId: newOrderId,
           amount: totalWithDelivery,
@@ -806,6 +826,7 @@ export default function CheckoutModal() {
       try { tsIdsRef.current.forEach(({ id }) => window.turnstile?.reset(id)); } catch {}
     } finally {
       setSubmitting(false);
+      idemKeyRef.current = makeIdem(); // nowy klucz po próbie
     }
   };
 
@@ -900,8 +921,9 @@ export default function CheckoutModal() {
                           <button
                             key={opt}
                             onClick={() => setSelectedOption(opt)}
+                            disabled={submitting}
                             className={clsx(
-                              "flex flex-col items-center p-4 rounded border transition",
+                              "flex flex-col items-center p-4 rounded border transition disabled:opacity-60 disabled:cursor-not-allowed",
                               selectedOption === opt ? "bg-yellow-400 text-black border-yellow-500" : "bg-gray-100 text-gray-800 hover:bg-gray-200 border-gray-200"
                             )}
                           >
@@ -917,15 +939,15 @@ export default function CheckoutModal() {
                         <h3 className="font-semibold">Czas dostawy</h3>
                         <div className="flex flex-wrap gap-6 items-center">
                           <label className="flex items-center gap-2">
-                            <input type="radio" name="timeOption" value="asap" checked={deliveryTimeOption === "asap"} onChange={() => setDeliveryTimeOption("asap")} />
+                            <input type="radio" name="timeOption" value="asap" checked={deliveryTimeOption === "asap"} onChange={() => setDeliveryTimeOption("asap")} disabled={submitting} />
                             <span>Jak najszybciej</span>
                           </label>
                           <label className="flex items-center gap-2">
-                            <input type="radio" name="timeOption" value="schedule" checked={deliveryTimeOption === "schedule"} onChange={() => setDeliveryTimeOption("schedule")} />
+                            <input type="radio" name="timeOption" value="schedule" checked={deliveryTimeOption === "schedule"} onChange={() => setDeliveryTimeOption("schedule")} disabled={submitting} />
                             <span>Na godzinę</span>
                           </label>
                           {deliveryTimeOption === "schedule" && (
-                            <input type="time" className="border rounded px-2 py-1" min="11:30" max="21:45" value={scheduledTime} onChange={(e) => setScheduledTime(e.target.value)} />
+                            <input type="time" className="border rounded px-2 py-1" min="11:30" max="21:45" value={scheduledTime} onChange={(e) => setScheduledTime(e.target.value)} disabled={submitting} />
                           )}
                         </div>
                       </div>
@@ -934,8 +956,8 @@ export default function CheckoutModal() {
                     <div className="space-y-3">
                       {!isLoggedIn ? (
                         <>
-                          <input type="text" placeholder="Email" className="w-full px-3 py-2 border rounded" value={email} onChange={(e) => setEmail(e.target.value)} />
-                          <input type="password" placeholder="Hasło" className="w-full px-3 py-2 border rounded" value={password} onChange={(e) => setPassword(e.target.value)} />
+                          <input type="text" placeholder="Email" className="w-full px-3 py-2 border rounded" value={email} onChange={(e) => setEmail(e.target.value)} disabled={submitting} />
+                          <input type="password" placeholder="Hasło" className="w-full px-3 py-2 border rounded" value={password} onChange={(e) => setPassword(e.target.value)} disabled={submitting} />
                           <div className="flex flex-col gap-2">
                             <button
                               onClick={async () => {
@@ -943,18 +965,18 @@ export default function CheckoutModal() {
                                 if (!error) nextStep();
                                 else setErrorMessage(error.message);
                               }}
-                              disabled={!email || !password || !selectedOption}
-                              className="w-full bg-yellow-400 py-2 rounded font-bold disabled:opacity-50"
+                              disabled={!email || !password || !selectedOption || submitting}
+                              className="w-full bg-yellow-400 py-2 rounded font-bold disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                               Zaloguj się
                             </button>
-                            <button onClick={nextStep} disabled={!selectedOption} className="w-full bg-black text-white py-2 rounded mt-1">
+                            <button onClick={nextStep} disabled={!selectedOption || submitting} className="w-full bg-black text-white py-2 rounded mt-1 disabled:opacity-50 disabled:cursor-not-allowed">
                               Kontynuuj bez logowania
                             </button>
                           </div>
                         </>
                       ) : (
-                        <button onClick={nextStep} className="w-full bg-black text-white py-2 rounded font-semibold">
+                        <button onClick={nextStep} className="w-full bg-black text-white py-2 rounded font-semibold disabled:opacity-50 disabled:cursor-not-allowed" disabled={submitting}>
                           Dalej
                         </button>
                       )}
@@ -973,12 +995,12 @@ export default function CheckoutModal() {
                         {!custCoords ? <p className="text-xs text-red-600">Najpierw wyszukaj i wybierz adres z listy powyżej.</p> : null}
 
                         <div className={clsx("grid grid-cols-1 gap-2", !custCoords && "opacity-50 pointer-events-none")}>
-                          <input type="text" placeholder="Adres" className="w-full px-3 py-2 border rounded" value={street} onChange={(e) => setStreet(e.target.value)} disabled={!custCoords} />
+                          <input type="text" placeholder="Adres" className="w-full px-3 py-2 border rounded" value={street} onChange={(e) => setStreet(e.target.value)} disabled={!custCoords || submitting} />
                           <div className="flex gap-2">
-                            <input type="text" placeholder="Nr mieszkania" className="flex-1 px-3 py-2 border rounded" value={flatNumber} onChange={(e) => setFlatNumber(e.target.value)} disabled={!custCoords} />
-                            <input type="text" placeholder="Kod pocztowy" className="flex-1 px-3 py-2 border rounded" value={postalCode} onChange={(e) => setPostalCode(e.target.value)} disabled={!custCoords} />
+                            <input type="text" placeholder="Nr mieszkania" className="flex-1 px-3 py-2 border rounded" value={flatNumber} onChange={(e) => setFlatNumber(e.target.value)} disabled={!custCoords || submitting} />
+                            <input type="text" placeholder="Kod pocztowy" className="flex-1 px-3 py-2 border rounded" value={postalCode} onChange={(e) => setPostalCode(e.target.value)} disabled={!custCoords || submitting} />
                           </div>
-                          <input type="text" placeholder="Miasto" className="w-full px-3 py-2 border rounded" value={city} onChange={(e) => setCity(e.target.value)} disabled={!custCoords} />
+                          <input type="text" placeholder="Miasto" className="w-full px-3 py-2 border rounded" value={city} onChange={(e) => setCity(e.target.value)} disabled={!custCoords || submitting} />
                         </div>
 
                         {deliveryInfo && (
@@ -989,20 +1011,20 @@ export default function CheckoutModal() {
                       </div>
                     )}
                     <div className="grid grid-cols-1 gap-2">
-                      <input type="text" placeholder="Imię" className="w-full px-3 py-2 border rounded" value={name} onChange={(e) => setName(e.target.value)} />
-                      <input type="tel" placeholder="Telefon" className="w-full px-3 py-2 border rounded" value={phone} onChange={(e) => setPhone(e.target.value)} />
+                      <input type="text" placeholder="Imię" className="w-full px-3 py-2 border rounded" value={name} onChange={(e) => setName(e.target.value)} disabled={submitting} />
+                      <input type="tel" placeholder="Telefon" className="w-full px-3 py-2 border rounded" value={phone} onChange={(e) => setPhone(e.target.value)} disabled={submitting} />
                       {(selectedOption === "local" || selectedOption === "takeaway") && (
-                        <input type="text" placeholder="Adres (opcjonalnie)" className="w-full px-3 py-2 border rounded" value={optionalAddress} onChange={(e) => setOptionalAddress(e.target.value)} />
+                        <input type="text" placeholder="Adres (opcjonalnie)" className="w-full px-3 py-2 border rounded" value={optionalAddress} onChange={(e) => setOptionalAddress(e.target.value)} disabled={submitting} />
                       )}
-                      <input type="email" placeholder="Email (wymagany do potwierdzenia)" className="w-full px-3 py-2 border rounded" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} />
+                      <input type="email" placeholder="Email (wymagany do potwierdzenia)" className="w-full px-3 py-2 border rounded" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} disabled={submitting} />
                       {contactEmail !== "" && !validEmail && <p className="text-xs text-red-600">Podaj poprawny adres e-mail.</p>}
                     </div>
                     <div className="flex justify-between mt-2">
-                      <button onClick={() => goToStep(1)} className="px-4 py-2 bg-gray-200 rounded">← Wstecz</button>
+                      <button onClick={() => goToStep(1)} className="px-4 py-2 bg-gray-200 rounded disabled:opacity-50 disabled:cursor-not-allowed" disabled={submitting}>← Wstecz</button>
                       <button
                         onClick={nextStep}
-                        disabled={!name || !phone || !validEmail || (selectedOption === "delivery" && (!custCoords || !deliveryInfo))}
-                        className="px-4 py-2 bg-yellow-400 rounded font-semibold disabled:opacity-50"
+                        disabled={!name || !phone || !validEmail || (selectedOption === "delivery" && (!custCoords || !deliveryInfo)) || submitting}
+                        className="px-4 py-2 bg-yellow-400 rounded font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         Dalej →
                       </button>
@@ -1058,7 +1080,8 @@ export default function CheckoutModal() {
                             <div className="flex flex-wrap gap-2">
                               {(["Gotówka", "Terminal", "Online"] as const).map((m) => (
                                 <button key={m} onClick={() => { setPaymentMethod(m); setShowConfirmation(false); }}
-                                  className={clsx("px-3 py-2 rounded font-semibold text-sm transition", paymentMethod === m ? "bg-green-600 text-white" : "bg-gray-200 text-black hover:bg-gray-300")}>
+                                  disabled={submitting}
+                                  className={clsx("px-3 py-2 rounded font-semibold text-sm transition disabled:opacity-60 disabled:cursor-not-allowed", paymentMethod === m ? "bg-green-600 text-white" : "bg-gray-200 text-black hover:bg-gray-300")}>
                                   {m}
                                 </button>
                               ))}
@@ -1085,18 +1108,26 @@ export default function CheckoutModal() {
                                 <button
                                   onClick={() => setShowConfirmation(true)}
                                   disabled={confirmDisabled}
-                                  className="w-full mt-3 py-2 bg-yellow-400 text-black rounded font-semibold disabled:opacity-50 touch-manipulation"
+                                  aria-busy={submitting}
+                                  className="w-full mt-3 py-2 bg-yellow-400 text-black rounded font-semibold disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation inline-flex items-center justify-center gap-2"
                                 >
-                                  Potwierdź płatność
+                                  {submitting ? <Spinner /> : null}
+                                  {submitting ? "Przetwarzanie…" : "Potwierdź płatność"}
                                 </button>
                               )
                             ) : (
                               !shouldHideOrderActions && (
                                 <div className="flex flex-col gap-2 mt-2">
-                                  <button onClick={paymentMethod === "Online" ? handleOnlinePayment : handleSubmitOrder} className="w-full py-2 bg-black text-white rounded font-semibold hover:opacity-95 touch-manipulation" disabled={confirmDisabled}>
-                                    ✅ Zamawiam i płacę ({paymentMethod})
+                                  <button
+                                    onClick={paymentMethod === "Online" ? handleOnlinePayment : handleSubmitOrder}
+                                    disabled={confirmDisabled}
+                                    aria-busy={submitting}
+                                    className="w-full py-2 bg-black text-white rounded font-semibold hover:opacity-95 touch-manipulation inline-flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                                  >
+                                    {submitting ? <Spinner /> : "✅"}
+                                    {submitting ? "Składanie zamówienia…" : `Zamawiam i płacę (${paymentMethod})`}
                                   </button>
-                                  <button onClick={() => setShowConfirmation(false)} className="text-xs underline">Zmień metodę</button>
+                                  <button onClick={() => setShowConfirmation(false)} className="text-xs underline disabled:opacity-50" disabled={submitting}>Zmień metodę</button>
                                 </div>
                               )
                             )}
@@ -1107,7 +1138,7 @@ export default function CheckoutModal() {
 
                     {/* Nawigacja kroku 3 */}
                     <div className="mt-2 flex justify-between">
-                      <button onClick={() => goToStep(2)} className="px-4 py-2 bg-gray-200 rounded">← Wstecz</button>
+                      <button onClick={() => goToStep(2)} className="px-4 py-2 bg-gray-200 rounded disabled:opacity-50 disabled:cursor-not-allowed" disabled={submitting}>← Wstecz</button>
                       <button
                         onClick={() => {
                           if (!paymentMethod) setErrorMessage("Wybierz metodę płatności.");
@@ -1115,7 +1146,8 @@ export default function CheckoutModal() {
                           document.getElementById("paymentBox")?.scrollIntoView({ behavior: "smooth", block: "start" });
                           setShowConfirmation(true);
                         }}
-                        className="px-4 py-2 bg-yellow-400 rounded font-semibold"
+                        className="px-4 py-2 bg-yellow-400 rounded font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                        disabled={submitting}
                       >
                         Dalej →
                       </button>
@@ -1154,7 +1186,8 @@ export default function CheckoutModal() {
                   <div className="flex flex-wrap gap-2">
                     {(["Gotówka", "Terminal", "Online"] as const).map((m) => (
                       <button key={m} onClick={() => { setPaymentMethod(m); setShowConfirmation(false); }}
-                        className={clsx("px-3 py-2 rounded font-semibold text-sm transition", paymentMethod === m ? "bg-green-600 text-white" : "bg-gray-200 text-black hover:bg-gray-300")}>
+                        disabled={submitting}
+                        className={clsx("px-3 py-2 rounded font-semibold text-sm transition disabled:opacity-60 disabled:cursor-not-allowed", paymentMethod === m ? "bg-green-600 text-white" : "bg-gray-200 text-black hover:bg-gray-300")}>
                         {m}
                       </button>
                     ))}
@@ -1181,18 +1214,26 @@ export default function CheckoutModal() {
                       <button
                         onClick={() => setShowConfirmation(true)}
                         disabled={confirmDisabled}
-                        className="w-full mt-3 py-2 bg-yellow-400 text-black rounded font-semibold disabled:opacity-50"
+                        aria-busy={submitting}
+                        className="w-full mt-3 py-2 bg-yellow-400 text-black rounded font-semibold disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2"
                       >
-                        Potwierdź płatność
+                        {submitting ? <Spinner /> : null}
+                        {submitting ? "Przetwarzanie…" : "Potwierdź płatność"}
                       </button>
                     )
                   ) : (
                     !shouldHideOrderActions && (
                       <div className="flex flex-col gap-2 mt-2">
-                        <button onClick={paymentMethod === "Online" ? handleOnlinePayment : handleSubmitOrder} className="w-full py-2 bg-black text-white rounded font-semibold hover:opacity-95" disabled={confirmDisabled}>
-                          ✅ Zamawiam i płacę ({paymentMethod})
+                        <button
+                          onClick={paymentMethod === "Online" ? handleOnlinePayment : handleSubmitOrder}
+                          disabled={confirmDisabled}
+                          aria-busy={submitting}
+                          className="w-full py-2 bg-black text-white rounded font-semibold hover:opacity-95 inline-flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                        >
+                          {submitting ? <Spinner /> : "✅"}
+                          {submitting ? "Składanie zamówienia…" : `Zamawiam i płacę (${paymentMethod})`}
                         </button>
-                        <button onClick={() => setShowConfirmation(false)} className="text-xs underline">Zmień</button>
+                        <button onClick={() => setShowConfirmation(false)} className="text-xs underline disabled:opacity-50" disabled={submitting}>Zmień</button>
                       </div>
                     )
                   )}
@@ -1202,6 +1243,16 @@ export default function CheckoutModal() {
           )}
         </div>
       </div>
+
+      {/* Overlay blokujący interakcje podczas submitu */}
+      {submitting && (
+        <div className="fixed inset-0 z-[60] grid place-items-center bg-black/40">
+          <div className="rounded-xl bg-white px-4 py-3 shadow inline-flex items-center gap-3">
+            <Spinner />
+            <div className="text-sm font-medium">Przetwarzanie zamówienia…</div>
+          </div>
+        </div>
+      )}
     </>
   );
 
