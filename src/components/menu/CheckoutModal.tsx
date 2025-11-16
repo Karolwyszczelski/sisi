@@ -96,13 +96,8 @@ const buildClientDeliveryTime = (
 ): string | null => {
   if (selectedOption !== "delivery") return null;
   if (deliveryTimeOption === "asap") return "asap";
-  const [hours, minutes] = scheduledTime.split(":").map(Number);
-  const tz = "Europe/Warsaw";
-  const nowZoned = toZonedTime(new Date(), tz);
-  const dt = new Date(nowZoned);
-  dt.setHours(hours, minutes, 0, 0);
-  if (dt.getTime() < nowZoned.getTime()) dt.setDate(dt.getDate() + 1);
-  return dt.toISOString();
+  // Zwracaj w stabilnym, krótkim formacie zgodnym z kolumną w DB
+  return scheduledTime; // "HH:mm"
 };
 
 const safeFetch = async (url: string, opts: RequestInit) => {
