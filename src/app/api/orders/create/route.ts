@@ -62,13 +62,15 @@ const money = (v: any): number => {
 const optLabel = (v?: string) =>
   v === "delivery" ? "DOSTAWA" : v === "takeaway" ? "NA WYNOS" : "NA MIEJSCU";
 
-const normalizePhone = (phone?: string | null) => {
+/* twarda normalizacja do E.164 (+48500111222) */
+const normalizePhone = (phone?: string | null): string | null => {
   if (!phone) return null;
-  const digits = String(phone).replace(/\D/g, "");
-  if (digits.length === 9) return "+48" + digits;
-  if (digits.startsWith("00")) return "+" + digits.slice(2);
-  if (!String(phone).startsWith("+") && digits.length > 9) return "+" + digits;
-  return String(phone);
+  let digits = String(phone).replace(/\D/g, "");
+  if (digits.startsWith("00")) digits = digits.slice(2);
+  if (digits.length === 9) digits = "48" + digits; // lokalne PL
+  if (digits.length < 9 || digits.length > 15) return null;
+  const e164 = "+" + digits;
+  return /^\+[1-9]\d{8,14}$/.test(e164) ? e164 : null;
 };
 
 const toArray = (val: any): any[] =>
@@ -236,7 +238,7 @@ const haversineKm = (a:{lat:number;lng:number}, b:{lat:number;lng:number}) => {
   return 2 * R * Math.asin(Math.sqrt(s1));
 };
 
-/* ============== Normalizacja BODY ============== */
+/* ----- Promo picker + czas klienta ----- */
 function pickPromo(v: any): string | null {
   const src = v || {};
   const keys = [
@@ -249,6 +251,29 @@ function pickPromo(v: any): string | null {
   }
   return null;
 }
+
+function normalizeClientTime(v: any): string | null {
+  if (!v) return null;
+  if (typeof v === "string" && v.toLowerCase() === "asap") return "asap";
+  if (typeof v === "string") {
+    const m = v.match(/^(\d{1,2}):(\d{2})$/);
+    const tz = "Europe/Warsaw";
+    if (m) {
+      const hh = Math.max(0, Math.min(23, parseInt(m[1], 10)));
+      const mm = Math.max(0, Math.min(59, parseInt(m[2], 10)));
+      const now = toZonedTime(new Date(), tz);
+      const dt = new Date(now);
+      dt.setHours(hh, mm, 0, 0);
+      if (dt.getTime() < now.getTime()) dt.setDate(dt.getDate() + 1);
+      return dt.toISOString();
+    }
+    const d = new Date(v);
+    if (!isNaN(d.getTime())) return d.toISOString();
+  }
+  return null;
+}
+
+/* ============== Normalizacja BODY ============== */
 function normalizeBody(raw: any, req: Request) {
   const base = raw?.orderPayload ? raw.orderPayload : raw;
   const rawItems =
@@ -302,7 +327,7 @@ function normalizeBody(raw: any, req: Request) {
 
   return {
     name: base?.name ?? base?.customer_name ?? null,
-    phone: normalizePhone(base?.phone ?? null),
+    phone: base?.phone ?? null, // surowy, walidujemy niżej twardo
     contact_email: base?.contact_email ?? base?.email ?? null,
     address: base?.address ?? null,
     street: base?.street ?? null,
@@ -320,7 +345,7 @@ function normalizeBody(raw: any, req: Request) {
     delivery_lat: num(base?.delivery_lat ?? base?.lat, null),
     delivery_lng: num(base?.delivery_lng ?? base?.lng, null),
     status: sanitizeOrderStatus(base?.status),
-    client_delivery_time: base?.client_delivery_time ?? base?.delivery_time ?? null,
+    client_delivery_time: normalizeClientTime(base?.client_delivery_time ?? base?.delivery_time ?? null),
     deliveryTime: null,
     eta: base?.eta ?? null,
     user: base?.user ?? base?.user_id ?? null,
@@ -371,71 +396,71 @@ export async function POST(req: Request) {
     }
 
     // --- PROMO: helpery bez joinów i bez RPC ---
-type DiscountCode = {
-  id: string;
-  code: string;
-  type: "amount" | "percent";
-  value: number;
-  active: boolean;
-  starts_at: string | null;
-  expires_at: string | null;
-  min_order: number | null;
-  max_uses: number | null;
-};
+    type DiscountCode = {
+      id: string;
+      code: string;
+      type: "amount" | "percent";
+      value: number;
+      active: boolean;
+      starts_at: string | null;
+      expires_at: string | null;
+      min_order: number | null;
+      max_uses: number | null;
+    };
 
-async function getDiscountByCode(codeInput: string): Promise<DiscountCode> {
-  const { data: dc, error } = await supabaseAdmin
-    .from("discount_codes")
-    .select("id, code, type, value, active, starts_at, expires_at, min_order, max_uses")
-    .ilike("code", codeInput) // CITEXT-safe
-    .maybeSingle();
+    async function getDiscountByCode(codeInput: string): Promise<DiscountCode> {
+      const { data: dc, error } = await supabaseAdmin
+        .from("discount_codes")
+        .select("id, code, type, value, active, starts_at, expires_at, min_order, max_uses")
+        .ilike("code", codeInput)
+        .maybeSingle();
 
-  if (error || !dc) throw new Error("invalid_code");
+      if (error || !dc) throw new Error("invalid_code");
 
-  const now = new Date().toISOString();
-  if (!dc.active) throw new Error("inactive");
-  if (dc.starts_at && dc.starts_at > now) throw new Error("not_started");
-  if (dc.expires_at && dc.expires_at < now) throw new Error("expired");
+      const now = new Date().toISOString();
+      if (!dc.active) throw new Error("inactive");
+      if (dc.starts_at && dc.starts_at > now) throw new Error("not_started");
+      if (dc.expires_at && dc.expires_at < now) throw new Error("expired");
 
-  return {
-    id: String(dc.id),
-    code: String(dc.code),
-    type: (dc.type === "amount" ? "amount" : "percent") as "amount" | "percent",
-    value: Number(dc.value || 0),
-    active: !!dc.active,
-    starts_at: dc.starts_at ? String(dc.starts_at) : null,
-    expires_at: dc.expires_at ? String(dc.expires_at) : null,
-    min_order: dc.min_order == null ? null : Number(dc.min_order),
-    max_uses: dc.max_uses == null ? null : Number(dc.max_uses),
-  };
-}
+      return {
+        id: String(dc.id),
+        code: String(dc.code),
+        type: (dc.type === "amount" ? "amount" : "percent") as "amount" | "percent",
+        value: Number(dc.value || 0),
+        active: !!dc.active,
+        starts_at: dc.starts_at ? String(dc.starts_at) : null,
+        expires_at: dc.expires_at ? String(dc.expires_at) : null,
+        min_order: dc.min_order == null ? null : Number(dc.min_order),
+        max_uses: dc.max_uses == null ? null : Number(dc.max_uses),
+      };
+    }
 
-async function getUsageCounts(codeId: string, userId: string | null, emailLower: string | null) {
-  const [allQ, userQ, emailLowerQ, emailPlainQ] = await Promise.all([
-    supabaseAdmin.from("discount_redemptions").select("*", { head: true, count: "exact" }).eq("code_id", codeId),
-    userId
-      ? supabaseAdmin.from("discount_redemptions").select("*", { head: true, count: "exact" }).eq("code_id", codeId).eq("user_id", userId)
-      : Promise.resolve({ count: 0 }),
-    emailLower
-      ? supabaseAdmin.from("discount_redemptions").select("*", { head: true, count: "exact" }).eq("code_id", codeId).eq("email_lower", emailLower)
-      : Promise.resolve({ count: 0 }),
-    emailLower
-      ? supabaseAdmin.from("discount_redemptions").select("*", { head: true, count: "exact" }).eq("code_id", codeId).eq("email", emailLower)
-      : Promise.resolve({ count: 0 }),
-  ]);
+    async function getUsageCounts(codeId: string, userId: string | null, emailLower: string | null) {
+      const [allQ, userQ, emailLowerQ, emailPlainQ] = await Promise.all([
+        supabaseAdmin.from("discount_redemptions").select("*", { head: true, count: "exact" }).eq("code_id", codeId),
+        userId
+          ? supabaseAdmin.from("discount_redemptions").select("*", { head: true, count: "exact" }).eq("code_id", codeId).eq("user_id", userId)
+          : Promise.resolve({ count: 0 }),
+        emailLower
+          ? supabaseAdmin.from("discount_redemptions").select("*", { head: true, count: "exact" }).eq("code_id", codeId).eq("email_lower", emailLower)
+          : Promise.resolve({ count: 0 }),
+        emailLower
+          ? supabaseAdmin.from("discount_redemptions").select("*", { head: true, count: "exact" }).eq("code_id", codeId).eq("email", emailLower)
+          : Promise.resolve({ count: 0 }),
+      ]);
 
-  return {
-    all: Number(allQ.count || 0),
-    byUser: Number((userQ as any).count || 0),
-    byEmail: Number((emailLowerQ as any).count || 0) + Number((emailPlainQ as any).count || 0),
-  };
-}
+      return {
+        all: Number(allQ.count || 0),
+        byUser: Number((userQ as any).count || 0),
+        byEmail: Number((emailLowerQ as any).count || 0) + Number((emailPlainQ as any).count || 0),
+      };
+    }
 
-function computeDiscount(base: number, dc: DiscountCode): number {
-  const raw = dc.type === "percent" ? base * (dc.value / 100) : dc.value;
-  const clamped = Math.min(Math.max(0, raw), base);
-  return Math.round(clamped * 100) / 100;
-}
+    function computeDiscount(base: number, dc: DiscountCode): number {
+      const raw = dc.type === "percent" ? base * (dc.value / 100) : dc.value;
+      const clamped = Math.min(Math.max(0, raw), base);
+      return Math.round(clamped * 100) / 100;
+    }
 
     // 1) Godziny (Europe/Warsaw)
     const nowPl = toZonedTime(new Date(), "Europe/Warsaw");
@@ -494,7 +519,16 @@ function computeDiscount(base: number, dc: DiscountCode): number {
 
     const n = normalizeBody(raw, req);
 
-    // wymagamy e-maila i pozycji
+    // wymagamy telefonu (E.164), e-maila oraz pozycji
+    const phoneE164 = normalizePhone(n.phone);
+    if (!phoneE164) {
+      return NextResponse.json(
+        { error: "Podaj poprawny numer telefonu (np. +48500111222)." },
+        { status: 400 }
+      );
+    }
+    n.phone = phoneE164;
+
     if (!n.contact_email) {
       return NextResponse.json(
         { error: "Wymagany jest adres e-mail do potwierdzenia." },
@@ -509,7 +543,7 @@ function computeDiscount(base: number, dc: DiscountCode): number {
     const baseFromItems = calcSubtotalFromItems(n.selected_option, n.itemsArray);
     const discount = 0;
 
-    let deliveryMinRequired = 0; // << DODAJ TO
+    let deliveryMinRequired = 0;
 
     // 2.2) Dostawa
     if (n.selected_option === "delivery") {
@@ -544,9 +578,9 @@ function computeDiscount(base: number, dc: DiscountCode): number {
 
       deliveryMinRequired = Number(zone.min_order_value || 0);
 
-      if (baseFromItems < Number(zone.min_order_value || 0)) {
+      if (baseFromItems < deliveryMinRequired) {
         return NextResponse.json(
-          { error: `Minimalna wartość zamówienia dla dostawy to ${Number(zone.min_order_value).toFixed(2)} zł.` },
+          { error: `Minimalna wartość zamówienia dla dostawy to ${deliveryMinRequired.toFixed(2)} zł.` },
           { status: 400 }
         );
       }
@@ -586,173 +620,211 @@ function computeDiscount(base: number, dc: DiscountCode): number {
       return buildItemFromDbAndOptions(db, it);
     });
 
-   // >>> USTAW MINIMA (przed insertem do orders)
-const baseBeforeDiscount = baseFromItems;
-// <<<
+    // >>> USTAW MINIMA (przed insertem do orders)
+    const baseBeforeDiscount = baseFromItems;
+    // <<<
 
-// 5) Zapis do orders
-const itemsForOrdersColumn = JSON.stringify(normalizedItems);
-const { data: orderRow, error: orderErr } = await supabaseAdmin
-  .from("orders")
-  .insert({
-    name: n.name,
-    phone: n.phone,
-    contact_email: n.contact_email,
-    address: n.address,
-    street: n.street,
-    postal_code: n.postal_code,
-    city: n.city,
-    flat_number: n.flat_number,
-    selected_option: n.selected_option,
-    payment_method: n.payment_method,
-    payment_status: n.payment_status,
-    items: itemsForOrdersColumn,
-    total_price: n.total_price,
-    delivery_cost: n.delivery_cost,
-    base_before_discount: baseBeforeDiscount,     // NOWE
-    delivery_min_required: deliveryMinRequired,   // NOWE
-    status: n.status,
-    client_delivery_time: n.client_delivery_time,
-    deliveryTime: n.deliveryTime,
-    eta: n.eta,
-    user: n.user,
-    promo_code: null,   // widoczny od razu; kwotę ustawimy niżej
-    discount_amount: 0,         // policzymy niżej
-    legal_accept: n.legal_accept,
-  })
-  .select("id, selected_option, total_price, name")
-  .single();
-
-if (orderErr || !orderRow) {
-  console.error("[orders.create] insert orders error:", orderErr?.message);
-  return NextResponse.json({ error: "Nie udało się zapisać zamówienia." }, { status: 500 });
-}
-
-const newOrderId = orderRow.id;
-
-// [NOWE] Zużycie kodu bez RPC i z amount
-let currentTotal = n.total_price;
-
-if (n.promo_code) {
-  try {
-    const dc = await getDiscountByCode(n.promo_code); // rzuci jeśli brak/nieaktywny
-
-    const baseTotal = Math.max(
-      0,
-      Math.round((baseFromItems + (n.delivery_cost ?? 0)) * 100) / 100
-    );
-
-    if (dc.min_order != null && baseTotal < Number(dc.min_order)) {
-      throw new Error(`min_order:${Number(dc.min_order).toFixed(2)}`);
-    }
-
-    const emailLower = (n.contact_email || "").toLowerCase() || null;
-    const { all, byUser, byEmail } = await getUsageCounts(dc.id, n.user ?? null, emailLower);
-
-    if (dc.max_uses != null && all >= Number(dc.max_uses)) throw new Error("limit_exhausted");
-    if (byUser > 0) throw new Error("used_by_user");
-    if (emailLower && byEmail > 0) throw new Error("used_by_email");
-
-    const applied = computeDiscount(baseTotal, dc);
-    const newTotal = Math.max(0, Math.round((baseTotal - applied) * 100) / 100);
-
-    // zapis redempcji z amount (NOT NULL)
-    const { error: redErr } = await supabaseAdmin.from("discount_redemptions").insert({
-      code_id: dc.id,
-      code: dc.code,              // kopia tekstowa do raportów
-      order_id: newOrderId,
-      user_id: n.user ?? null,
-      email_lower: emailLower,
-      amount: applied,            // WAŻNE
-    });
-    if (redErr) throw redErr;
-
-    // aktualizacja zamówienia po rabacie
-    const { error: updErr } = await supabaseAdmin
+    // 5) Zapis do orders
+    const itemsForOrdersColumn = JSON.stringify(normalizedItems);
+    const { data: orderRow, error: orderErr } = await supabaseAdmin
       .from("orders")
-      .update({ promo_code: dc.code, discount_amount: applied, total_price: newTotal })
-      .eq("id", newOrderId);
+      .insert({
+        name: n.name,
+        phone: n.phone,
+        contact_email: n.contact_email,
+        address: n.address,
+        street: n.street,
+        postal_code: n.postal_code,
+        city: n.city,
+        flat_number: n.flat_number,
+        selected_option: n.selected_option,
+        payment_method: n.payment_method,
+        payment_status: n.payment_status,
+        items: itemsForOrdersColumn,
+        total_price: n.total_price,
+        delivery_cost: n.delivery_cost,
+        base_before_discount: baseBeforeDiscount,     // NOWE
+        delivery_min_required: deliveryMinRequired,   // NOWE
+        status: n.status,
+        client_delivery_time: n.client_delivery_time,
+        deliveryTime: n.deliveryTime,
+        eta: n.eta,
+        user: n.user,
+        promo_code: null,     // policzymy niżej
+        discount_amount: 0,   // policzymy niżej
+        legal_accept: n.legal_accept,
+      })
+      .select("id, selected_option, total_price, name")
+      .single();
 
-    if (updErr) {
-      // rollback redempcji, gdyby update nie przeszedł
-      await supabaseAdmin.from("discount_redemptions").delete().eq("order_id", newOrderId);
-      throw updErr;
+    if (orderErr || !orderRow) {
+      console.error("[orders.create] insert orders error:", orderErr?.message);
+      return NextResponse.json({ error: "Nie udało się zapisać zamówienia." }, { status: 500 });
     }
 
-    currentTotal = newTotal;
-  } catch (e: any) {
-    console.error("[orders.create] promo apply error:", e?.message || e);
-    // porządkowanie: usuń zamówienie-sierotę
-    await supabaseAdmin.from("orders").delete().eq("id", newOrderId);
-    return NextResponse.json(
-      { error: "Kod promocyjny jest nieważny lub został już wykorzystany." },
-      { status: 400 }
-    );
-  }
-}
+    const newOrderId = orderRow.id;
 
-// 6) order_items
+    // Zużycie kodu (z amount)
+    let currentTotal = n.total_price;
+
+    if (n.promo_code) {
+      try {
+        const dc = await getDiscountByCode(n.promo_code);
+
+        const baseTotal = Math.max(
+          0,
+          Math.round((baseFromItems + (n.delivery_cost ?? 0)) * 100) / 100
+        );
+
+        if (dc.min_order != null && baseTotal < Number(dc.min_order)) {
+          throw new Error(`min_order:${Number(dc.min_order).toFixed(2)}`);
+        }
+
+        const emailLower = (n.contact_email || "").toLowerCase() || null;
+        const { all, byUser, byEmail } = await getUsageCounts(dc.id, n.user ?? null, emailLower);
+
+        if (dc.max_uses != null && all >= Number(dc.max_uses)) throw new Error("limit_exhausted");
+        if (byUser > 0) throw new Error("used_by_user");
+        if (emailLower && byEmail > 0) throw new Error("used_by_email");
+
+        const applied = computeDiscount(baseTotal, dc);
+        const newTotal = Math.max(0, Math.round((baseTotal - applied) * 100) / 100);
+
+        // zapis redempcji
+        const { error: redErr } = await supabaseAdmin.from("discount_redemptions").insert({
+          code_id: dc.id,
+          code: dc.code,
+          order_id: newOrderId,
+          user_id: n.user ?? null,
+          email_lower: emailLower,
+          amount: applied,
+        });
+        if (redErr) throw redErr;
+
+        // aktualizacja zamówienia
+        const { error: updErr } = await supabaseAdmin
+          .from("orders")
+          .update({ promo_code: dc.code, discount_amount: applied, total_price: newTotal })
+          .eq("id", newOrderId);
+
+        if (updErr) {
+          await supabaseAdmin.from("discount_redemptions").delete().eq("order_id", newOrderId);
+          throw updErr;
+        }
+
+        currentTotal = newTotal;
+      } catch (e: any) {
+        console.error("[orders.create] promo apply error:", e?.message || e);
+        await supabaseAdmin.from("orders").delete().eq("id", newOrderId);
+        return NextResponse.json(
+          { error: "Kod promocyjny jest nieważny lub został już wykorzystany." },
+          { status: 400 }
+        );
+      }
+    }
+
+    // 6) order_items
 if (Array.isArray(n.itemsArray) && n.itemsArray.length > 0) {
   try {
+    // pomocniczo: lookup po nazwie -> id (tylko dla pewnych dopasowań)
+    const nameToId = new Map<string, string>();
+    for (const [id, row] of productsMap.entries()) {
+      const nm =
+        (row?.name || row?.title || row?.label || "").toString().trim().toLowerCase();
+      if (nm) nameToId.set(nm, String(id));
+    }
+
     const shaped = n.itemsArray.map((rawIt: Any, i: number) => {
-      const key = String(rawIt.product_id ?? rawIt.productId ?? rawIt.id ?? "");
-      const db = productsMap.get(key);
-      const ni = buildItemFromDbAndOptions(db, rawIt);
+      const rawKey = rawIt.product_id ?? rawIt.productId ?? rawIt.id ?? null;
+      let pid = rawKey != null ? String(rawKey) : "";
+
+      // fallback po nazwie (gdy brak pid, a nazwa pasuje do produktu z bazy)
+      if (!pid) {
+        const nm = (rawIt.name || "").toString().trim().toLowerCase();
+        if (nm && nameToId.has(nm)) pid = nameToId.get(nm)!;
+      }
+
+      // walidacja pid: nie przyjmujemy pustych/„null”/„undefined”
+      const validPid =
+        !!pid && pid !== "null" && pid !== "undefined";
+
+      // zbuduj linię
+      const db = validPid ? productsMap.get(pid) : undefined;
+      const ni = buildItemFromDbAndOptions(db as any, rawIt);
+
       return {
         order_id: newOrderId,
-        product_id: key || null,
+        product_id: validPid ? pid : null, // odfiltrujemy poniżej
         name: ni.name,
         quantity: ni.quantity,
         unit_price: ni.price,
         line_no: i + 1,
       };
     });
-    const { error: oiErr } = await supabaseAdmin.from("order_items").insert(shaped);
-    if (oiErr) console.warn("[orders.create] order_items insert skipped:", oiErr.message);
+
+    // odrzuć pozycje bez poprawnego product_id (DB ma NOT NULL)
+    const filtered = shaped.filter(r => r.product_id !== null);
+
+    if (filtered.length) {
+      const { error: oiErr } = await supabaseAdmin
+        .from("order_items")
+        .insert(filtered);
+      if (oiErr) {
+        console.warn("[orders.create] order_items insert error:", oiErr.message);
+      }
+    } else {
+      console.warn("[orders.create] order_items: all dropped due to missing product_id");
+    }
+
+    // diagnostyka: pokaż które pozycje wypadły (razem z nazwą)
+    const dropped = shaped.filter(r => r.product_id === null).map(r => r.name);
+    if (dropped.length) {
+      console.warn("[orders.create] dropped items (no product_id):", dropped);
+    }
   } catch (e: any) {
     console.warn("[orders.create] order_items insert not executed:", e?.message);
   }
 }
 
-// 6.1) e-mail
-try {
-  if (n.contact_email) {
-    const origin = process.env.APP_BASE_URL || new URL(req.url).origin;
-    const url = trackingUrl(origin, String(newOrderId));
-    const total =
-      typeof currentTotal === "number"
-        ? currentTotal.toFixed(2).replace(".", ",")
-        : String(currentTotal ?? "0");
+    // 6.1) e-mail
+    try {
+      if (n.contact_email) {
+        const origin = process.env.APP_BASE_URL || new URL(req.url).origin;
+        const url = trackingUrl(origin, String(newOrderId));
+        const total =
+          typeof currentTotal === "number"
+            ? currentTotal.toFixed(2).replace(".", ",")
+            : String(currentTotal ?? "0");
 
-    const html = `
-      <div style="font-family:Inter,Arial,sans-serif;line-height:1.5;color:#111">
-        <h2 style="margin:0 0 8px">Potwierdzenie zamówienia #${newOrderId}</h2>
-        <p style="margin:0 0 16px">Dziękujemy za zamówienie w SISI.</p>
-        <p style="margin:16px 0">
-          <a href="${url}" style="display:inline-block;padding:12px 18px;background:#111;color:#fff;border-radius:8px;text-decoration:none">
-            Sprawdź status i czas dostawy
-          </a>
-        </p>
-        <p style="margin:8px 0">Kwota: <strong>${total} zł</strong></p>
-        <p style="margin:8px 0">Opcja: <strong>${optLabel(orderRow.selected_option)}</strong></p>
-        <hr style="margin:20px 0;border:none;border-top:1px solid #eee" />
-        <p style="font-size:12px;color:#555;margin:0">
-          Akceptacja: Regulamin v${TERMS_VERSION} (<a href="${TERMS_URL}">link</a>),
-          Polityka prywatności v${PRIVACY_VERSION} (<a href="${PRIVACY_URL}">link</a>)
-        </p>
-      </div>
-    `;
+        const html = `
+          <div style="font-family:Inter,Arial,sans-serif;line-height:1.5;color:#111">
+            <h2 style="margin:0 0 8px">Potwierdzenie zamówienia #${newOrderId}</h2>
+            <p style="margin:0 0 16px">Dziękujemy za zamówienie w SISI.</p>
+            <p style="margin:16px 0">
+              <a href="${url}" style="display:inline-block;padding:12px 18px;background:#111;color:#fff;border-radius:8px;text-decoration:none">
+                Sprawdź status i czas dostawy
+              </a>
+            </p>
+            <p style="margin:8px 0">Kwota: <strong>${total} zł</strong></p>
+            <p style="margin:8px 0">Opcja: <strong>${optLabel(orderRow.selected_option)}</strong></p>
+            <hr style="margin:20px 0;border:none;border-top:1px solid #eee" />
+            <p style="font-size:12px;color:#555;margin:0">
+              Akceptacja: Regulamin v${TERMS_VERSION} (<a href="${TERMS_URL}">link</a>),
+              Polityka prywatności v${PRIVACY_VERSION} (<a href="${PRIVACY_URL}">link</a>)
+            </p>
+          </div>
+        `;
 
-    await sendEmail({ to: n.contact_email, subject: `SISI • Potwierdzenie zamówienia #${newOrderId}`, html });
+        await sendEmail({ to: n.contact_email, subject: `SISI • Potwierdzenie zamówienia #${newOrderId}`, html });
+      }
+    } catch (mailErr) {
+      console.error("[orders.create] email to client error:", mailErr);
+    }
+
+    // 7) OK
+    return NextResponse.json({ orderId: newOrderId }, { status: 201 });
+  } catch (e: any) {
+    console.error("[orders.create] unexpected:", e?.message ?? e);
+    return NextResponse.json({ error: "Wystąpił nieoczekiwany błąd." }, { status: 500 });
   }
-} catch (mailErr) {
-  console.error("[orders.create] email to client error:", mailErr);
 }
-
-// 7) OK
-return NextResponse.json({ orderId: newOrderId }, { status: 201 });
-} catch (e: any) {
-  console.error("[orders.create] unexpected:", e?.message ?? e);
-  return NextResponse.json({ error: "Wystąpił nieoczekiwany błąd." }, { status: 500 });
-}
-} // <-- domknięcie export async function POST
