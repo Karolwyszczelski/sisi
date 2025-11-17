@@ -484,38 +484,55 @@ export async function POST(req: Request) {
     }
 
     // 2.0) Turnstile
-    if (TURNSTILE_SECRET_KEY) {
-      const token =
-        req.headers.get("cf-turnstile-response") ||
-        req.headers.get("CF-Turnstile-Response");
+if (TURNSTILE_SECRET_KEY) {
+  // token z nagłówka (różne warianty) lub z body (fallback)
+  let token =
+    req.headers.get("cf-turnstile-response") ||
+    req.headers.get("CF-Turnstile-Response") ||
+    req.headers.get("x-turnstile-token") ||
+    null;
 
-      if (!token) {
-        return NextResponse.json({ error: "Brak weryfikacji antybot." }, { status: 400 });
+  if (!token) {
+    try {
+      const b: any = raw || (await req.clone().json().catch(() => null));
+      token =
+        b?.turnstileToken ||
+        b?.token ||
+        b?.cf_turnstile_token ||
+        null;
+    } catch {}
+  }
+
+  if (!token) {
+    return NextResponse.json({ error: "Brak weryfikacji antybot." }, { status: 400 });
+  }
+
+  try {
+    const ver = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        secret: TURNSTILE_SECRET_KEY,
+        response: String(token),
+        remoteip: clientIp(req) || "",
+      }).toString(),
+    });
+    const jr = (await ver.json()) as any;
+
+    if (!jr?.success) {
+      const codes: string[] = Array.isArray(jr?.["error-codes"]) ? jr["error-codes"] : [];
+      console.error("[turnstile.verify] fail", codes.length ? codes : jr);
+      // ważne: dla timeout-or-duplicate zwracamy 409, żeby FE mógł zrobić 1x retry z nowym tokenem
+      if (codes.includes("timeout-or-duplicate")) {
+        return NextResponse.json({ error: "duplicate" }, { status: 409 });
       }
-      try {
-        const ver = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
-          method: "POST",
-          headers: { "content-type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({
-            secret: TURNSTILE_SECRET_KEY,
-            response: String(token),
-            remoteip: clientIp(req) || "",
-          }).toString(),
-        });
-        const jr = await ver.json();
-        if (!jr?.success) {
-          const codes = new Set<string>((jr?.["error-codes"] || []) as string[]);
-          console.error("[turnstile.verify] fail", jr?.["error-codes"] || jr);
-          if (codes.has("timeout-or-duplicate")) {
-            return NextResponse.json({ error: "duplicate" }, { status: 409 });
-          }
-          return NextResponse.json({ error: "Nieudana weryfikacja formularza." }, { status: 400 });
-        }
-      } catch (e) {
-        console.error("[turnstile.verify] error", e);
-        return NextResponse.json({ error: "Błąd weryfikacji formularza." }, { status: 400 });
-      }
+      return NextResponse.json({ error: "Nieudana weryfikacja formularza." }, { status: 400 });
     }
+  } catch (e) {
+    console.error("[turnstile.verify] error", e);
+    return NextResponse.json({ error: "Błąd weryfikacji formularza." }, { status: 400 });
+  }
+}
 
     const n = normalizeBody(raw, req);
 

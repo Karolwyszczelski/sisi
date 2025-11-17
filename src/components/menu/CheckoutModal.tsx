@@ -96,8 +96,8 @@ const buildClientDeliveryTime = (
 ): string | null => {
   if (selectedOption !== "delivery") return null;
   if (deliveryTimeOption === "asap") return "asap";
-  // Zwracaj w stabilnym, krótkim formacie zgodnym z kolumną w DB
-  return scheduledTime; // "HH:mm"
+  // krótkie "HH:mm" zgodnie z kolumną
+  return scheduledTime;
 };
 
 const safeFetch = async (url: string, opts: RequestInit) => {
@@ -717,6 +717,38 @@ export default function CheckoutModal() {
     return true;
   };
 
+  // --- POST z Turnstile + 1x retry na 409 (timeout-or-duplicate)
+  const postWithTurnstile = async (url: string, payload: any) => {
+    const attempt = async () => {
+      const tsToken = TURNSTILE_SITE_KEY ? await getFreshTurnstileToken() : "";
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "CF-Turnstile-Response": tsToken,
+          "X-Idempotency-Key": idemKeyRef.current,
+        },
+        body: JSON.stringify(payload),
+        cache: "no-store",
+      });
+
+      if (res.status === 409) return { retry: true as const };
+      const text = await res.text();
+      let data: any; try { data = JSON.parse(text); } catch { data = { raw: text }; }
+      if (!res.ok) throw new Error(data.error || data.message || `HTTP ${res.status}`);
+      return { retry: false as const, data };
+    };
+
+    let out = await attempt();
+    if (!out.retry) return out.data;
+
+    // twardy reset i druga próba z nowym tokenem
+    try { tsIdsRef.current.forEach(({ id }) => window.turnstile?.reset(id)); } catch {}
+    out = await attempt();
+    if (out.retry) throw new Error("Nieudana weryfikacja. Odśwież stronę i spróbuj ponownie.");
+    return out.data;
+  };
+
   const handleSubmitOrder = async () => {
     if (submitting) return;
     setSubmitting(true);
@@ -738,19 +770,7 @@ export default function CheckoutModal() {
       const orderPayload = buildOrderPayload();
       const itemsPayload = buildItemsPayload();
 
-      // świeży token tuż przed POST
-      const tsToken = TURNSTILE_SITE_KEY ? await getFreshTurnstileToken() : "";
-
-      await safeFetch("/api/orders/create", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "CF-Turnstile-Response": tsToken,
-          "X-Idempotency-Key": idemKeyRef.current,
-        },
-        body: JSON.stringify({ orderPayload, itemsPayload }),
-        cache: "no-store",
-      });
+      await postWithTurnstile("/api/orders/create", { orderPayload, itemsPayload });
 
       try { tsIdsRef.current.forEach(({ id }) => window.turnstile?.reset(id)); } catch {}
       clearCart();
@@ -784,18 +804,8 @@ export default function CheckoutModal() {
 
       const orderPayload = buildOrderPayload();
       const itemsPayload = buildItemsPayload();
-      const tsToken = TURNSTILE_SITE_KEY ? await getFreshTurnstileToken() : "";
 
-      const data = await safeFetch("/api/orders/create", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "CF-Turnstile-Response": tsToken,
-          "X-Idempotency-Key": idemKeyRef.current,
-        },
-        body: JSON.stringify({ orderPayload, itemsPayload }),
-        cache: "no-store",
-      });
+      const data = await postWithTurnstile("/api/orders/create", { orderPayload, itemsPayload });
 
       try { tsIdsRef.current.forEach(({ id }) => window.turnstile?.reset(id)); } catch {}
 
