@@ -112,14 +112,22 @@ const safeFetch = async (url: string, opts: RequestInit) => {
   return data;
 };
 
-/* inferencja mięsa na podstawie metadanych z Supabase */
+/* tylko burgery mają dodatki */
+const isBurger = (meta?: Product, name?: string) => {
+  const n = (name || meta?.name || "").toLowerCase();
+  const cat = (meta?.category || "").toLowerCase();
+  const sub = (meta?.subcategory || "").toLowerCase();
+  return cat === "burger" || sub === "burger" || n.includes("burger");
+};
+
+/* inferencja mięsa – działa praktycznie tylko dla burgerów */
 const inferDefaultMeat = (meta?: Product, name?: string): "wołowina" | "kurczak" | null => {
   const n = (name || meta?.name || "").toLowerCase();
   const cat = (meta?.category || "").toLowerCase();
   const sub = (meta?.subcategory || "").toLowerCase();
 
   if (sub.includes("vege") || n.includes("vege")) return null;
-  if (sub.includes("kurczak") || n.includes("chicken") || n.includes("kurczak")) return "kurczak";
+  if (sub.includes("kurczak") || n.includes("chicken")) return "kurczak";
   if (cat === "burger" || n.includes("burger")) return "wołowina";
   return null;
 };
@@ -145,13 +153,16 @@ const ProductItem: React.FC<{
   const { changeMeatType, addExtraMeat, removeExtraMeat, addAddon, removeAddon, swapIngredient, removeItem, removeWholeItem } =
     helpers;
 
+  const burger = isBurger(meta, prod.name);
+
   const priceNum = toPrice(prod.price);
-  const addonsCost = (prod.addons ?? []).reduce((sum: number, addon: string) => sum + (SAUCES.includes(addon) ? 3 : 4), 0);
-  const extraMeatCost = (prod.extraMeatCount || 0) * 10;
+  const addonsCostRaw = (prod.addons ?? []).reduce((sum: number, addon: string) => sum + (SAUCES.includes(addon) ? 3 : 4), 0);
+  const addonsCost = burger ? addonsCostRaw : 0; // tylko burgerom doliczamy dodatki
+  const extraMeatCost = burger ? (prod.extraMeatCount || 0) * 10 : 0;
   const lineTotal = (priceNum + addonsCost + extraMeatCost) * (prod.quantity || 1);
 
   const selectedMeat = (prod.meatType as string | undefined) ?? defaultMeat ?? null;
-  const supportsMeat = selectedMeat !== null;
+  const supportsMeat = burger && selectedMeat !== null;
 
   return (
     <div className="border p-3 rounded bg-gray-50 relative">
@@ -181,22 +192,28 @@ const ProductItem: React.FC<{
           </>
         )}
 
-        <div className="font-semibold mt-2">Dodatki:</div>
-        <div className="flex flex-wrap gap-2">
-          {AVAILABLE_ADDONS.map((add) => (
-            <button
-              key={add}
-              onClick={() => (prod.addons?.includes(add) ? removeAddon(prod.name, add) : addAddon(prod.name, add))}
-              className={clsx(
-                "border text-xs px-2 py-1 rounded",
-                prod.addons?.includes(add) ? "bg-gray-800 text-white border-gray-900" : "bg-white text-black hover:bg-gray-50"
-              )}
-            >
-              {prod.addons?.includes(add) ? `✓ ${add}` : `+ ${add}`}
-            </button>
-          ))}
-        </div>
+        {/* DODATKI – tylko dla burgerów */}
+        {burger && (
+          <>
+            <div className="font-semibold mt-2">Dodatki:</div>
+            <div className="flex flex-wrap gap-2">
+              {AVAILABLE_ADDONS.map((add) => (
+                <button
+                  key={add}
+                  onClick={() => (prod.addons?.includes(add) ? removeAddon(prod.name, add) : addAddon(prod.name, add))}
+                  className={clsx(
+                    "border text-xs px-2 py-1 rounded",
+                    prod.addons?.includes(add) ? "bg-gray-800 text-white border-gray-900" : "bg-white text-black hover:bg-gray-50"
+                  )}
+                >
+                  {prod.addons?.includes(add) ? `✓ ${add}` : `+ ${add}`}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
 
+        {/* Ekstra mięso – też tylko dla burgerów */}
         {supportsMeat && (
           <>
             <div className="font-semibold mt-2">Dodatkowe mięso:</div>
@@ -513,15 +530,21 @@ export default function CheckoutModal() {
     if (TURNSTILE_SITE_KEY && turnstileError) setShowConfirmation(false);
   }, [turnstileError]);
 
+  /* najpierw szybki lookup metadanych produktu po nazwie */
+  const findMetaByName = (name: string) => products.find((p) => p.name === name);
+
   const baseTotal = useMemo<number>(() => {
     return items.reduce((acc: number, it: any) => {
       const qty = it.quantity || 1;
       const priceNum = toPrice(it.price);
-      const addonsCost = (it.addons ?? []).reduce((sum: number, addon: string) => sum + (SAUCES.includes(addon) ? 3 : 4), 0);
-      const extraMeatCost = (it.extraMeatCount || 0) * 10;
+      const meta = findMetaByName(it.name);
+      const burger = isBurger(meta, it.name);
+      const addonsCostRaw = (it.addons ?? []).reduce((sum: number, addon: string) => sum + (SAUCES.includes(addon) ? 3 : 4), 0);
+      const addonsCost = burger ? addonsCostRaw : 0;
+      const extraMeatCost = burger ? (it.extraMeatCount || 0) * 10 : 0;
       return acc + (priceNum + addonsCost + extraMeatCost) * qty;
     }, 0);
-  }, [items]);
+  }, [items, products]);
 
   const packagingCost = selectedOption === "takeaway" || selectedOption === "delivery" ? 2 : 0;
   const subtotal = baseTotal + packagingCost;
@@ -602,9 +625,6 @@ export default function CheckoutModal() {
     removeWholeItem,
   };
 
-  // meta produktów po nazwie
-  const findMetaByName = (name: string) => products.find((p) => p.name === name);
-
   const buildOrderPayload = () => {
     const client_delivery_time = buildClientDeliveryTime(selectedOption, deliveryTimeOption, scheduledTime);
     const payload: any = {
@@ -641,6 +661,7 @@ export default function CheckoutModal() {
     items.map((item: any, index: number) => {
       const meta = findMetaByName(item.name);
       const inferred = inferDefaultMeat(meta, item.name);
+      const burger = isBurger(meta, item.name);
       const product = meta;
       return {
         product_id: product?.id,
@@ -648,9 +669,9 @@ export default function CheckoutModal() {
         quantity: item.quantity || 1,
         unit_price: toPrice(item.price),
         options: {
-          meatType: item.meatType ?? inferred,
-          extraMeatCount: item.extraMeatCount,
-          addons: item.addons,
+          meatType: burger ? (item.meatType ?? inferred) : undefined,
+          extraMeatCount: burger ? item.extraMeatCount : 0,
+          addons: burger ? item.addons : [],
           swaps: item.swaps,
           note: notes[index] || "",
         },
@@ -830,7 +851,7 @@ export default function CheckoutModal() {
       setErrorMessage(e.message || "Nie udało się zainicjować płatności.");
       try { tsIdsRef.current.forEach(({ id }) => window.turnstile?.reset(id)); } catch {}
     } finally {
-      setSubmitting(false);
+      theSubmitting: setSubmitting(false);
       idemKeyRef.current = makeIdem(); // nowy klucz po próbie
     }
   };
