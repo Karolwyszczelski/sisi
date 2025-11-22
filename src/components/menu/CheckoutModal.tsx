@@ -88,6 +88,23 @@ const toPrice = (v: any): number => {
 
 type Product = { id: number; name: string; category: string | null; subcategory: string | null };
 
+/* === normalizacja nazw dla pewnego dopasowania product_id === */
+const normalizeName = (s?: string) =>
+  (s || "")
+    .toLowerCase()
+    .replace(/[ą]/g, "a")
+    .replace(/[ć]/g, "c")
+    .replace(/[ę]/g, "e")
+    .replace(/[ł]/g, "l")
+    .replace(/[ń]/g, "n")
+    .replace(/[ó]/g, "o")
+    .replace(/[ś]/g, "s")
+    .replace(/[żź]/g, "z")
+    .replace(/[\u2013\u2014\-–—]+/g, " ") // różne myślniki → spacja
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
 /* helpers */
 const buildClientDeliveryTime = (
   selectedOption: string | null,
@@ -112,15 +129,7 @@ const safeFetch = async (url: string, opts: RequestInit) => {
   return data;
 };
 
-/* tylko burgery mają dodatki */
-const isBurger = (meta?: Product, name?: string) => {
-  const n = (name || meta?.name || "").toLowerCase();
-  const cat = (meta?.category || "").toLowerCase();
-  const sub = (meta?.subcategory || "").toLowerCase();
-  return cat === "burger" || sub === "burger" || n.includes("burger");
-};
-
-/* inferencja mięsa – działa praktycznie tylko dla burgerów */
+/* burger/mięso */
 const inferDefaultMeat = (meta?: Product, name?: string): "wołowina" | "kurczak" | null => {
   const n = (name || meta?.name || "").toLowerCase();
   const cat = (meta?.category || "").toLowerCase();
@@ -130,6 +139,12 @@ const inferDefaultMeat = (meta?: Product, name?: string): "wołowina" | "kurczak
   if (sub.includes("kurczak") || n.includes("chicken")) return "kurczak";
   if (cat === "burger" || n.includes("burger")) return "wołowina";
   return null;
+};
+
+const isBurger = (meta?: Product, name?: string) => {
+  const cat = (meta?.category || "").toLowerCase();
+  const n = (name || meta?.name || "").toLowerCase();
+  return cat === "burger" || n.includes("burger");
 };
 
 const MEAT_OPTIONS: Array<"wołowina" | "kurczak"> = ["wołowina", "kurczak"];
@@ -153,16 +168,20 @@ const ProductItem: React.FC<{
   const { changeMeatType, addExtraMeat, removeExtraMeat, addAddon, removeAddon, swapIngredient, removeItem, removeWholeItem } =
     helpers;
 
-  const burger = isBurger(meta, prod.name);
-
   const priceNum = toPrice(prod.price);
-  const addonsCostRaw = (prod.addons ?? []).reduce((sum: number, addon: string) => sum + (SAUCES.includes(addon) ? 3 : 4), 0);
-  const addonsCost = burger ? addonsCostRaw : 0; // tylko burgerom doliczamy dodatki
+
+  // dodatki i mięso tylko dla burgerów
+  const burger = isBurger(meta, prod?.name);
+  const addonsCost = burger
+    ? (prod.addons ?? []).reduce((sum: number, addon: string) => sum + (SAUCES.includes(addon) ? 3 : 4), 0)
+    : 0;
   const extraMeatCost = burger ? (prod.extraMeatCount || 0) * 10 : 0;
+
   const lineTotal = (priceNum + addonsCost + extraMeatCost) * (prod.quantity || 1);
 
-  const selectedMeat = (prod.meatType as string | undefined) ?? defaultMeat ?? null;
+  const selectedMeat = (prod.meatType as string | undefined) ?? (burger ? defaultMeat : null) ?? null;
   const supportsMeat = burger && selectedMeat !== null;
+  const supportsAddons = burger;
 
   return (
     <div className="border p-3 rounded bg-gray-50 relative">
@@ -192,8 +211,7 @@ const ProductItem: React.FC<{
           </>
         )}
 
-        {/* DODATKI – tylko dla burgerów */}
-        {burger && (
+        {supportsAddons && (
           <>
             <div className="font-semibold mt-2">Dodatki:</div>
             <div className="flex flex-wrap gap-2">
@@ -213,7 +231,6 @@ const ProductItem: React.FC<{
           </>
         )}
 
-        {/* Ekstra mięso – też tylko dla burgerów */}
         {supportsMeat && (
           <>
             <div className="font-semibold mt-2">Dodatkowe mięso:</div>
@@ -231,7 +248,7 @@ const ProductItem: React.FC<{
           </>
         )}
 
-        {!!prod.availableSwaps?.length && (
+        {supportsAddons && !!prod.availableSwaps?.length && (
           <>
             <div className="font-semibold mt-2">Wymiana składnika:</div>
             <div className="flex flex-wrap gap-2">
@@ -425,16 +442,33 @@ export default function CheckoutModal() {
   }, [isLoggedIn, session]);
 
   useEffect(() => {
-    supabase.from("products").select("id,name,category,subcategory").then((r) => {
-      if (!r.error && r.data) setProducts((r.data as Product[]) || []);
-    });
+    supabase
+      .from("products")
+      .select("id,name,category,subcategory")
+      .then((r) => {
+        if (!r.error && r.data) setProducts((r.data as Product[]) || []);
+      });
 
-    supabase.from("delivery_zones").select("*").order("min_distance_km", { ascending: true })
+    supabase
+      .from("delivery_zones")
+      .select("*")
+      .order("min_distance_km", { ascending: true })
       .then((r) => { if (!r.error && r.data) setZones(r.data as Zone[]); });
 
-    supabase.from("restaurant_info").select("lat,lng").eq("id", 1).single()
+    supabase
+      .from("restaurant_info")
+      .select("lat,lng")
+      .eq("id", 1)
+      .single()
       .then((r) => { if (!r.error && r.data) setRestLoc({ lat: r.data.lat, lng: r.data.lng }); });
   }, []);
+
+  /* szybka mapa name->product z normalizacją */
+  const productByNorm = useMemo(() => {
+    const m = new Map<string, Product>();
+    for (const p of products) m.set(normalizeName(p.name), p);
+    return m;
+  }, [products]);
 
   const isVisible = (el: HTMLDivElement | null) => !!el && !!el.offsetParent;
 
@@ -530,21 +564,19 @@ export default function CheckoutModal() {
     if (TURNSTILE_SITE_KEY && turnstileError) setShowConfirmation(false);
   }, [turnstileError]);
 
-  /* najpierw szybki lookup metadanych produktu po nazwie */
-  const findMetaByName = (name: string) => products.find((p) => p.name === name);
-
   const baseTotal = useMemo<number>(() => {
     return items.reduce((acc: number, it: any) => {
       const qty = it.quantity || 1;
       const priceNum = toPrice(it.price);
-      const meta = findMetaByName(it.name);
-      const burger = isBurger(meta, it.name);
-      const addonsCostRaw = (it.addons ?? []).reduce((sum: number, addon: string) => sum + (SAUCES.includes(addon) ? 3 : 4), 0);
-      const addonsCost = burger ? addonsCostRaw : 0;
+      const meta = productByNorm.get(normalizeName(it.name));
+      const burger = isBurger(meta, it?.name);
+      const addonsCost = burger
+        ? (it.addons ?? []).reduce((sum: number, addon: string) => sum + (SAUCES.includes(addon) ? 3 : 4), 0)
+        : 0;
       const extraMeatCost = burger ? (it.extraMeatCount || 0) * 10 : 0;
       return acc + (priceNum + addonsCost + extraMeatCost) * qty;
     }, 0);
-  }, [items, products]);
+  }, [items, productByNorm]);
 
   const packagingCost = selectedOption === "takeaway" || selectedOption === "delivery" ? 2 : 0;
   const subtotal = baseTotal + packagingCost;
@@ -625,6 +657,9 @@ export default function CheckoutModal() {
     removeWholeItem,
   };
 
+  // meta produktów po nazwie (z normalizacją)
+  const findMetaByName = (name: string) => productByNorm.get(normalizeName(name));
+
   const buildOrderPayload = () => {
     const client_delivery_time = buildClientDeliveryTime(selectedOption, deliveryTimeOption, scheduledTime);
     const payload: any = {
@@ -659,20 +694,21 @@ export default function CheckoutModal() {
 
   const buildItemsPayload = () =>
     items.map((item: any, index: number) => {
-      const meta = findMetaByName(item.name);
+      // jeżeli w koszyku mamy już id, użyjemy go; w przeciwnym razie dopasujemy po nazwie
+      const meta = item.product_id ? { id: item.product_id } as Product : findMetaByName(item.name);
       const inferred = inferDefaultMeat(meta, item.name);
       const burger = isBurger(meta, item.name);
-      const product = meta;
+
       return {
-        product_id: product?.id,
+        product_id: (meta as any)?.id ?? null,
         name: item.name,
         quantity: item.quantity || 1,
         unit_price: toPrice(item.price),
         options: {
-          meatType: burger ? (item.meatType ?? inferred) : undefined,
+          meatType: burger ? (item.meatType ?? inferred) : null,
           extraMeatCount: burger ? item.extraMeatCount : 0,
           addons: burger ? item.addons : [],
-          swaps: item.swaps,
+          swaps: burger ? item.swaps : [],
           note: notes[index] || "",
         },
       };
@@ -851,7 +887,7 @@ export default function CheckoutModal() {
       setErrorMessage(e.message || "Nie udało się zainicjować płatności.");
       try { tsIdsRef.current.forEach(({ id }) => window.turnstile?.reset(id)); } catch {}
     } finally {
-      theSubmitting: setSubmitting(false);
+      setSubmitting(false);
       idemKeyRef.current = makeIdem(); // nowy klucz po próbie
     }
   };
