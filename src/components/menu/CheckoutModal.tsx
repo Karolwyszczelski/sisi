@@ -275,13 +275,26 @@ const ProductItem: React.FC<{
   );
 };
 
+type AutoPromoType = {
+  code: string;
+  type: "percent" | "amount";
+  value: number;
+  amount: number;
+} | null;
+
 /* kupony */
 type PromoType = { code: string; type: "percent" | "amount"; value: number } | null;
+
 function PromoSectionExternal({
-  promo, promoError, onApply, onClear,
+  promo,
+  promoError,
+  autoPromo,
+  onApply,
+  onClear,
 }: {
   promo: PromoType;
   promoError: string | null;
+  autoPromo: AutoPromoType;
   onApply: (code: string) => void;
   onClear: () => void;
 }) {
@@ -309,10 +322,27 @@ function PromoSectionExternal({
           <button onClick={onClear} className="px-3 py-2 bg-gray-200 rounded text-sm">Usuń kod</button>
         )}
       </div>
-      {promoError && <p className="text-xs text-red-600 mt-1">{promoError}</p>}
+      {promoError && (
+        <p className="text-xs text-red-600 mt-1">{promoError}</p>
+      )}
+
       {promo && (
         <p className="text-xs text-green-700 mt-1">
-          Zastosowano kod <b>{promo.code}</b> — {promo.type === "percent" ? `${promo.value}%` : `${promo.value.toFixed(2)} zł`} zniżki.
+          Zastosowano kod <b>{promo.code}</b> —{" "}
+          {promo.type === "percent"
+            ? `${promo.value}%`
+            : `${promo.value.toFixed(2)} zł`}{" "}
+          zniżki.
+        </p>
+      )}
+
+      {!promo && autoPromo && autoPromo.amount > 0 && (
+        <p className="text-xs text-indigo-700 mt-1">
+          Globalna promocja bez kodu:{" "}
+          {autoPromo.type === "percent"
+            ? `${autoPromo.value}%`
+            : `${autoPromo.amount.toFixed(2)} zł`}{" "}
+          rabatu zostanie naliczona automatycznie.
         </p>
       )}
     </div>
@@ -375,6 +405,10 @@ export default function CheckoutModal() {
 
   const [promo, setPromo] = useState<PromoType>(null);
   const [promoError, setPromoError] = useState<string | null>(null);
+
+    // auto-promocja (bez kodu)
+  const [autoPromo, setAutoPromo] = useState<AutoPromoType>(null);
+  const [autoPromoKey, setAutoPromoKey] = useState<string | null>(null);
 
   // Turnstile
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
@@ -624,12 +658,81 @@ export default function CheckoutModal() {
     calcDelivery(lat, lng);
   };
 
-  const discount = useMemo(() => {
-    if (!promo) return 0;
+   const discount = useMemo(() => {
     const base = subtotal + (deliveryInfo?.cost || 0);
-    const val = promo.type === "percent" ? base * (Number(promo.value) / 100) : Number(promo.value || 0);
-    return Math.max(0, Math.min(val, base));
-  }, [promo, subtotal, deliveryInfo]);
+
+    if (promo) {
+      const val =
+        promo.type === "percent"
+          ? base * (Number(promo.value) / 100)
+          : Number(promo.value || 0);
+      return Math.max(0, Math.min(val, base));
+    }
+
+    if (autoPromo && typeof autoPromo.amount === "number") {
+      const val = Number(autoPromo.amount || 0);
+      return Math.max(0, Math.min(val, base));
+    }
+
+    return 0;
+  }, [promo, autoPromo, subtotal, deliveryInfo]);
+
+   // auto-promocja (bez kodu) – podgląd z backendu
+  useEffect(() => {
+    const base = subtotal + (deliveryInfo?.cost || 0);
+
+    // brak koszyka / brak sumy / jest ręczny kod → czyścimy auto-promkę
+    if (!items.length || base <= 0 || promo) {
+      setAutoPromo(null);
+      setAutoPromoKey(null);
+      return;
+    }
+
+    const key = `${base.toFixed(2)}|${effectiveEmail || ""}|${
+      isLoggedIn ? session!.user.id : ""
+    }`;
+
+    // jeśli już sprawdzaliśmy dla tego samego koszyka – nic nie rób
+    if (autoPromoKey === key) return;
+    setAutoPromoKey(key);
+
+    (async () => {
+      try {
+        const resp = await safeFetch("/api/promo/auto-preview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            total: base,
+            email: effectiveEmail || null,
+            userId: isLoggedIn ? session!.user.id : null,
+          }),
+        });
+
+        if (resp?.hasAuto) {
+          setAutoPromo({
+            code: resp.code,
+            type: resp.type,
+            value: Number(resp.value || 0),
+            amount: Number(resp.amount || 0),
+          });
+        } else {
+          setAutoPromo(null);
+        }
+      } catch (e) {
+        // w razie błędu po prostu nie pokazujemy globalnego rabatu
+        setAutoPromo(null);
+      }
+    })();
+  }, [
+    subtotal,
+    deliveryInfo,
+    items.length,
+    promo,
+    effectiveEmail,
+    isLoggedIn,
+    session,
+    autoPromoKey,
+  ]);
 
   const totalWithDelivery = Math.max(0, subtotal + (deliveryInfo?.cost || 0) - discount);
   const shouldHideOrderActions = Boolean(TURNSTILE_SITE_KEY && turnstileError);
@@ -1142,7 +1245,13 @@ export default function CheckoutModal() {
                             <p className="text-xs text-red-600">Minimalna wartość zamówienia dla tej strefy: {deliveryMinRequired.toFixed(2)} zł.</p>
                           )}
 
-                          <PromoSectionExternal promo={promo} promoError={promoError} onApply={applyPromo} onClear={clearPromo} />
+                          <PromoSectionExternal
+  promo={promo}
+  promoError={promoError}
+  autoPromo={autoPromo}
+  onApply={applyPromo}
+  onClear={clearPromo}
+/>
 
                           {discount > 0 && <div className="flex justify-between text-sm text-green-700"><span>Rabat:</span><span>-{discount.toFixed(2)} zł</span></div>}
 
