@@ -396,22 +396,27 @@ export async function POST(req: Request) {
     }
 
     // --- PROMO: helpery bez joinów i bez RPC ---
+    // --- PROMO: helpery bez joinów i bez RPC ---
     type DiscountCode = {
       id: string;
       code: string;
       type: "amount" | "percent";
       value: number;
       active: boolean;
+      auto_apply: boolean;
       starts_at: string | null;
       expires_at: string | null;
       min_order: number | null;
       max_uses: number | null;
+      per_user_max_uses: number | null;
     };
 
     async function getDiscountByCode(codeInput: string): Promise<DiscountCode> {
       const { data: dc, error } = await supabaseAdmin
         .from("discount_codes")
-        .select("id, code, type, value, active, starts_at, expires_at, min_order, max_uses")
+        .select(
+          "id, code, type, value, active, auto_apply, starts_at, expires_at, min_order, max_uses, per_user_max_uses"
+        )
         .ilike("code", codeInput)
         .maybeSingle();
 
@@ -425,34 +430,59 @@ export async function POST(req: Request) {
       return {
         id: String(dc.id),
         code: String(dc.code),
-        type: (dc.type === "amount" ? "amount" : "percent") as "amount" | "percent",
+        type:
+          (dc.type === "amount" ? "amount" : "percent") as "amount" | "percent",
         value: Number(dc.value || 0),
         active: !!dc.active,
+        auto_apply: !!dc.auto_apply,
         starts_at: dc.starts_at ? String(dc.starts_at) : null,
         expires_at: dc.expires_at ? String(dc.expires_at) : null,
         min_order: dc.min_order == null ? null : Number(dc.min_order),
         max_uses: dc.max_uses == null ? null : Number(dc.max_uses),
+        per_user_max_uses:
+          dc.per_user_max_uses == null ? null : Number(dc.per_user_max_uses),
       };
     }
 
-    async function getUsageCounts(codeId: string, userId: string | null, emailLower: string | null) {
+    async function getUsageCounts(
+      codeId: string,
+      userId: string | null,
+      emailLower: string | null
+    ) {
       const [allQ, userQ, emailLowerQ, emailPlainQ] = await Promise.all([
-        supabaseAdmin.from("discount_redemptions").select("*", { head: true, count: "exact" }).eq("code_id", codeId),
+        supabaseAdmin
+          .from("discount_redemptions")
+          .select("*", { head: true, count: "exact" })
+          .eq("code_id", codeId),
         userId
-          ? supabaseAdmin.from("discount_redemptions").select("*", { head: true, count: "exact" }).eq("code_id", codeId).eq("user_id", userId)
+          ? supabaseAdmin
+              .from("discount_redemptions")
+              .select("*", { head: true, count: "exact" })
+              .eq("code_id", codeId)
+              .eq("user_id", userId)
           : Promise.resolve({ count: 0 }),
         emailLower
-          ? supabaseAdmin.from("discount_redemptions").select("*", { head: true, count: "exact" }).eq("code_id", codeId).eq("email_lower", emailLower)
+          ? supabaseAdmin
+              .from("discount_redemptions")
+              .select("*", { head: true, count: "exact" })
+              .eq("code_id", codeId)
+              .eq("email_lower", emailLower)
           : Promise.resolve({ count: 0 }),
         emailLower
-          ? supabaseAdmin.from("discount_redemptions").select("*", { head: true, count: "exact" }).eq("code_id", codeId).eq("email", emailLower)
+          ? supabaseAdmin
+              .from("discount_redemptions")
+              .select("*", { head: true, count: "exact" })
+              .eq("code_id", codeId)
+              .eq("email", emailLower)
           : Promise.resolve({ count: 0 }),
       ]);
 
       return {
-        all: Number(allQ.count || 0),
+        all: Number((allQ as any).count || 0),
         byUser: Number((userQ as any).count || 0),
-        byEmail: Number((emailLowerQ as any).count || 0) + Number((emailPlainQ as any).count || 0),
+        byEmail:
+          Number((emailLowerQ as any).count || 0) +
+          Number((emailPlainQ as any).count || 0),
       };
     }
 
@@ -460,6 +490,73 @@ export async function POST(req: Request) {
       const raw = dc.type === "percent" ? base * (dc.value / 100) : dc.value;
       const clamped = Math.min(Math.max(0, raw), base);
       return Math.round(clamped * 100) / 100;
+    }
+
+    // wybór najlepszej auto-promocji (auto_apply = true) dla danego koszyka
+    async function getBestAutoDiscount(
+      baseTotal: number,
+      userId: string | null,
+      emailLower: string | null
+    ): Promise<{ dc: DiscountCode; amount: number } | null> {
+      const { data, error } = await supabaseAdmin
+        .from("discount_codes")
+        .select(
+          "id, code, type, value, active, auto_apply, starts_at, expires_at, min_order, max_uses, per_user_max_uses"
+        )
+        .eq("auto_apply", true)
+        .eq("active", true);
+
+      if (error || !data || !data.length) return null;
+
+      const nowIso = new Date().toISOString();
+      let best: { dc: DiscountCode; amount: number } | null = null;
+
+      for (const row of data as any[]) {
+        const dc: DiscountCode = {
+          id: String(row.id),
+          code: String(row.code),
+          type: row.type === "amount" ? "amount" : "percent",
+          value: Number(row.value || 0),
+          active: !!row.active,
+          auto_apply: !!row.auto_apply,
+          starts_at: row.starts_at ? String(row.starts_at) : null,
+          expires_at: row.expires_at ? String(row.expires_at) : null,
+          min_order: row.min_order == null ? null : Number(row.min_order),
+          max_uses: row.max_uses == null ? null : Number(row.max_uses),
+          per_user_max_uses:
+            row.per_user_max_uses == null
+              ? null
+              : Number(row.per_user_max_uses),
+        };
+
+        if (!dc.value || dc.value <= 0) continue;
+        if (dc.starts_at && dc.starts_at > nowIso) continue;
+        if (dc.expires_at && dc.expires_at < nowIso) continue;
+        if (dc.min_order != null && baseTotal < Number(dc.min_order)) continue;
+
+        const { all, byUser, byEmail } = await getUsageCounts(
+          dc.id,
+          userId,
+          emailLower
+        );
+
+        if (dc.max_uses != null && all >= Number(dc.max_uses)) continue;
+
+        const perUserLimit =
+          dc.per_user_max_uses == null ? 1 : Number(dc.per_user_max_uses);
+
+        if (userId && byUser >= perUserLimit) continue;
+        if (emailLower && byEmail >= perUserLimit) continue;
+
+        const amount = computeDiscount(baseTotal, dc);
+        if (amount <= 0) continue;
+
+        if (!best || amount > best.amount) {
+          best = { dc, amount };
+        }
+      }
+
+      return best;
     }
 
     // 1) Godziny (Europe/Warsaw)
@@ -679,63 +776,153 @@ if (TURNSTILE_SECRET_KEY) {
       return NextResponse.json({ error: "Nie udało się zapisać zamówienia." }, { status: 500 });
     }
 
-    const newOrderId = orderRow.id;
+     const newOrderId = orderRow.id;
+
+    const baseTotal = Math.max(
+      0,
+      Math.round((baseFromItems + (n.delivery_cost ?? 0)) * 100) / 100
+    );
+    const emailLower = (n.contact_email || "").toLowerCase() || null;
 
     // Zużycie kodu (z amount)
     let currentTotal = n.total_price;
+    let appliedCode: DiscountCode | null = null;
+    let appliedDiscount = 0;
 
+    // 5.1) Kod wpisany przez klienta – ma pierwszeństwo nad auto-promocją
     if (n.promo_code) {
       try {
         const dc = await getDiscountByCode(n.promo_code);
-
-        const baseTotal = Math.max(
-          0,
-          Math.round((baseFromItems + (n.delivery_cost ?? 0)) * 100) / 100
-        );
 
         if (dc.min_order != null && baseTotal < Number(dc.min_order)) {
           throw new Error(`min_order:${Number(dc.min_order).toFixed(2)}`);
         }
 
-        const emailLower = (n.contact_email || "").toLowerCase() || null;
-        const { all, byUser, byEmail } = await getUsageCounts(dc.id, n.user ?? null, emailLower);
+        const { all, byUser, byEmail } = await getUsageCounts(
+          dc.id,
+          n.user ?? null,
+          emailLower
+        );
 
-        if (dc.max_uses != null && all >= Number(dc.max_uses)) throw new Error("limit_exhausted");
-        if (byUser > 0) throw new Error("used_by_user");
-        if (emailLower && byEmail > 0) throw new Error("used_by_email");
+        if (dc.max_uses != null && all >= Number(dc.max_uses)) {
+          throw new Error("limit_exhausted");
+        }
+
+        const perUserLimit =
+          dc.per_user_max_uses == null ? 1 : Number(dc.per_user_max_uses);
+
+        if (n.user && byUser >= perUserLimit) {
+          throw new Error("used_by_user");
+        }
+
+        if (emailLower && byEmail >= perUserLimit) {
+          throw new Error("used_by_email");
+        }
 
         const applied = computeDiscount(baseTotal, dc);
-        const newTotal = Math.max(0, Math.round((baseTotal - applied) * 100) / 100);
+        const newTotal = Math.max(
+          0,
+          Math.round((baseTotal - applied) * 100) / 100
+        );
 
-        // zapis redempcji
-        const { error: redErr } = await supabaseAdmin.from("discount_redemptions").insert({
-          code_id: dc.id,
-          code: dc.code,
-          order_id: newOrderId,
-          user_id: n.user ?? null,
-          email_lower: emailLower,
-          amount: applied,
-        });
+        const { error: redErr } = await supabaseAdmin
+          .from("discount_redemptions")
+          .insert({
+            code_id: dc.id,
+            code: dc.code,
+            order_id: newOrderId,
+            user_id: n.user ?? null,
+            email_lower: emailLower,
+            amount: applied,
+          });
         if (redErr) throw redErr;
 
-        // aktualizacja zamówienia
         const { error: updErr } = await supabaseAdmin
           .from("orders")
-          .update({ promo_code: dc.code, discount_amount: applied, total_price: newTotal })
+          .update({
+            promo_code: dc.code,
+            discount_amount: applied,
+            total_price: newTotal,
+          })
           .eq("id", newOrderId);
 
         if (updErr) {
-          await supabaseAdmin.from("discount_redemptions").delete().eq("order_id", newOrderId);
+          await supabaseAdmin
+            .from("discount_redemptions")
+            .delete()
+            .eq("order_id", newOrderId);
           throw updErr;
         }
 
         currentTotal = newTotal;
+        appliedCode = dc;
+        appliedDiscount = applied;
       } catch (e: any) {
         console.error("[orders.create] promo apply error:", e?.message || e);
         await supabaseAdmin.from("orders").delete().eq("id", newOrderId);
         return NextResponse.json(
-          { error: "Kod promocyjny jest nieważny lub został już wykorzystany." },
+          {
+            error:
+              "Kod promocyjny jest nieważny lub został już wykorzystany.",
+          },
           { status: 400 }
+        );
+      }
+    }
+
+    // 5.2) Auto-promocja (auto_apply) – tylko jeśli brak ręcznie podanego kodu
+    if (!appliedCode) {
+      try {
+        const auto = await getBestAutoDiscount(
+          baseTotal,
+          (n.user as string | null) ?? null,
+          emailLower
+        );
+
+        if (auto) {
+          const { dc, amount } = auto;
+          const newTotal = Math.max(
+            0,
+            Math.round((baseTotal - amount) * 100) / 100
+          );
+
+          const { error: redErr } = await supabaseAdmin
+            .from("discount_redemptions")
+            .insert({
+              code_id: dc.id,
+              code: dc.code,
+              order_id: newOrderId,
+              user_id: n.user ?? null,
+              email_lower: emailLower,
+              amount,
+            });
+
+          if (!redErr) {
+            const { error: updErr } = await supabaseAdmin
+              .from("orders")
+              .update({
+                promo_code: dc.code,
+                discount_amount: amount,
+                total_price: newTotal,
+              })
+              .eq("id", newOrderId);
+
+            if (!updErr) {
+              currentTotal = newTotal;
+              appliedCode = dc;
+              appliedDiscount = amount;
+            } else {
+              await supabaseAdmin
+                .from("discount_redemptions")
+                .delete()
+                .eq("order_id", newOrderId);
+            }
+          }
+        }
+      } catch (e: any) {
+        console.warn(
+          "[orders.create] auto promo skipped:",
+          e?.message || e
         );
       }
     }
@@ -839,7 +1026,15 @@ if (Array.isArray(n.itemsArray) && n.itemsArray.length > 0) {
     }
 
     // 7) OK
-    return NextResponse.json({ orderId: newOrderId }, { status: 201 });
+    return NextResponse.json(
+      {
+        orderId: newOrderId,
+        total: currentTotal,
+        discount_amount: appliedDiscount,
+        promo_code: appliedCode?.code ?? null,
+      },
+      { status: 201 }
+    );
   } catch (e: any) {
     console.error("[orders.create] unexpected:", e?.message ?? e);
     return NextResponse.json({ error: "Wystąpił nieoczekiwany błąd." }, { status: 500 });

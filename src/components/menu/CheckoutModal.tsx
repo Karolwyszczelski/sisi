@@ -862,11 +862,21 @@ export default function CheckoutModal() {
       const orderPayload = buildOrderPayload();
       const itemsPayload = buildItemsPayload();
 
-      const data = await postWithTurnstile("/api/orders/create", { orderPayload, itemsPayload });
+      const data = await postWithTurnstile("/api/orders/create", {
+        orderPayload,
+        itemsPayload,
+      });
 
-      try { tsIdsRef.current.forEach(({ id }) => window.turnstile?.reset(id)); } catch {}
+      try {
+        tsIdsRef.current.forEach(({ id }) => window.turnstile?.reset(id));
+      } catch {}
 
       const newOrderId = data.orderId;
+      const amountFromServer =
+        typeof data.total === "number" && !Number.isNaN(data.total)
+          ? data.total
+          : totalWithDelivery;
+
       const pay = await safeFetch("/api/payments/create-transaction", {
         method: "POST",
         headers: {
@@ -875,7 +885,7 @@ export default function CheckoutModal() {
         },
         body: JSON.stringify({
           orderId: newOrderId,
-          amount: totalWithDelivery,
+          amount: amountFromServer,
           email: effectiveEmail,
           customerName: name,
         }),
@@ -885,7 +895,9 @@ export default function CheckoutModal() {
       else throw new Error("Brak URL do płatności");
     } catch (e: any) {
       setErrorMessage(e.message || "Nie udało się zainicjować płatności.");
-      try { tsIdsRef.current.forEach(({ id }) => window.turnstile?.reset(id)); } catch {}
+      try {
+        tsIdsRef.current.forEach(({ id }) => window.turnstile?.reset(id));
+      } catch {}
     } finally {
       setSubmitting(false);
       idemKeyRef.current = makeIdem(); // nowy klucz po próbie
