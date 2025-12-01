@@ -1,4 +1,3 @@
-// src/app/admin/settings/page.tsx
 "use client";
 
 import { useState, useMemo } from "react";
@@ -7,17 +6,40 @@ import {
   IconCalendarEvent,
   IconMap,
   IconBrandGoogle,
+  IconPercentage,
 } from "@tabler/icons-react";
 
 import TableLayoutForm from "@/components/admin/settings/TableLayoutForm";
 import DeliveryZonesForm from "@/components/admin/settings/DeliveryZonesForm";
 import IntegrationsForm from "@/components/admin/settings/IntegrationsForm";
+import DiscountsSettingsForm from "@/components/admin/settings/DiscountsSettingsForm";
 
 // Uwaga: karta "Płatności" została usunięta na Twoją prośbę.
 const tabs = [
-  { key: "tables", label: "Rezerwacje & Stoły", icon: IconCalendarEvent, component: <TableLayoutForm /> },
-  { key: "delivery", label: "Strefy dostawy", icon: IconMap, component: <DeliveryZonesForm /> },
-  { key: "integr", label: "Integracje", icon: IconBrandGoogle, component: <IntegrationsForm /> },
+  {
+    key: "tables",
+    label: "Rezerwacje & Stoły",
+    icon: IconCalendarEvent,
+    component: <TableLayoutForm />,
+  },
+  {
+    key: "delivery",
+    label: "Strefy dostawy",
+    icon: IconMap,
+    component: <DeliveryZonesForm />,
+  },
+  {
+    key: "integr",
+    label: "Integracje",
+    icon: IconBrandGoogle,
+    component: <IntegrationsForm />,
+  },
+  {
+    key: "discounts",
+    label: "Rabaty & promocje",
+    icon: IconPercentage,
+    component: <DiscountsSettingsForm />,
+  },
 ];
 
 function classNames(...classes: string[]) {
