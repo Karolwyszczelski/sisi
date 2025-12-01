@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from "react";
 import clsx from "clsx";
 
-// opcjonalnie Supabase; jeśli brak env albo brak rekordu, pokaż fallback
 let supabase: any = null;
 try {
   const { createClient } = require("@supabase/supabase-js");
@@ -12,91 +11,153 @@ try {
   if (url && key) supabase = createClient(url, key);
 } catch {}
 
+type Banner = {
+  id: string;
+  title: string | null;
+  body: string | null;
+  url: string | null;
+  enabled: boolean;
+  starts_at: string | null;
+  ends_at: string | null;
+  dismiss_hours: number | null;
+  bg: string | null;
+  fg: string | null;
+};
+
 type Ann = {
   id: string;
   text: string;
   link_href: string | null;
-  active: boolean;
-  show_from: string | null;
-  show_to: string | null;
   dismiss_key: string | null;
-  theme: "red" | "black" | "yellow" | null;
+  bg: string;
+  fg: string;
+  dismiss_hours?: number | null;
 };
 
 const FALLBACK: Ann = {
-  id: "fallback-30",
-  text: "PROMO -30% NA CAŁE MENU! Kod: SISI30. Tylko do 30 listopada!",
+  id: "fallback-10",
+  text: "PROMO -10% NA CAŁE MENU! Tylko do 30 grudnia!",
   link_href: "/#menu",
-  active: true,
-  show_from: null,
-  show_to: "2025-11-30T23:59:59+01:00",
-  dismiss_key: "sisi-30-list",
-  theme: "red",
+  dismiss_key: "sisi-10",
+  bg: "#de1d13",
+  fg: "#ffffff",
+  dismiss_hours: 24,
 };
 
 export default function PromoTicker() {
   const [ann, setAnn] = useState<Ann | null>(null);
 
-  // localStorage dismisser
+  // sprawdź, czy użytkownik już zamknął ten konkretny baner
   const dismissed = useMemo(() => {
-    const k = ann?.dismiss_key || "promo";
-    try { return localStorage.getItem(`dismiss:${k}`) === "1"; } catch { return false; }
-  }, [ann?.dismiss_key]);
+    if (!ann) return false;
+    const key = ann.dismiss_key || ann.id;
+    try {
+      const raw = localStorage.getItem(`dismiss:${key}`);
+      if (!raw) return false;
+      const { at, hours } = JSON.parse(raw) as {
+        at: number;
+        hours: number | null;
+      };
+      if (!hours || hours <= 0) return true; // bezterminowo
+      const diff = Date.now() - at;
+      return diff < hours * 60 * 60 * 1000;
+    } catch {
+      return false;
+    }
+  }, [ann]);
 
   useEffect(() => {
     let cancelled = false;
 
-    async function load() {
-      // 1) Spróbuj Supabase
+    const load = async () => {
+      const now = new Date();
+
+      // 1) spróbuj pobrać z promo_banners
       if (supabase) {
         try {
           const { data, error } = await supabase
-            .from("site_announcements")
-            .select("id,text,link_href,active,show_from,show_to,dismiss_key,theme")
-            .eq("active", true)
-            .lte("show_from", new Date().toISOString())
-            .gte("show_to", new Date().toISOString())
-            .order("show_from", { ascending: false })
-            .limit(1)
-            .maybeSingle();
+            .from("promo_banners")
+            .select(
+              "id, enabled, title, body, url, starts_at, ends_at, dismiss_hours, bg, fg, priority"
+            )
+            .eq("enabled", true)
+            .order("priority", { ascending: false })
+            .order("starts_at", { ascending: false });
 
-          if (!cancelled && !error && data) {
-            setAnn(data as Ann);
-            return;
+          if (!error && data && data.length) {
+            const list = data as Banner[];
+
+            const active = list.find((b) => {
+              if (!b.enabled) return false;
+              const from = b.starts_at ? new Date(b.starts_at) : null;
+              const to = b.ends_at ? new Date(b.ends_at) : null;
+              if (from && from > now) return false;
+              if (to && to < now) return false;
+              return true;
+            });
+
+            if (!cancelled && active) {
+              setAnn({
+                id: active.id,
+                text: active.title || active.body || "",
+                link_href: active.url,
+                dismiss_key: active.id,
+                bg: active.bg || "#de1d13",
+                fg: active.fg || "#ffffff",
+                dismiss_hours: active.dismiss_hours,
+              });
+              return;
+            }
           }
-        } catch {}
+        } catch {
+          // w razie błędu – lecimy na fallback
+        }
       }
-      // 2) Fallback do 30 listopada
-      if (!cancelled) setAnn(FALLBACK);
-    }
+
+      // 2) Fallback, jeśli nic z bazy
+      if (!cancelled) {
+        setAnn(FALLBACK);
+      }
+    };
 
     load();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   if (!ann) return null;
-
-  // czy po dacie?
-  if (ann.show_to && new Date(ann.show_to).getTime() < Date.now()) return null;
   if (dismissed) return null;
 
-  const bg =
-    ann.theme === "black" ? "bg-black" :
-    ann.theme === "yellow" ? "bg-yellow-400 text-black" :
-    "bg-red-600";
-
   const handleClose = () => {
-    try { localStorage.setItem(`dismiss:${ann.dismiss_key || "promo"}`, "1"); } catch {}
+    try {
+      const key = ann.dismiss_key || ann.id;
+      localStorage.setItem(
+        `dismiss:${key}`,
+        JSON.stringify({
+          at: Date.now(),
+          hours: ann.dismiss_hours ?? 24,
+        })
+      );
+    } catch {}
     setAnn(null);
   };
+
+  const bgClass = "bg-[color:var(--promo-bg)]";
+  const fgClass = "text-[color:var(--promo-fg)]";
 
   return (
     <div
       className={clsx(
         "fixed top-0 left-0 right-0 z-[9999] select-none",
-        bg,
-        "text-white"
+        bgClass,
+        fgClass
       )}
+      style={{
+        // Tailwind nie lubi dynamicznych kolorów, więc lecimy przez CSS custom props
+        ["--promo-bg" as any]: ann.bg,
+        ["--promo-fg" as any]: ann.fg,
+      }}
       role="status"
     >
       <div className="mx-auto max-w-7xl px-3 sm:px-4 py-2 text-center text-sm font-semibold flex items-center justify-center gap-3">
