@@ -494,7 +494,7 @@ export default function PickupOrdersPage() {
       });
 
       const prev = prevIdsRef.current;
-      const newOnes = mapped.filter((o) => o.status === "new" && !prev.has(o.id));
+      const newOnes = mapped.filter((o) => (o.status === "new" || o.status === "pending" || o.status === "placed") && !prev.has(o.id));
       if (!silent && initializedRef.current && newOnes.length > 0) void playDing();
       prevIdsRef.current = new Set(mapped.map((o) => o.id));
       initializedRef.current = true;
