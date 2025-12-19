@@ -22,6 +22,7 @@ export const metadata: Metadata = {
   metadataBase: new URL(BASE),
   title: { default: "SISI Burger & Pancakes", template: "%s | SISI Burger & Pancakes" },
   description: "Zamów najlepsze burgery i pancakes w Ciechanowie!",
+  manifest: "/manifest.webmanifest",
   alternates: {  languages: { "pl-PL": "/" } },
   icons: { icon: "/favicon.ico", apple: "/hamburger.png" },
   openGraph: {

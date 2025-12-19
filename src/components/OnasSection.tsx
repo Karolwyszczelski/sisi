@@ -6,6 +6,9 @@ import Link from "next/link";
 import Image from "next/image";
 import ReservationModal from "@/components/ReservationModal";
 
+const BG_DESKTOP = "/graffitiburger2.webp";  // wspólne tło desktop
+const BG_MOBILE = "/backgroundsisi.jpg";     // wspólne tło mobile
+
 export default function OnasSection() {
   const [isResOpen, setResOpen] = useState(false);
 
@@ -42,21 +45,25 @@ export default function OnasSection() {
 
   return (
     <>
+      {/* === START REPLACE: outer section wrapper + overlay === */}
       <section
         id="onas"
-        className="relative w-full text-white overflow-hidden bg-[url('/backgroundsisi.jpg')] bg-cover bg-center bg-no-repeat"
+        className="onas-sec relative w-full text-white overflow-hidden"
         aria-labelledby="onas-heading"
       >
-        <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-black/40 to-black/60" aria-hidden="true" />
+        {/* overlay IDENTYCZNY jak Burger/MENU */}
+        <div className="overlay" aria-hidden="true" />
 
-        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-10 py-14 md:py-20">
+        <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-10 py-14 md:py-20">
           <div className="flex flex-col items-center text-center">
             <span className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-black/40 px-3 py-1 text-[11px] font-medium text-neutral-200 tracking-wide">
               <span className="h-1.5 w-1.5 rounded-full bg-yellow-400" />
               Lokal w centrum Ciechanowa
             </span>
 
-            <h2 id="onas-heading" className="mt-4 text-4xl md:text-6xl font-extrabold tracking-tight">O nas</h2>
+            <h2 id="onas-heading" className="mt-4 text-4xl md:text-6xl font-extrabold tracking-tight">
+              O nas
+            </h2>
 
             <p className="mt-4 max-w-2xl text-sm md:text-base text-neutral-200 leading-relaxed">
               <strong className="text-white">SISI Burger &amp; Pancake</strong> — chrupiące burgery i puszyste pancake z lokalnych składników.
@@ -64,7 +71,10 @@ export default function OnasSection() {
 
             <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
               <ReserveButton />
-              <Link href="#menu" className="inline-flex items-center justify-center rounded-full px-6 py-3 text-sm md:text-base font-semibold text-white border border-white hover:bg-white/10 transition">
+              <Link
+                href="#menu"
+                className="inline-flex items-center justify-center rounded-full px-6 py-3 text-sm md:text-base font-semibold text-white border border-white hover:bg-white/10 transition"
+              >
                 Zobacz menu
               </Link>
             </div>
@@ -92,14 +102,52 @@ export default function OnasSection() {
           </div>
 
           <div className="mt-12 md:mt-16 flex justify-center">
-            <Image src="/onas-main.jpg" alt="SISI — wnętrze lokalu" width={1200} height={700} className="w-full max-w-5xl h-auto rounded-2xl object-cover" />
+            <Image
+              src="/onas-main.jpg"
+              alt="SISI — wnętrze lokalu"
+              width={1200}
+              height={700}
+              className="w-full max-w-5xl h-auto rounded-2xl object-cover"
+            />
           </div>
 
           <div className="mt-10 text-center md:hidden">
             <ReserveButton className="w-full" />
           </div>
         </div>
+
+        {/* wspólne tło mobile/desktop + identyczny efekt jak Burger/MENU */}
+        <style jsx>{`
+          .onas-sec {
+            background-image: url("${BG_MOBILE}");
+            background-position: center top;
+            background-repeat: no-repeat;
+            background-size: cover;
+            background-attachment: scroll; /* mobile */
+          }
+
+          @media (min-width: 768px) {
+            .onas-sec {
+              background-image: url("${BG_DESKTOP}");
+              background-attachment: fixed; /* desktop */
+              background-position: center center;
+            }
+          }
+
+          .overlay {
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(
+                1200px 700px at 65% 55%,
+                rgba(0, 0, 0, 0.35),
+                rgba(0, 0, 0, 0.82)
+              ),
+              rgba(0, 0, 0, 0.55);
+            pointer-events: none;
+          }
+        `}</style>
       </section>
+      {/* === END REPLACE: outer section wrapper + overlay === */}
 
       {/* Modal poza sekcją + wymuszony czarny tekst */}
       {isResOpen && (

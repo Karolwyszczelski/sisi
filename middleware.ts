@@ -148,7 +148,7 @@ export async function middleware(req: NextRequest) {
       .eq("id", session.user.id)
       .maybeSingle();
 
-    const role = data?.role ?? null;
+    const role = (data && 'role' in data) ? data.role : null;
 
     if (pathname === "/admin") {
       const dest =
@@ -157,8 +157,7 @@ export async function middleware(req: NextRequest) {
           : role === "employee"
           ? "/admin/EmployeePanel"
           : "/";
-      if (dest !== pathname)
-        return NextResponse.redirect(new URL(dest, req.nextUrl.origin));
+      return NextResponse.redirect(new URL(dest, req.nextUrl.origin));
     }
 
     if (role === "client") {
@@ -173,6 +172,7 @@ export async function middleware(req: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!_next|.*\\.(?:png|jpg|jpeg|gif|webp|svg|ico|css|js|map|txt|xml)|favicon\\.ico|robots\\.txt|sitemap\\.xml).*)",
+    "/((?!_next|.*\\.(?:png|jpg|jpeg|gif|webp|svg|ico|css|js|map|txt|xml|webmanifest)|favicon\\.ico|robots\\.txt|sitemap\\.xml).*)",
   ],
 };
+

@@ -1,3 +1,4 @@
+// src/components/MenuSection.tsx
 "use client";
 
 import React, { useEffect, useState, useCallback } from "react";
@@ -40,6 +41,17 @@ export interface SupabaseProduct {
   image_url?: string | null;
   available?: boolean | null;
 }
+
+const BG_DESKTOP = "/graffitiburger2.webp";
+const BG_MOBILE = "/backgroundsisi.jpg";
+
+// identyczny overlay jak w BurgerMiesiaca
+const OVERLAY_BG = `radial-gradient(
+  1200px 700px at 65% 55%,
+  rgba(0, 0, 0, 0.35),
+  rgba(0, 0, 0, 0.82)
+),
+rgba(0, 0, 0, 0.55)`;
 
 function parseIngredients(v: any): string[] {
   if (!v) return [];
@@ -117,7 +129,6 @@ const supabase = getSupabaseBrowser();
 
 export default function MenuSection() {
   const [selectedCategory, setSelectedCategory] = useState<string>("");
-  // UJEDNOLICONE: string ("" = brak)
   const [selectedSubcategory, setSelectedSubcategory] = useState<string>("");
 
   const [remoteMenu, setRemoteMenu] = useState<RawMenuCategory[] | null>(null);
@@ -135,7 +146,6 @@ export default function MenuSection() {
       const selectNoImage =
         "id, name, price, description, category, subcategory, ingredients, available";
 
-      // 1) próbujemy z image_url
       let data: SupabaseProduct[] | null = null;
       let error: any | null = null;
 
@@ -150,7 +160,6 @@ export default function MenuSection() {
       data = (r1.data as SupabaseProduct[] | null) ?? null;
       error = r1.error;
 
-      // 2) fallback bez image_url
       if (error && /image_url does not exist/i.test(String(error.message || ""))) {
         const r2 = await supabase
           .from("products")
@@ -228,13 +237,14 @@ export default function MenuSection() {
 
     if (!categoryData) return;
 
-    // jeżeli są subkategorie i obecna jest pusta / nie istnieje -> ustaw pierwszą
     if (categoryData.subcategories?.length) {
-      if (!selectedSubcategory || !categoryData.subcategories.some((s) => s.name === selectedSubcategory)) {
+      if (
+        !selectedSubcategory ||
+        !categoryData.subcategories.some((s) => s.name === selectedSubcategory)
+      ) {
         setSelectedSubcategory(categoryData.subcategories[0]?.name ?? "");
       }
     } else {
-      // brak subkategorii -> czyścimy
       if (selectedSubcategory) setSelectedSubcategory("");
     }
   }, [categoryData, selectedCategory, selectedSubcategory, sourceMenu]);
@@ -242,7 +252,9 @@ export default function MenuSection() {
   let products: any[] = [];
   if (categoryData) {
     if (categoryData.subcategories?.length && selectedSubcategory) {
-      const subcat = categoryData.subcategories.find((s) => s.name === selectedSubcategory) || categoryData.subcategories[0];
+      const subcat =
+        categoryData.subcategories.find((s) => s.name === selectedSubcategory) ||
+        categoryData.subcategories[0];
       products = subcat?.items || [];
     } else {
       products = categoryData.items || [];
@@ -250,99 +262,73 @@ export default function MenuSection() {
   }
 
   return (
-    <>
-      {/* === MOBILE === */}
-      <section id="menu" className="block md:hidden relative pt-16 pb-14 px-4 bg-transparent text-white overflow-hidden">
-        <div className="relative z-10 max-w-md mx-auto text-center">
-          <h2 className="text-3xl font-bold uppercase mb-3 inline-block border-b-4 border-yellow-400">
-            Menu
-          </h2>
+    <section id="menu" className="shared-sec relative w-full overflow-hidden text-white">
+      <div className="overlay" />
 
-          <div className="mt-1 flex justify-center">
-            <CategorySelector
-              selectedCategory={selectedCategory}
-              setSelectedCategory={(c: string) => {
-                setSelectedCategory(c);
-                const newCat = sourceMenu.find((x) => x.category === c);
-                setSelectedSubcategory(newCat?.subcategories?.[0]?.name ?? "");
-              }}
-              selectedSubcategory={selectedSubcategory}
-              setSelectedSubcategory={(v: string) => setSelectedSubcategory(v)}
-              subcategories={subcategories}
-            />
-          </div>
+      <div className="relative z-10 mx-auto max-w-6xl px-4 pt-16 pb-14 md:px-20 md:pt-[120px] md:pb-20 text-center">
+        <h2 className="text-3xl md:text-4xl font-bold uppercase mb-3 md:mb-6 inline-block border-b-4 border-yellow-400">
+          Menu
+        </h2>
 
-          {loadError && (
-            <p className="mt-3 text-sm text-pink-300">
-              Błąd ładowania: {loadError} Pokażę fallback / ostatnie dane.
-            </p>
-          )}
-
-          {loading && !products.length && <p className="text-center mt-6">Ładowanie…</p>}
-
-          <div className="mt-5 grid grid-cols-2 gap-3">
-            {products.map((product, index) => (
-              <div key={index} className="h-full [&>*]:h-full">
-                <ProductCard product={product} index={index} />
-              </div>
-            ))}
-            {!loading && products.length === 0 && (
-              <div className="col-span-2 text-center py-8">Brak produktów w tej kategorii.</div>
-            )}
-          </div>
+        <div className="mt-2 flex justify-center">
+          <CategorySelector
+            selectedCategory={selectedCategory}
+            setSelectedCategory={(c: string) => {
+              setSelectedCategory(c);
+              const newCat = sourceMenu.find((x) => x.category === c);
+              setSelectedSubcategory(newCat?.subcategories?.[0]?.name ?? "");
+            }}
+            selectedSubcategory={selectedSubcategory}
+            setSelectedSubcategory={(v: string) => setSelectedSubcategory(v)}
+            subcategories={subcategories}
+          />
         </div>
-      </section>
 
-      {/* === DESKTOP === */}
-      <section
-        id="menu"
-        className="hidden md:block relative pt-[120px] pb-20 px-6 md:px-20 text-white overflow-hidden"
-        style={{
-          backgroundImage: "url('/graffitiburger2.webp')",
-          backgroundPosition: "center top",
-          backgroundRepeat: "no-repeat",
-          backgroundSize: "cover",
-          backgroundAttachment: "fixed",
-        }}
-      >
-        <div className="absolute inset-0 bg-black opacity-80 z-0" />
-        <div className="relative z-10 max-w-6xl mx-auto text-center">
-          <h2 className="text-4xl font-bold uppercase mb-6 border-b-4 border-yellow-400 inline-block">
-            Menu
-          </h2>
+        {loadError && (
+          <p className="mt-3 md:mt-2 text-sm text-pink-300">
+            Błąd ładowania: {loadError} Pokażę fallback / ostatnie dane.
+          </p>
+        )}
 
-          <div className="mt-2 flex justify-center">
-            <CategorySelector
-              selectedCategory={selectedCategory}
-              setSelectedCategory={(c: string) => {
-                setSelectedCategory(c);
-                const newCat = sourceMenu.find((x) => x.category === c);
-                setSelectedSubcategory(newCat?.subcategories?.[0]?.name ?? "");
-              }}
-              selectedSubcategory={selectedSubcategory}
-              setSelectedSubcategory={(v: string) => setSelectedSubcategory(v)}
-              subcategories={subcategories}
-            />
-          </div>
+        {loading && !products.length && <p className="text-center mt-6">Ładowanie…</p>}
 
-          {loadError && (
-            <p className="text-sm text-pink-300 mb-2">
-              Błąd ładowania: {loadError} Pokażę fallback / ostatnie dane.
-            </p>
+        <div className="mt-5 md:mt-8 grid grid-cols-2 gap-3 sm:grid-cols-2 lg:grid-cols-4 md:gap-6 justify-items-center auto-rows-[1fr]">
+          {products.map((product, index) => (
+            <div key={index} className="h-full w-full [&>*]:h-full">
+              <ProductCard product={product} index={index} />
+            </div>
+          ))}
+
+          {!loading && products.length === 0 && (
+            <div className="col-span-2 lg:col-span-4 text-center py-8">
+              Brak produktów w tej kategorii.
+            </div>
           )}
-
-          <div className="grid gap-6 mt-8 sm:grid-cols-2 lg:grid-cols-4 justify-items-center auto-rows-[1fr]">
-            {products.map((product, index) => (
-              <div key={index} className="h-full [&>*]:h-full w-full">
-                <ProductCard product={product} index={index} />
-              </div>
-            ))}
-            {!loading && products.length === 0 && (
-              <div className="col-span-full text-center py-8">Brak produktów w tej kategorii.</div>
-            )}
-          </div>
         </div>
-      </section>
-    </>
+      </div>
+
+      <style jsx>{`
+        .shared-sec {
+          background-image: url("${BG_MOBILE}");
+          background-position: center top;
+          background-repeat: no-repeat;
+          background-size: cover;
+          background-attachment: scroll; /* mobile */
+        }
+        @media (min-width: 768px) {
+          .shared-sec {
+            background-image: url("${BG_DESKTOP}");
+            background-attachment: fixed; /* desktop */
+            background-position: center center;
+          }
+        }
+        .overlay {
+          position: absolute;
+          inset: 0;
+          background: ${OVERLAY_BG};
+          pointer-events: none;
+        }
+      `}</style>
+    </section>
   );
 }

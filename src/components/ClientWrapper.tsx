@@ -3,7 +3,6 @@
 import { useEffect } from "react";
 import { usePathname } from "next/navigation";
 import CartButton from "./CartButton";
-import FloatingLoginButton from "@/components/FloatingLoginButton";
 import CartPopup from "./menu/CartPopup";
 import CheckoutModal from "./menu/CheckoutModal";
 import Header from "./Header";
@@ -12,27 +11,34 @@ export default function ClientWrapper({ children }: { children: React.ReactNode 
   const pathname = usePathname();
   const isAdminRoute = pathname.startsWith("/admin");
 
-  // Rejestracja Service Workera globalnie (PWA + Push działa w całym scope "/").
-  // NIE prosimy tu o zgodę na powiadomienia i NIE robimy subskrypcji.
-  // Permission + subscribe robimy wyłącznie po kliknięciu przycisku w panelu.
+  // START marker: useEffect(() => {
+  // END marker: }, []);
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (!("serviceWorker" in navigator)) return;
 
     (async () => {
       try {
-        await navigator.serviceWorker.register("/sw.js", { scope: "/" });
-      } catch {
-        // ignore
+        // Rejestruj SW zawsze -> Chrome widzi stronę jako PWA-installable
+        await navigator.serviceWorker.register("/sw.js", {
+          scope: "/",
+          updateViaCache: "none",
+        });
+
+        // czekamy aż SW będzie gotowy (kontroluje scope)
+        await navigator.serviceWorker.ready;
+      } catch (e) {
+        console.warn("[sw] register failed", e);
       }
     })();
   }, []);
+  // START marker: useEffect(() => {
+  // END marker: }, []);
 
   return (
     <>
       {!isAdminRoute && <Header />}
       {children}
-      {!isAdminRoute && <FloatingLoginButton />}
       {!isAdminRoute && <CartButton />}
       {!isAdminRoute && <CartPopup />}
       {!isAdminRoute && <CheckoutModal />}

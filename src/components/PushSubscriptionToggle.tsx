@@ -40,6 +40,13 @@ export default function PushSubscriptionToggle({ className, showTestButton = tru
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // mała diagnostyka (pomaga szybko zrozumieć czemu nie ma promptu)
+  const [diag, setDiag] = useState<{ secure: boolean; sw: boolean; controller: boolean }>({
+    secure: true,
+    sw: true,
+    controller: true,
+  });
+
   const standalone = useMemo(() => {
     if (typeof window === "undefined") return false;
     return isStandaloneMode();
@@ -53,11 +60,17 @@ export default function PushSubscriptionToggle({ className, showTestButton = tru
   const refreshState = useCallback(async () => {
     setError(null);
 
-    const ok = typeof window !== "undefined"
-      && "Notification" in window
-      && "serviceWorker" in navigator
-      && "PushManager" in window;
+    const ok =
+      typeof window !== "undefined" &&
+      "Notification" in window &&
+      "serviceWorker" in navigator &&
+      "PushManager" in window;
 
+    const secure = typeof window !== "undefined" ? window.isSecureContext : false;
+    const hasSW = typeof navigator !== "undefined" ? "serviceWorker" in navigator : false;
+    const controller = typeof navigator !== "undefined" ? !!navigator.serviceWorker?.controller : false;
+
+    setDiag({ secure, sw: hasSW, controller });
     setSupported(ok);
 
     if (!ok) {
@@ -86,7 +99,15 @@ export default function PushSubscriptionToggle({ className, showTestButton = tru
   }, [refreshState]);
 
   const ensureSW = useCallback(async () => {
-    const reg = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+    // preferujemy istniejącą rejestrację (żeby nie robić duplikatów)
+    const existing = await navigator.serviceWorker.getRegistration("/");
+    if (existing) return existing;
+
+    const reg = await navigator.serviceWorker.register("/sw.js", {
+      scope: "/",
+      updateViaCache: "none",
+    });
+
     await navigator.serviceWorker.ready;
     return reg;
   }, []);
@@ -96,6 +117,7 @@ export default function PushSubscriptionToggle({ className, showTestButton = tru
     setError(null);
 
     try {
+      // iOS wymaga PWA z ekranu początkowego
       if (ios && !standalone) {
         throw new Error(
           "iOS/iPadOS: Web Push działa dopiero po dodaniu strony do ekranu początkowego (PWA) i uruchomieniu z ikony."
@@ -108,26 +130,50 @@ export default function PushSubscriptionToggle({ className, showTestButton = tru
         throw new Error("Brak obsługi Notification API w tej przeglądarce.");
       }
 
-      const perm = await Notification.requestPermission();
+      if (!window.isSecureContext) {
+        throw new Error("Brak secure context (HTTPS). Web Push nie zadziała bez HTTPS.");
+      }
+
+      // Upewniamy się, że SW jest zarejestrowany
+      const reg = await ensureSW();
+
+      // Bardzo ważne: po pierwszej rejestracji controller może być null dopóki nie zrobisz reload.
+      // Jeśli controller = null, push często "niby" się subskrybuje, ale później zachowanie jest nieprzewidywalne.
+      if (!navigator.serviceWorker.controller) {
+        throw new Error(
+          "Service Worker zarejestrowany, ale jeszcze nie kontroluje strony. Zrób odświeżenie (reload) i kliknij ponownie Włącz."
+        );
+      }
+
+      // Chrome może mieć 'quiet UI' — wtedy nie ma popupu.
+      // Nie wołamy requestPermission() jeśli już jest granted/denied.
+      let perm: NotificationPermission = Notification.permission;
+
+      if (perm === "default") {
+        perm = await Notification.requestPermission();
+      }
+
       setPermission(perm);
 
       if (perm === "denied") {
         throw new Error(
-          "Powiadomienia są ZABLOKOWANE dla tej witryny. Odblokuj je w ustawieniach przeglądarki/systemu i spróbuj ponownie."
+          "Powiadomienia są ZABLOKOWANE dla tej witryny. Wejdź w ustawienia witryny (kłódka/dzwonek przy adresie) i ustaw Powiadomienia na: Zezwalaj."
         );
       }
-      if (perm !== "granted") {
-        throw new Error("Nie przyznano uprawnień do powiadomień.");
+
+      if (perm === "default") {
+        throw new Error(
+          "Przeglądarka nie pokazała okna zgody (Chrome może używać 'cichego promptu'). Sprawdź ikonę dzwonka w pasku adresu albo Ustawienia witryny → Powiadomienia → Zezwalaj."
+        );
       }
 
-      const reg = await ensureSW();
-
-      const existing = await reg.pushManager.getSubscription();
-      if (existing) {
+      // Jeśli sub istnieje — tylko zapisujemy w backendzie
+      const existingSub = await reg.pushManager.getSubscription();
+      if (existingSub) {
         const res = await fetch("/api/push/subscribe", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(existing),
+          body: JSON.stringify(existingSub),
         });
 
         if (!res.ok) {
@@ -215,6 +261,7 @@ export default function PushSubscriptionToggle({ className, showTestButton = tru
   const label = useMemo(() => {
     if (supported === false) return "Brak wsparcia";
     if (permission === "denied") return "Zablokowane w przeglądarce";
+    if (permission === "default") return "Uprawnienia: nieustawione";
     if (subscribed) return "Powiadomienia: WŁĄCZONE";
     return "Powiadomienia: WYŁĄCZONE";
   }, [permission, subscribed, supported]);
@@ -263,13 +310,18 @@ export default function PushSubscriptionToggle({ className, showTestButton = tru
 
       {permission === "denied" && (
         <p className="mt-1 text-xs text-amber-700">
-          Powiadomienia są zablokowane dla tej witryny. Odblokuj je w ustawieniach przeglądarki (uprawnienia witryny) lub w ustawieniach systemu.
+          Powiadomienia są zablokowane dla tej witryny. Odblokuj je w ustawieniach witryny (kłódka/dzwonek) albo w ustawieniach systemu.
         </p>
       )}
 
-      {error && (
-        <p className="mt-1 text-xs text-rose-600">{error}</p>
+      {/* mini-diagnostyka */}
+      {supported !== false && (
+        <p className="mt-1 text-[11px] text-slate-500">
+          diag: secure={String(diag.secure)} • sw={String(diag.sw)} • controller={String(diag.controller)}
+        </p>
       )}
+
+      {error && <p className="mt-1 text-xs text-rose-600">{error}</p>}
     </div>
   );
 }
