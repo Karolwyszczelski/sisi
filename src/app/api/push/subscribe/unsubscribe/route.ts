@@ -5,19 +5,29 @@ import { cookies } from "next/headers";
 
 export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}));
-  const supabase = createRouteHandlerClient<Database>({ cookies });
 
-  const { data: { user } } = await supabase.auth.getUser();
+  // ✅ poprawne w App Router: przekazujemy cookieStore przez funkcję
+  const cookieStore = cookies();
+  const supabase = createRouteHandlerClient<Database>({
+    cookies: () => cookieStore,
+  });
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const endpoint = body?.endpoint;
-  if (!endpoint) return NextResponse.json({ error: "Brak endpoint." }, { status: 400 });
+  if (!endpoint || typeof endpoint !== "string") {
+    return NextResponse.json({ error: "Brak endpoint." }, { status: 400 });
+  }
 
   const { error } = await supabase
     .from("push_subscriptions")
     .delete()
-    .eq("endpoint", endpoint)
-    .eq("user_id", user.id);
+    .eq("user_id", user.id)
+    .eq("endpoint", endpoint);
 
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
 

@@ -1,4 +1,3 @@
-
 // sw.js (v1)
 const DEFAULT_URL = "/admin/current-orders";
 const DEFAULT_ICON = "/hamburger.png";
@@ -6,6 +5,15 @@ const DEFAULT_BADGE = "/favicon.ico";
 
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
+
+// Minimalny fetch handler (lepsza kompatybilność i stabilniejsze "installability" na części urządzeń)
+self.addEventListener("fetch", (event) => {
+  // nie ruszamy non-GET
+  if (!event.request || event.request.method !== "GET") return;
+
+  // brak cache'owania, po prostu przepuszczamy request
+  event.respondWith(fetch(event.request));
+});
 
 self.addEventListener("push", (event) => {
   let data = {};

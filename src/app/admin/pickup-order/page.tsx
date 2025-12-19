@@ -567,16 +567,26 @@ export default function PickupOrdersPage() {
     return () => clearInterval(iv);
   }, [orders]);
 
-  // dźwięk co 30 s dopóki są „new”
-  const hasNew = useMemo(() => orders.some((o) => o.status === "new"), [orders]);
-  useEffect(() => {
-    if (!initializedRef.current) return;
-    if (!hasNew) return;
-    const iv = setInterval(() => {
-      if (document.visibilityState === "visible") void playDing();
-    }, 30000);
-    return () => clearInterval(iv);
-  }, [hasNew, playDing]);
+  // dźwięk co 2 s dopóki są „new” (działa tylko gdy ekran/aplikacja jest aktywna;
+// na zablokowanym ekranie dźwięk zapewnia systemowa notyfikacja Web Push)
+const hasNew = useMemo(
+  () => orders.some((o) => o.status === "new" || o.status === "pending" || o.status === "placed"),
+  [orders]
+);
+
+useEffect(() => {
+  if (!initializedRef.current) return;
+  if (!hasNew) return;
+
+  const tick = () => {
+    if (document.visibilityState === "visible") void playDing();
+  };
+
+  tick();
+  const iv = setInterval(tick, 2000);
+  return () => clearInterval(iv);
+}, [hasNew, playDing]);
+
 
   // AUTO-refresh co 5s (taki sam jak przycisk) + odśwież po powrocie
   useEffect(() => {

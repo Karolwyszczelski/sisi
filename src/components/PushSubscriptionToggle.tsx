@@ -18,6 +18,14 @@ function isStandaloneMode() {
     || (typeof window !== "undefined" && window.matchMedia?.("(display-mode: standalone)")?.matches);
 }
 
+function isIOS() {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent || "";
+  const iOS = /iPad|iPhone|iPod/i.test(ua);
+  const iPadOS = navigator.platform === "MacIntel" && (navigator as any).maxTouchPoints > 1;
+  return iOS || iPadOS;
+}
+
 type Props = {
   className?: string;
   showTestButton?: boolean;
@@ -35,6 +43,11 @@ export default function PushSubscriptionToggle({ className, showTestButton = tru
   const standalone = useMemo(() => {
     if (typeof window === "undefined") return false;
     return isStandaloneMode();
+  }, []);
+
+  const ios = useMemo(() => {
+    if (typeof window === "undefined") return false;
+    return isIOS();
   }, []);
 
   const refreshState = useCallback(async () => {
@@ -83,6 +96,12 @@ export default function PushSubscriptionToggle({ className, showTestButton = tru
     setError(null);
 
     try {
+      if (ios && !standalone) {
+        throw new Error(
+          "iOS/iPadOS: Web Push działa dopiero po dodaniu strony do ekranu początkowego (PWA) i uruchomieniu z ikony."
+        );
+      }
+
       if (!vapidPublicKey) throw new Error("Brak NEXT_PUBLIC_VAPID_PUBLIC_KEY w env.");
 
       if (typeof window === "undefined" || !("Notification" in window)) {
@@ -92,13 +111,18 @@ export default function PushSubscriptionToggle({ className, showTestButton = tru
       const perm = await Notification.requestPermission();
       setPermission(perm);
 
+      if (perm === "denied") {
+        throw new Error(
+          "Powiadomienia są ZABLOKOWANE dla tej witryny. Odblokuj je w ustawieniach przeglądarki/systemu i spróbuj ponownie."
+        );
+      }
       if (perm !== "granted") {
-        throw new Error("Powiadomienia zablokowane lub nieprzyznane.");
+        throw new Error("Nie przyznano uprawnień do powiadomień.");
       }
 
       const reg = await ensureSW();
 
-            const existing = await reg.pushManager.getSubscription();
+      const existing = await reg.pushManager.getSubscription();
       if (existing) {
         const res = await fetch("/api/push/subscribe", {
           method: "POST",
@@ -114,7 +138,6 @@ export default function PushSubscriptionToggle({ className, showTestButton = tru
         setSubscribed(true);
         return;
       }
-
 
       const sub = await reg.pushManager.subscribe({
         userVisibleOnly: true,
@@ -139,7 +162,7 @@ export default function PushSubscriptionToggle({ className, showTestButton = tru
       setBusy(false);
       await refreshState();
     }
-  }, [ensureSW, refreshState, vapidPublicKey]);
+  }, [ensureSW, refreshState, vapidPublicKey, ios, standalone]);
 
   const disable = useCallback(async () => {
     setBusy(true);
@@ -203,8 +226,8 @@ export default function PushSubscriptionToggle({ className, showTestButton = tru
           <button
             className="h-10 rounded-md bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-50"
             onClick={enable}
-            disabled={busy || supported === false}
-            title={!standalone ? "Na iOS: dodaj stronę do ekranu początkowego, aby Web Push działał." : undefined}
+            disabled={busy || supported === false || (ios && !standalone)}
+            title={ios && !standalone ? "iOS/iPadOS: dodaj stronę do ekranu początkowego (PWA) i uruchom z ikony." : undefined}
           >
             Włącz powiadomienia
           </button>
@@ -232,9 +255,15 @@ export default function PushSubscriptionToggle({ className, showTestButton = tru
         <span className="text-xs text-slate-600">{label}</span>
       </div>
 
-      {!standalone && (
+      {ios && !standalone && (
         <p className="mt-1 text-xs text-slate-500">
-          iOS/iPadOS: Web Push działa po dodaniu strony do ekranu początkowego (PWA).
+          iOS/iPadOS: Web Push działa dopiero po dodaniu strony do ekranu początkowego (PWA) i uruchomieniu z ikony.
+        </p>
+      )}
+
+      {permission === "denied" && (
+        <p className="mt-1 text-xs text-amber-700">
+          Powiadomienia są zablokowane dla tej witryny. Odblokuj je w ustawieniach przeglądarki (uprawnienia witryny) lub w ustawieniach systemu.
         </p>
       )}
 
