@@ -2,7 +2,7 @@
 "use client";
 
 import Link from "next/link";
-import { ShoppingCart, Phone, Facebook, Instagram, Mail, ShieldCheck, FileText } from "lucide-react";
+import { ShoppingCart, Phone, Facebook, Instagram, Mail, ShieldCheck, FileText, LayoutDashboard } from "lucide-react";
 
 const TERMS_VERSION = process.env.NEXT_PUBLIC_TERMS_VERSION || "2025-09-15";
 
@@ -114,6 +114,12 @@ export default function Footer() {
               <ShieldCheck className="w-5 h-5 mr-2" aria-hidden="true" />
               <Link href="/cookies" className="hover:text-primary">Polityka cookies</Link>
             </li>
+<li className="flex items-center justify-center md:justify-start">
+  <LayoutDashboard className="w-5 h-5 mr-2" aria-hidden="true" />
+  <Link href="/admin" className="hover:text-primary">
+    Panel administratora
+  </Link>
+</li>
             <li className="flex items-center justify-center md:justify-start">
               <button
                 type="button"
