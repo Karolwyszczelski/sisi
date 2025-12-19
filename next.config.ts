@@ -9,8 +9,8 @@ const csp = [
   "img-src 'self' blob: data: https://*.googleusercontent.com https://*.ggpht.com https://maps.gstatic.com https://maps.googleapis.com https://lottie.host",
   "media-src 'self'",
   "object-src 'none'",
-  "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://maps.googleapis.com https://maps.gstatic.com https://www.googletagmanager.com https://challenges.cloudflare.com",
-  "script-src-elem 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://maps.googleapis.com https://maps.gstatic.com https://www.googletagmanager.com https://challenges.cloudflare.com",
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: https://maps.googleapis.com https://maps.gstatic.com https://www.googletagmanager.com https://challenges.cloudflare.com",
+  "script-src-elem 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: https://maps.googleapis.com https://maps.gstatic.com https://www.googletagmanager.com https://challenges.cloudflare.com",
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://maps.googleapis.com https://*.googleapis.com https://*.google.com https://secure.przelewy24.pl https://sandbox.przelewy24.pl https://challenges.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com https://lottie.host",
   "frame-src 'self' https://*.google.com https://*.gstatic.com https://challenges.cloudflare.com https://secure.przelewy24.pl https://sandbox.przelewy24.pl",
@@ -40,6 +40,16 @@ const nextConfig: NextConfig = {
 
   async headers() {
     return [
+      // PWA: nie cache'uj manifestu i SW (Android często trzyma stare wersje)
+      {
+        source: "/manifest.webmanifest",
+        headers: [{ key: "Cache-Control", value: "no-store" }],
+      },
+      {
+        source: "/sw.js",
+        headers: [{ key: "Cache-Control", value: "no-store" }],
+      },
+
       {
         source: "/(.*)",
         headers: [
@@ -51,9 +61,22 @@ const nextConfig: NextConfig = {
           {
             key: "Permissions-Policy",
             value: [
-              "accelerometer=()","ambient-light-sensor=()","autoplay=()","camera=()","display-capture=()",
-              "encrypted-media=()","fullscreen=()","geolocation=()","gyroscope=()","magnetometer=()",
-              "microphone=()","midi=()","payment=()","picture-in-picture=()","usb=()","xr-spatial-tracking=()",
+              "accelerometer=()",
+              "ambient-light-sensor=()",
+              "autoplay=()",
+              "camera=()",
+              "display-capture=()",
+              "encrypted-media=()",
+              "fullscreen=()",
+              "geolocation=()",
+              "gyroscope=()",
+              "magnetometer=()",
+              "microphone=()",
+              "midi=()",
+              "payment=()",
+              "picture-in-picture=()",
+              "usb=()",
+              "xr-spatial-tracking=()",
             ].join(", "),
           },
           { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
@@ -61,14 +84,13 @@ const nextConfig: NextConfig = {
           { key: "Content-Language", value: "pl" },
         ],
       },
+
       { source: "/order/:path*", headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }] },
       { source: "/admin/:path*", headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }] },
       {
-      source: "/wp-:slug(.*)",
-      headers: [
-        { key: "X-Robots-Tag", value: "noindex, nofollow" },
-      ],
-    },
+        source: "/wp-:slug(.*)",
+        headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }],
+      },
       { source: "/xmlrpc.php", headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }] },
       { source: "/category/:path*", headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }] },
       { source: "/tag/:path*", headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }] },
@@ -77,12 +99,12 @@ const nextConfig: NextConfig = {
 
   // TWARDY CUT parametrów z dawnych WP (zapytania typu ?s=, ?p= itd.)
   async redirects() {
-    const spamParams = ["s","p","m","paged","cat","attachment_id","replytocom"] as const;
+    const spamParams = ["s", "p", "m", "paged", "cat", "attachment_id", "replytocom"] as const;
     const rules = spamParams.map((key) => ({
-      source: "/:path*",                             // dowolna ścieżka
-      has: [{ type: "query", key } as const],        // jeśli dany parametr istnieje
-      destination: "/gone",                          // przenosimy na /gone
-      permanent: false,                              // 302/307
+      source: "/:path*",
+      has: [{ type: "query", key } as const],
+      destination: "/gone",
+      permanent: false,
     }));
     return rules;
   },

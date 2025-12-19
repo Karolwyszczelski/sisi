@@ -138,7 +138,7 @@ export default function OnasSection() {
             position: absolute;
             inset: 0;
             background: radial-gradient(
-                1200px 700px at 65% 55%,
+                1200px 700px at 25% 55%,
                 rgba(0, 0, 0, 0.35),
                 rgba(0, 0, 0, 0.82)
               ),

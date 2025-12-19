@@ -75,13 +75,13 @@ const { session, role } = await getSessionAndRole();
     let rows: (Row & { updated_at?: string | null })[] = [];
     let r1 = await supabase
       .from("orders")
-      .select("id, created_at, updated_at, status, total_price, payment_status, items, deliveryTime, client_delivery_time")
+      .select("id, created_at, updated_at, status, total_price, payment_status, items, delivery_time, client_delivery_time")
       .gte("created_at", sinceISO);
 
     if (r1.error) {
       const r2 = await supabase
         .from("orders")
-        .select("id, created_at, status, total_price, payment_status, items, deliveryTime, client_delivery_time")
+        .select("id, created_at, status, total_price, payment_status, items, delivery_time, client_delivery_time")
         .gte("created_at", sinceISO);
       if (r2.error) throw r2.error;
       rows = (r2.data as any) ?? [];
@@ -112,8 +112,8 @@ const { session, role } = await getSessionAndRole();
       let minutes: number | null = null;
       if (o.status === "completed" && o.updated_at) {
         minutes = Math.max(0, Math.round((+new Date(o.updated_at) - +new Date(o.created_at!)) / 60000));
-      } else if ((o as any).deliveryTime) {
-        minutes = Math.max(0, Math.round((+new Date((o as any).deliveryTime) - +new Date(o.created_at!)) / 60000));
+      } else if ((o as any).delivery_time) {
+        minutes = Math.max(0, Math.round((+new Date((o as any).delivery_time) - +new Date(o.created_at!)) / 60000));
       } else if ((o as any).client_delivery_time) {
         minutes = Math.max(0, Math.round((+new Date((o as any).client_delivery_time) - +new Date(o.created_at!)) / 60000));
       }

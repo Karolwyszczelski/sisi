@@ -3,6 +3,7 @@ import "./globals.css";
 import type { Metadata, Viewport } from "next";
 import { Montserrat, Covered_By_Your_Grace, Smooch, Anton } from "next/font/google";
 import Image from "next/image";
+import Script from "next/script";
 import ClientWrapper from "@/components/ClientWrapper";
 import ClientProvider from "@/components/ClientProvider";
 import Footer from "@/components/Footer";
@@ -83,6 +84,20 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head>
         <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(restaurantLd) }} />
         <meta name="format-detection" content="telephone=no" />
+        <link rel="manifest" href="/manifest.webmanifest" />
+<meta name="theme-color" content="#000000" />
+
+<Script
+  id="sw-register"
+  strategy="beforeInteractive"
+>{`
+  try {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js', { scope: '/', updateViaCache: 'none' }).catch(() => {});
+    }
+  } catch {}
+`}</Script>
+
       </head>
       <body className={`${montserrat.className} ${covered.variable} ${smooch.variable} ${anton.variable} bg-[#fff800] text-black relative overflow-x-hidden`}>
         {/* Mobile tło – nie łapie tapów */}
