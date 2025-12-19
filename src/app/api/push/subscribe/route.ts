@@ -5,7 +5,10 @@ import { cookies } from "next/headers";
 
 export async function POST(req: Request) {
   const sub = await req.json().catch(() => ({}));
-  const supabase = createRouteHandlerClient<Database>({ cookies });
+  const cookieStore = cookies();
+  const supabase = createRouteHandlerClient<Database>({
+    cookies: () => cookieStore,
+  });
 
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

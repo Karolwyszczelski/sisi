@@ -56,7 +56,7 @@ export default function PushSubscriptionToggle({ className, showTestButton = tru
     setPermission(Notification.permission);
 
     try {
-      const reg = await navigator.serviceWorker.getRegistration();
+      const reg = await navigator.serviceWorker.getRegistration("/");
       if (!reg) {
         setSubscribed(false);
         return;
@@ -74,6 +74,7 @@ export default function PushSubscriptionToggle({ className, showTestButton = tru
 
   const ensureSW = useCallback(async () => {
     const reg = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+    await navigator.serviceWorker.ready;
     return reg;
   }, []);
 
@@ -97,16 +98,23 @@ export default function PushSubscriptionToggle({ className, showTestButton = tru
 
       const reg = await ensureSW();
 
-      const existing = await reg.pushManager.getSubscription();
+            const existing = await reg.pushManager.getSubscription();
       if (existing) {
-        setSubscribed(true);
-        await fetch("/api/push/subscribe", {
+        const res = await fetch("/api/push/subscribe", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(existing),
         });
+
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body?.error || "Backend nie zapisał subskrypcji (existing).");
+        }
+
+        setSubscribed(true);
         return;
       }
+
 
       const sub = await reg.pushManager.subscribe({
         userVisibleOnly: true,
@@ -138,7 +146,7 @@ export default function PushSubscriptionToggle({ className, showTestButton = tru
     setError(null);
 
     try {
-      const reg = await navigator.serviceWorker.getRegistration();
+      const reg = await navigator.serviceWorker.getRegistration("/");
       const sub = await reg?.pushManager.getSubscription();
       if (sub) {
         await fetch("/api/push/unsubscribe", {
