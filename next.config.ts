@@ -63,7 +63,12 @@ const nextConfig: NextConfig = {
       },
       { source: "/order/:path*", headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }] },
       { source: "/admin/:path*", headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }] },
-      { source: "/wp-:slug*(.*)", headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }] },
+      {
+      source: "/wp-:slug(.*)",
+      headers: [
+        { key: "X-Robots-Tag", value: "noindex, nofollow" },
+      ],
+    },
       { source: "/xmlrpc.php", headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }] },
       { source: "/category/:path*", headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }] },
       { source: "/tag/:path*", headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }] },
