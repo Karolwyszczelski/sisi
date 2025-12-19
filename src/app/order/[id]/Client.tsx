@@ -17,7 +17,12 @@ const fmtHM = (iso?: string | null) => {
   if (!iso) return null;
   const t = Date.parse(iso);
   if (Number.isNaN(t)) return null;
-  return new Date(t).toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" });
+  return new Date(t).toLocaleTimeString("pl-PL", {
+  timeZone: "Europe/Warsaw",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
 };
 
 const optionLabel = (opt?: S["option"]) =>

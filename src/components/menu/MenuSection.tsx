@@ -1,4 +1,3 @@
-// src/components/MenuSection.tsx
 "use client";
 
 import React, { useEffect, useState, useCallback } from "react";
@@ -33,36 +32,65 @@ export interface RawMenuCategory {
 export interface SupabaseProduct {
   id: string;
   name: string;
-  price: string;
+  price: number | string | null;
   description: string | null;
   category: string | null;
   subcategory: string | null;
-  ingredients: string[] | null;
+  ingredients: string[] | string | null;
   image_url?: string | null;
-  available?: boolean;
+  available?: boolean | null;
+}
+
+function parseIngredients(v: any): string[] {
+  if (!v) return [];
+  if (Array.isArray(v)) return v.map(String).map((s) => s.trim()).filter(Boolean);
+
+  if (typeof v === "string") {
+    const s = v.trim();
+    if (!s) return [];
+    try {
+      const parsed = JSON.parse(s);
+      return parseIngredients(parsed);
+    } catch {
+      return s.split(",").map((x) => x.trim()).filter(Boolean);
+    }
+  }
+
+  if (typeof v === "object") {
+    if (Array.isArray((v as any).items)) return parseIngredients((v as any).items);
+    return Object.values(v).map(String).map((s) => s.trim()).filter(Boolean);
+  }
+
+  return [];
+}
+
+function money(v: any): number {
+  if (typeof v === "number" && Number.isFinite(v)) return Math.round(v * 100) / 100;
+  const s = String(v ?? "0").replace(/[^0-9,.\-]/g, "").replace(",", ".");
+  const n = Number(s);
+  return Number.isFinite(n) ? Math.round(n * 100) / 100 : 0;
 }
 
 function normalizeSupabaseData(data: SupabaseProduct[]): RawMenuCategory[] {
   const map: Record<string, Record<string, any[]>> = {};
+
   data.forEach((p) => {
     if (p.available === false) return;
+
     const cat = p.category || "Inne";
     const sub = p.subcategory;
+
     if (!map[cat]) map[cat] = {};
+
     const itemObj = {
       name: p.name,
-      price: typeof p.price === "number"
-  ? Math.round(p.price * 100) / 100
-  : (() => {
-      const s = String(p.price ?? "0").replace(/[^0-9,.\-]/g, "").replace(",", ".");
-      const n = Number(s);
-      return Number.isFinite(n) ? Math.round(n * 100) / 100 : 0;
-    })(),
+      price: money(p.price),
       description: p.description || undefined,
-      ingredients: Array.isArray(p.ingredients) ? p.ingredients : [],
+      ingredients: parseIngredients(p.ingredients),
       imageUrl: p.image_url || undefined,
       available: p.available ?? true,
     };
+
     if (sub) {
       if (!map[cat][sub]) map[cat][sub] = [];
       map[cat][sub].push(itemObj);
@@ -76,6 +104,7 @@ function normalizeSupabaseData(data: SupabaseProduct[]): RawMenuCategory[] {
     const subcategories = Object.entries(subs)
       .filter(([name]) => name !== "__base__")
       .map(([name, items]) => ({ name, items: items as any[] }));
+
     return {
       category,
       subcategories: subcategories.length ? subcategories : undefined,
@@ -88,6 +117,7 @@ const supabase = getSupabaseBrowser();
 
 export default function MenuSection() {
   const [selectedCategory, setSelectedCategory] = useState<string>("");
+  // UJEDNOLICONE: string ("" = brak)
   const [selectedSubcategory, setSelectedSubcategory] = useState<string>("");
 
   const [remoteMenu, setRemoteMenu] = useState<RawMenuCategory[] | null>(null);
@@ -98,35 +128,56 @@ export default function MenuSection() {
   const fetchFromSupabase = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
+
     try {
-      let res = await supabase
-        .from<SupabaseProduct>("products")
-        .select("id, name, price, description, category, subcategory, ingredients, image_url, available")
+      const selectWithImage =
+        "id, name, price, description, category, subcategory, ingredients, image_url, available";
+      const selectNoImage =
+        "id, name, price, description, category, subcategory, ingredients, available";
+
+      // 1) próbujemy z image_url
+      let data: SupabaseProduct[] | null = null;
+      let error: any | null = null;
+
+      const r1 = await supabase
+        .from("products")
+        .select(selectWithImage)
         .eq("available", true)
         .order("category", { ascending: true })
         .order("subcategory", { ascending: true })
         .order("name", { ascending: true });
 
-      if (res.error && /image_url does not exist/.test(res.error.message)) {
-        res = await supabase
-          .from<SupabaseProduct>("products")
-          .select("id, name, price, description, category, subcategory, ingredients, available")
+      data = (r1.data as SupabaseProduct[] | null) ?? null;
+      error = r1.error;
+
+      // 2) fallback bez image_url
+      if (error && /image_url does not exist/i.test(String(error.message || ""))) {
+        const r2 = await supabase
+          .from("products")
+          .select(selectNoImage)
           .eq("available", true)
           .order("category", { ascending: true })
           .order("subcategory", { ascending: true })
           .order("name", { ascending: true });
+
+        data = (r2.data as SupabaseProduct[] | null) ?? null;
+        error = r2.error;
       }
 
-      if (res.error) {
+      if (error) {
         setUseFallback(true);
         setLoadError("Błąd ładowania z serwera. Pokażę lokalne menu.");
-      } else if (res.data && res.data.length > 0) {
-        const normalized = normalizeSupabaseData(res.data);
+      } else if (data && data.length > 0) {
+        const normalized = normalizeSupabaseData(data);
         setRemoteMenu(normalized);
+
         if (!selectedCategory || !normalized.find((c) => c.category === selectedCategory)) {
-          setSelectedCategory(normalized[0]?.category || "");
-          setSelectedSubcategory(normalized[0]?.subcategories?.[0]?.name || "");
+          const nextCat = normalized[0]?.category || "";
+          const nextSub = normalized[0]?.subcategories?.[0]?.name ?? "";
+          setSelectedCategory(nextCat);
+          setSelectedSubcategory(nextSub);
         }
+
         setUseFallback(false);
       } else {
         setUseFallback(true);
@@ -141,47 +192,66 @@ export default function MenuSection() {
 
   useEffect(() => {
     fetchFromSupabase();
+
     const channel = supabase
       .channel("public:products")
       .on("postgres_changes", { event: "*", schema: "public", table: "products" }, () => {
         fetchFromSupabase();
       })
       .subscribe();
+
     return () => {
       void supabase.removeChannel(channel);
     };
   }, [fetchFromSupabase]);
 
-  const sourceMenu: RawMenuCategory[] = useFallback || !remoteMenu ? (menu as RawMenuCategory[]) : remoteMenu;
+  const sourceMenu: RawMenuCategory[] =
+    useFallback || !remoteMenu ? (menu as RawMenuCategory[]) : remoteMenu;
 
-  const categoryData = sourceMenu.find((cat) => cat.category === selectedCategory) || sourceMenu[0] || null;
-  const subcategories = categoryData?.subcategories ? categoryData.subcategories.map((sub) => sub.name) : [];
+  const categoryData =
+    sourceMenu.find((cat) => cat.category === selectedCategory) || sourceMenu[0] || null;
+
+  const subcategories = categoryData?.subcategories
+    ? categoryData.subcategories.map((sub) => sub.name)
+    : [];
 
   useEffect(() => {
-    if (categoryData) {
-      if (!selectedSubcategory || !categoryData.subcategories?.find((s) => s.name === selectedSubcategory)) {
-        setSelectedSubcategory(categoryData.subcategories?.[0]?.name || "");
-      }
+    if (!sourceMenu.length) return;
+
+    if (!selectedCategory) {
+      const firstCat = sourceMenu[0].category;
+      const firstSub = sourceMenu[0].subcategories?.[0]?.name ?? "";
+      setSelectedCategory(firstCat);
+      setSelectedSubcategory(firstSub);
+      return;
     }
-    if (!selectedCategory && sourceMenu.length) {
-      setSelectedCategory(sourceMenu[0].category);
-      setSelectedSubcategory(sourceMenu[0].subcategories?.[0]?.name || "");
+
+    if (!categoryData) return;
+
+    // jeżeli są subkategorie i obecna jest pusta / nie istnieje -> ustaw pierwszą
+    if (categoryData.subcategories?.length) {
+      if (!selectedSubcategory || !categoryData.subcategories.some((s) => s.name === selectedSubcategory)) {
+        setSelectedSubcategory(categoryData.subcategories[0]?.name ?? "");
+      }
+    } else {
+      // brak subkategorii -> czyścimy
+      if (selectedSubcategory) setSelectedSubcategory("");
     }
   }, [categoryData, selectedCategory, selectedSubcategory, sourceMenu]);
 
   let products: any[] = [];
   if (categoryData) {
-    if (categoryData.subcategories && selectedSubcategory && categoryData.subcategories.find((s) => s.name === selectedSubcategory)) {
-      const subcat = categoryData.subcategories.find((s) => s.name === selectedSubcategory);
+    if (categoryData.subcategories?.length && selectedSubcategory) {
+      const subcat = categoryData.subcategories.find((s) => s.name === selectedSubcategory) || categoryData.subcategories[0];
       products = subcat?.items || [];
     } else {
-      products = categoryData?.items || [];
+      products = categoryData.items || [];
     }
   }
 
   return (
     <>
-      {/* === MOBILE (kafelki 2 kolumny, bez slidera) === */}
+      {/* === MOBILE === */}
       <section id="menu" className="block md:hidden relative pt-16 pb-14 px-4 bg-transparent text-white overflow-hidden">
         <div className="relative z-10 max-w-md mx-auto text-center">
           <h2 className="text-3xl font-bold uppercase mb-3 inline-block border-b-4 border-yellow-400">
@@ -191,13 +261,13 @@ export default function MenuSection() {
           <div className="mt-1 flex justify-center">
             <CategorySelector
               selectedCategory={selectedCategory}
-              setSelectedCategory={(c) => {
+              setSelectedCategory={(c: string) => {
                 setSelectedCategory(c);
                 const newCat = sourceMenu.find((x) => x.category === c);
-                setSelectedSubcategory(newCat?.subcategories?.[0]?.name || "");
+                setSelectedSubcategory(newCat?.subcategories?.[0]?.name ?? "");
               }}
               selectedSubcategory={selectedSubcategory}
-              setSelectedSubcategory={setSelectedSubcategory}
+              setSelectedSubcategory={(v: string) => setSelectedSubcategory(v)}
               subcategories={subcategories}
             />
           </div>
@@ -208,9 +278,8 @@ export default function MenuSection() {
             </p>
           )}
 
-          {(loading && !products.length) && <p className="text-center mt-6">Ładowanie…</p>}
+          {loading && !products.length && <p className="text-center mt-6">Ładowanie…</p>}
 
-          {/* siatka kafelków: 2 kolumny (małe karty) */}
           <div className="mt-5 grid grid-cols-2 gap-3">
             {products.map((product, index) => (
               <div key={index} className="h-full [&>*]:h-full">
@@ -245,13 +314,13 @@ export default function MenuSection() {
           <div className="mt-2 flex justify-center">
             <CategorySelector
               selectedCategory={selectedCategory}
-              setSelectedCategory={(c) => {
+              setSelectedCategory={(c: string) => {
                 setSelectedCategory(c);
                 const newCat = sourceMenu.find((x) => x.category === c);
-                setSelectedSubcategory(newCat?.subcategories?.[0]?.name || "");
+                setSelectedSubcategory(newCat?.subcategories?.[0]?.name ?? "");
               }}
               selectedSubcategory={selectedSubcategory}
-              setSelectedSubcategory={setSelectedSubcategory}
+              setSelectedSubcategory={(v: string) => setSelectedSubcategory(v)}
               subcategories={subcategories}
             />
           </div>

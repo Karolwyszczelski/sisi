@@ -56,7 +56,7 @@ function extractProductNames(items: any): string[] {
 // ===== route =====
 export async function GET(request: Request) {
   // 1) Auth
-  const { session, role } = await getSessionAndRole(request);
+const { session, role } = await getSessionAndRole();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (role !== "admin" && role !== "employee") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 

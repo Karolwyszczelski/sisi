@@ -17,6 +17,29 @@ interface Order {
   deliveryTime?: string;
 }
 
+// === START INSERT: TZ helpers ===
+const APP_TZ = "Europe/Warsaw";
+
+const fmtDateTimePL = (iso?: string | null) => {
+  if (!iso) return "–";
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return "–";
+  return new Date(t).toLocaleString("pl-PL", { timeZone: APP_TZ });
+};
+
+const fmtTimePL = (iso?: string | null) => {
+  if (!iso) return "–";
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return "–";
+  return new Date(t).toLocaleTimeString("pl-PL", {
+    timeZone: APP_TZ,
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
+// === END INSERT: TZ helpers ===
+
+
 export default function CurrentOrdersPage() {
   const supabase = createClientComponentClient<Database>();
   const [orders, setOrders] = useState<Order[]>([]);
@@ -69,9 +92,9 @@ export default function CurrentOrdersPage() {
                 <tr key={o.id} className="border-b">
                   <td className="px-4 py-2">{i + 1}</td>
                   <td className="px-4 py-2">
-                    {new Date(o.created_at).toLocaleString("pl-PL")}
+                    {fmtDateTimePL(o.created_at)}
                   </td>
-                  <td className="px-4 py-2">{o.customer_name}</td>
+                  <td className="px-4 py-2">{o.customer_name || (o as any).name || "—"}</td>
                   <td className="px-4 py-2">{o.total_price} zł</td>
                   <td className="px-4 py-2">
                     {o.selected_option === "local"
@@ -81,12 +104,7 @@ export default function CurrentOrdersPage() {
                       : "Dostawa"}
                   </td>
                   <td className="px-4 py-2">
-                    {o.deliveryTime
-                      ? new Date(o.deliveryTime).toLocaleTimeString("pl-PL", {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })
-                      : "–"}
+                    {fmtTimePL(o.deliveryTime)}
                   </td>
                 </tr>
               ))}

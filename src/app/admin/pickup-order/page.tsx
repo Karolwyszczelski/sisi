@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 import EditOrderButton from "@/components/EditOrderButton";
 import CancelButton from "@/components/CancelButton";
+import PushSubscriptionToggle from "@/components/PushSubscriptionToggle";
 
 type Any = Record<string, any>;
 type PaymentMethod = "Gotówka" | "Terminal" | "Online";
@@ -19,7 +20,7 @@ interface Order {
   created_at: string;
   status: "new" | "pending" | "placed" | "accepted" | "cancelled" | "completed";
   clientDelivery?: string;
-  deliveryTime?: string;
+  delivery_time?: string;
   address?: string;
   street?: string;
   flat_number?: string;
@@ -30,7 +31,10 @@ interface Order {
   selected_option?: "local" | "takeaway" | "delivery";
   payment_method?: PaymentMethod;
   payment_status?: PaymentStatus;
+  order_note?: string | null;
 }
+
+const APP_TZ = "Europe/Warsaw";
 
 const getOptionLabel = (opt?: Order["selected_option"]) =>
   opt === "delivery" ? "DOSTAWA" : opt === "takeaway" ? "NA WYNOS" : opt === "local" ? "NA MIEJSCU" : "BRAK";
@@ -470,7 +474,7 @@ export default function PickupOrdersPage() {
         created_at: o.created_at,
         status: o.status,
         clientDelivery: o.client_delivery_time ?? o.delivery_time ?? o.clientDelivery,
-        deliveryTime: o.deliveryTime,
+        delivery_time: o.delivery_time ?? o.delivery_time ?? undefined,
         address:
           o.selected_option === "delivery"
             ? `${o.street || ""}${o.flat_number ? `, nr ${o.flat_number}` : ""}${o.city ? `, ${o.city}` : ""}`
@@ -479,6 +483,7 @@ export default function PickupOrdersPage() {
         flat_number: o.flat_number,
         city: o.city,
         phone: o.phone,
+        order_note: o.order_note ?? null,
         items: o.items ?? o.order_items ?? [],
         selected_option: o.selected_option,
         payment_method: (o.payment_method as PaymentMethod) ?? "Gotówka",
@@ -612,26 +617,26 @@ export default function PickupOrdersPage() {
       const res = await fetch(`/api/orders/${order.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "accepted", deliveryTime: dt }),
+        body: JSON.stringify({ status: "accepted", delivery_time: dt }),
       });
       if (!res.ok) return;
-      updateLocal(order.id, { status: "accepted", deliveryTime: dt });
+      updateLocal(order.id, { status: "accepted", delivery_time: dt });
       fetchOrders();
     } finally { setEditingOrderId(null); }
   };
 
   const extendTime = async (order: Order, minutes: number) => {
-    const base = order.deliveryTime && !isNaN(Date.parse(order.deliveryTime)) ? new Date(order.deliveryTime) : new Date();
+    const base = order.delivery_time && !isNaN(Date.parse(order.delivery_time)) ? new Date(order.delivery_time) : new Date();
     const dt = new Date(base.getTime() + minutes * 60000).toISOString();
     try {
       setEditingOrderId(order.id);
       const res = await fetch(`/api/orders/${order.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ deliveryTime: dt }),
+        body: JSON.stringify({ delivery_time: dt }),
       });
       if (!res.ok) return;
-      updateLocal(order.id, { deliveryTime: dt });
+      updateLocal(order.id, { delivery_time: dt });
       fetchOrders();
     } finally { setEditingOrderId(null); }
   };
@@ -790,13 +795,19 @@ export default function PickupOrdersPage() {
                       <b>Klient:</b> {o.name || "—"}
                       <span className="ml-3">
                         <b>Czas (klient):</b>{" "}
-                        {o.clientDelivery === "asap" ? "Jak najszybciej" : o.clientDelivery ? new Date(o.clientDelivery).toLocaleTimeString() : "-"}
+{o.clientDelivery === "asap"
+  ? "Jak najszybciej"
+  : o.clientDelivery
+    ? new Date(o.clientDelivery).toLocaleTimeString("pl-PL", { timeZone: APP_TZ, hour: "2-digit", minute: "2-digit" })
+    : "-"}
                       </span>
                     </div>
                   </div>
                   <div className="flex items-center gap-3 text-sm">
-                    {o.status === "accepted" && o.deliveryTime && <InlineCountdown targetTime={o.deliveryTime} onComplete={() => completeOrder(o.id)} />}
-                    <span className="text-slate-600">{new Date(o.created_at).toLocaleString()}</span>
+                    {o.status === "accepted" && o.delivery_time && <InlineCountdown targetTime={o.delivery_time} onComplete={() => completeOrder(o.id)} />}
+<span className="text-slate-600">
+  {new Date(o.created_at).toLocaleString("pl-PL", { timeZone: APP_TZ })}
+</span>
                   </div>
                 </header>
 
@@ -812,7 +823,14 @@ export default function PickupOrdersPage() {
                     {o.selected_option === "delivery" && typeof o.delivery_cost === "number" && <div><b>Dostawa:</b> {o.delivery_cost.toFixed(2)} zł</div>}
                     {o.selected_option === "delivery" && o.address && <div><b>Adres:</b> {o.address}</div>}
                     {o.phone && <div><b>Telefon:</b> {o.phone}</div>}
-
+                    {o.order_note && o.order_note.trim() && (
+                      <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-[12px] text-amber-900">
+                        <b>Notatka do zamówienia:</b>{" "}
+                        <span className="whitespace-pre-wrap break-words">
+                          {o.order_note.trim()}
+                        </span>
+                      </div>
+                    )}
                     <div className="mt-1">
                       <b>Płatność:</b>{" "}
                       <span className="inline-flex items-center gap-2">
@@ -830,6 +848,7 @@ export default function PickupOrdersPage() {
                         {o.payment_method === "Online" && (
                           <>
                             <span className="ml-1">{paymentBadge(o)}</span>
+                             {o.order_note && o.order_note.trim() && <Badge tone="yellow">NOTATKA</Badge>}
                             {o.payment_status === "pending" && (
                               <button
                                 onClick={() => refreshPaymentStatus(o.id)}
@@ -944,13 +963,16 @@ export default function PickupOrdersPage() {
           <button className="h-10 rounded-md border px-3 text-sm" onClick={() => setSortOrder((o) => (o === "desc" ? "asc" : "desc"))}>
             {sortOrder === "desc" ? "Najnowsze" : "Najstarsze"}
           </button>
-          <button
-            className="ml-auto h-10 rounded-md bg-emerald-600 px-4 text-sm font-semibold text-white hover:bg-emerald-500"
-            onClick={() => fetchOrders()}
-            disabled={loading}
-          >
-            Odśwież
-          </button>
+          <div className="ml-auto flex items-center gap-2">
+  <PushSubscriptionToggle />
+  <button
+    className="h-10 rounded-md bg-emerald-600 px-4 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
+    onClick={() => fetchOrders()}
+    disabled={loading}
+  >
+    Odśwież
+  </button>
+</div>
         </div>
       </div>
 

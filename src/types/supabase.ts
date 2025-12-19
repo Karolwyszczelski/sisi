@@ -3,6 +3,11 @@ export type Json = string | number | boolean | null | { [key: string]: Json } | 
 export interface Database {
   public: {
     Tables: {
+  [key: string]: any;
+  Row: Record<string, any>;
+    Insert: Record<string, any>;
+    Update: Record<string, any>;
+    Relationships: any[];
       reservations: {
         Row: {
           id: string;

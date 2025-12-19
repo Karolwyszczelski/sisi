@@ -5,7 +5,13 @@ import type { Database } from "@/types/supabase";
 
 export async function getSessionAndRole() {
   // 1) Tworzymy klienta z dostępem do ciasteczek
-  const supabase = createRouteHandlerClient<Database>({ cookies });
+  const cookieStore = await cookies();
+
+  // Next 15: cookies() jest async, a auth-helpers oczekuje obiektu store'a cookies (nie Promise).
+  // Dlatego przekazujemy już await-nięty cookieStore i rzutujemy typ, żeby TS nie krzyczał.
+  const supabase = createRouteHandlerClient<Database>({
+    cookies: () => cookieStore as any,
+  });
 
   // 2) Pobieramy sesję
   const {
@@ -21,7 +27,7 @@ export async function getSessionAndRole() {
     .from("profiles")
     .select("role")
     .eq("id", session.user.id)
-    .single();
+    .single<{ role: string | null }>();
 
   if (error) {
     console.error("Błąd pobierania profilu:", error);

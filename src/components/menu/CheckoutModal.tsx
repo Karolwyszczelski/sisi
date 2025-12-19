@@ -57,6 +57,7 @@ const TERMS_VERSION = process.env.NEXT_PUBLIC_TERMS_VERSION || "2025-09-15";
 const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || "";
 const THANKS_QR_URL = process.env.NEXT_PUBLIC_REVIEW_QR_URL || "https://g.co/kgs/47NSDMH";
 
+
 type Zone = {
   id: string;
   min_distance_km: number;
@@ -147,6 +148,21 @@ const isBurger = (meta?: Product, name?: string) => {
   return cat === "burger" || n.includes("burger");
 };
 
+const isFries = (meta?: Product, name?: string) => {
+  const n = (name || meta?.name || "").toLowerCase();
+  const cat = (meta?.category || "").toLowerCase();
+  const sub = (meta?.subcategory || "").toLowerCase();
+
+  // łapiemy: "frytki", "fryty", "fries" + ewentualne odmiany
+  return (
+    n.includes("fryt") ||
+    sub.includes("fryt") ||
+    cat.includes("fryt") ||
+    n.includes("fries")
+  );
+};
+
+
 const MEAT_OPTIONS: Array<"wołowina" | "kurczak"> = ["wołowina", "kurczak"];
 
 /* child */
@@ -154,8 +170,8 @@ const ProductItem: React.FC<{
   prod: any;
   meta?: Product | undefined;
   defaultMeat: "wołowina" | "kurczak" | null;
-  helpers: {
-    changeMeatType: (name: string, type: string) => void;
+    helpers: {
+    changeMeatType: (name: string, type: "wołowina" | "kurczak") => void;
     addExtraMeat: (name: string) => void;
     removeExtraMeat: (name: string) => void;
     addAddon: (name: string, addon: string) => void;
@@ -171,17 +187,29 @@ const ProductItem: React.FC<{
   const priceNum = toPrice(prod.price);
 
   // dodatki i mięso tylko dla burgerów
+    // burger: pełne dodatki; frytki: tylko sosy
   const burger = isBurger(meta, prod?.name);
+  const fries = isFries(meta, prod?.name);
+
+  const addonPool = burger ? AVAILABLE_ADDONS : fries ? SAUCES : [];
+  const sanitizedAddons: string[] = (prod.addons ?? []).filter((a: string) => addonPool.includes(a));
+
   const addonsCost = burger
-    ? (prod.addons ?? []).reduce((sum: number, addon: string) => sum + (SAUCES.includes(addon) ? 3 : 4), 0)
-    : 0;
+    ? sanitizedAddons.reduce((sum: number, addon: string) => sum + (SAUCES.includes(addon) ? 3 : 4), 0)
+    : fries
+      ? sanitizedAddons.length * 3
+      : 0;
+
   const extraMeatCost = burger ? (prod.extraMeatCount || 0) * 10 : 0;
 
   const lineTotal = (priceNum + addonsCost + extraMeatCost) * (prod.quantity || 1);
 
-  const selectedMeat = (prod.meatType as string | undefined) ?? (burger ? defaultMeat : null) ?? null;
+  const selectedMeat =
+    (prod.meatType as string | undefined) ?? (burger ? defaultMeat : null) ?? null;
+
   const supportsMeat = burger && selectedMeat !== null;
-  const supportsAddons = burger;
+  const supportsAddons = burger || fries;
+  const addonsTitle = burger ? "Dodatki:" : "Sosy:";
 
   return (
     <div className="border p-3 rounded bg-gray-50 relative">
@@ -211,25 +239,29 @@ const ProductItem: React.FC<{
           </>
         )}
 
-        {supportsAddons && (
+                {supportsAddons && (
           <>
-            <div className="font-semibold mt-2">Dodatki:</div>
+            <div className="font-semibold mt-2">{addonsTitle}</div>
             <div className="flex flex-wrap gap-2">
-              {AVAILABLE_ADDONS.map((add) => (
-                <button
-                  key={add}
-                  onClick={() => (prod.addons?.includes(add) ? removeAddon(prod.name, add) : addAddon(prod.name, add))}
-                  className={clsx(
-                    "border text-xs px-2 py-1 rounded",
-                    prod.addons?.includes(add) ? "bg-gray-800 text-white border-gray-900" : "bg-white text-black hover:bg-gray-50"
-                  )}
-                >
-                  {prod.addons?.includes(add) ? `✓ ${add}` : `+ ${add}`}
-                </button>
-              ))}
+              {addonPool.map((add) => {
+                const has = prod.addons?.includes(add);
+                return (
+                  <button
+                    key={add}
+                    onClick={() => (has ? removeAddon(prod.name, add) : addAddon(prod.name, add))}
+                    className={clsx(
+                      "border text-xs px-2 py-1 rounded",
+                      has ? "bg-gray-800 text-white border-gray-900" : "bg-white text-black hover:bg-gray-50"
+                    )}
+                  >
+                    {has ? `✓ ${add}` : `+ ${add}`}
+                  </button>
+                );
+              })}
             </div>
           </>
         )}
+
 
         {supportsMeat && (
           <>
@@ -248,7 +280,7 @@ const ProductItem: React.FC<{
           </>
         )}
 
-        {supportsAddons && !!prod.availableSwaps?.length && (
+        {burger && !!prod.availableSwaps?.length && (
           <>
             <div className="font-semibold mt-2">Wymiana składnika:</div>
             <div className="flex flex-wrap gap-2">
@@ -376,6 +408,7 @@ export default function CheckoutModal() {
   } = useCartStore();
 
   const [notes, setNotes] = useState<{ [key: number]: string }>({});
+  const [orderNote, setOrderNote] = useState<string>("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
@@ -603,12 +636,21 @@ export default function CheckoutModal() {
       const qty = it.quantity || 1;
       const priceNum = toPrice(it.price);
       const meta = productByNorm.get(normalizeName(it.name));
-      const burger = isBurger(meta, it?.name);
+            const burger = isBurger(meta, it?.name);
+      const fries = isFries(meta, it?.name);
+
+      const addonPool = burger ? AVAILABLE_ADDONS : fries ? SAUCES : [];
+      const sanitizedAddons: string[] = (it.addons ?? []).filter((a: string) => addonPool.includes(a));
+
       const addonsCost = burger
-        ? (it.addons ?? []).reduce((sum: number, addon: string) => sum + (SAUCES.includes(addon) ? 3 : 4), 0)
-        : 0;
+        ? sanitizedAddons.reduce((sum: number, addon: string) => sum + (SAUCES.includes(addon) ? 3 : 4), 0)
+        : fries
+          ? sanitizedAddons.length * 3
+          : 0;
+
       const extraMeatCost = burger ? (it.extraMeatCount || 0) * 10 : 0;
       return acc + (priceNum + addonsCost + extraMeatCost) * qty;
+
     }, 0);
   }, [items, productByNorm]);
 
@@ -747,6 +789,8 @@ export default function CheckoutModal() {
     setPromoError(null);
     setLegalAccepted(false);
     removeTurnstile();
+    setNotes({});
+    setOrderNote("");
   };
 
   const productHelpers = {
@@ -777,6 +821,7 @@ export default function CheckoutModal() {
       discount_amount: 0,
       promo_code: promo?.code || null,
       legal_accept: { terms_version: TERMS_VERSION, privacy_version: TERMS_VERSION, marketing_opt_in: false },
+      order_note: orderNote.trim() ? orderNote.trim().slice(0, 500) : null,
       status: "placed",
     };
     if (selectedOption === "delivery") {
@@ -800,7 +845,14 @@ export default function CheckoutModal() {
       // jeżeli w koszyku mamy już id, użyjemy go; w przeciwnym razie dopasujemy po nazwie
       const meta = item.product_id ? { id: item.product_id } as Product : findMetaByName(item.name);
       const inferred = inferDefaultMeat(meta, item.name);
-      const burger = isBurger(meta, item.name);
+            const burger = isBurger(meta, item.name);
+      const fries = isFries(meta, item.name);
+
+      const sanitizedAddons: string[] = burger
+        ? (item.addons ?? [])
+        : fries
+          ? (item.addons ?? []).filter((a: string) => SAUCES.includes(a))
+          : [];
 
       return {
         product_id: (meta as any)?.id ?? null,
@@ -810,11 +862,12 @@ export default function CheckoutModal() {
         options: {
           meatType: burger ? (item.meatType ?? inferred) : null,
           extraMeatCount: burger ? item.extraMeatCount : 0,
-          addons: burger ? item.addons : [],
+          addons: sanitizedAddons,
           swaps: burger ? item.swaps : [],
           note: notes[index] || "",
         },
       };
+
     });
 
   const hoursGuardFail = () => {
@@ -1222,13 +1275,38 @@ export default function CheckoutModal() {
                           const defaultMeat = inferDefaultMeat(meta, item.name);
                           return (
                             <div key={idx}>
-                              <ProductItem prod={item} meta={meta} defaultMeat={defaultMeat} helpers={productHelpers} />
+                              <ProductItem
+  prod={item}
+  meta={meta}
+  defaultMeat={defaultMeat}
+  helpers={productHelpers}
+/>
+
                               <textarea className="w-full text-xs border rounded px-2 py-1 mt-1" placeholder="Notatka do produktu" value={notes[idx] || ""} onChange={(e) => setNotes({ ...notes, [idx]: e.target.value })} />
                             </div>
                           );
                         })}
                         {items.length === 0 && <p className="text-center text-gray-500">Brak produktów w koszyku.</p>}
                       </div>
+                      
+<div className="flex-1">
+  <div className="mt-3">
+    <h3 className="font-semibold text-sm mb-1">Notatka do zamówienia (opcjonalnie)</h3>
+    <textarea
+      className="w-full text-sm border rounded px-3 py-2"
+      placeholder="Np. nie dzwonić domofonem, proszę o sztućce, itp."
+      value={orderNote}
+      onChange={(e) => setOrderNote(e.target.value)}
+      maxLength={500}
+      disabled={submitting}
+    />
+    <div className="text-[11px] text-gray-500 mt-1">
+      Maks. 500 znaków.
+    </div>
+  </div>
+</div>
+
+
 
                       {/* MOBILE SUMMARY */}
                       <div className="w-full lg:hidden flex-shrink-0">
@@ -1357,7 +1435,14 @@ export default function CheckoutModal() {
                   <p className="text-xs text-red-600">Minimalna wartość zamówienia dla tej strefy: {deliveryMinRequired.toFixed(2)} zł.</p>
                 )}
 
-                <PromoSectionExternal promo={promo} promoError={promoError} onApply={applyPromo} onClear={clearPromo} />
+           <PromoSectionExternal
+  promo={promo}
+  promoError={promoError}
+  autoPromo={autoPromo}
+  onApply={applyPromo}
+  onClear={clearPromo}
+/>
+
 
                 {discount > 0 && <div className="flex justify-between text-green-700"><span>Rabat:</span><span>-{discount.toFixed(2)} zł</span></div>}
 

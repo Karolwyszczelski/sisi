@@ -27,18 +27,26 @@ const emptyZone: Omit<Zone, "id"> = {
   cost_per_km: 0,
 };
 
+const coerceZones = (j: any): Zone[] => {
+  if (Array.isArray(j)) return j as Zone[];
+  if (Array.isArray(j?.zones)) return j.zones as Zone[];
+  return [];
+};
+
 export default function DeliveryZonesForm() {
   const [zones, setZones] = useState<Zone[]>([]);
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
-  const [draft, setDraft] = useState(emptyZone);
+  const [draft, setDraft] = useState<Omit<Zone, "id">>(emptyZone);
   const [error, setError] = useState<string | null>(null);
 
   const sorted = useMemo(
     () =>
       [...zones].sort(
-        (a, b) => a.min_distance_km - b.min_distance_km || a.max_distance_km - b.max_distance_km
+        (a, b) =>
+          a.min_distance_km - b.min_distance_km ||
+          a.max_distance_km - b.max_distance_km
       ),
     [zones]
   );
@@ -46,14 +54,16 @@ export default function DeliveryZonesForm() {
   async function load() {
     setLoading(true);
     setError(null);
+
     const r = await fetch("/api/admin/delivery-zones", { cache: "no-store" });
     if (!r.ok) {
       setError("Nie udało się pobrać stref.");
       setLoading(false);
       return;
     }
-    const j = await r.json();
-    setZones(j.zones || []);
+
+    const j = await r.json().catch(() => null);
+    setZones(coerceZones(j));
     setLoading(false);
   }
 
@@ -64,17 +74,21 @@ export default function DeliveryZonesForm() {
   async function create() {
     setCreating(true);
     setError(null);
+
     const r = await fetch("/api/admin/delivery-zones", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(draft),
     });
+
     setCreating(false);
+
     if (!r.ok) {
       const j = await r.json().catch(() => ({}));
       setError(j?.error || "Błąd zapisu.");
       return;
     }
+
     setDraft(emptyZone);
     await load();
   }
@@ -82,43 +96,58 @@ export default function DeliveryZonesForm() {
   async function save(z: Zone) {
     setSavingId(z.id);
     setError(null);
+
     const { id, ...payload } = z;
     const r = await fetch(`/api/admin/delivery-zones/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
+
     setSavingId(null);
+
     if (!r.ok) {
       const j = await r.json().catch(() => ({}));
       setError(j?.error || "Błąd zapisu.");
       return;
     }
+
     await load();
   }
 
   async function remove(id: string) {
     if (!confirm("Usunąć tę strefę?")) return;
-    const r = await fetch(`/api/admin/delivery-zones/${id}`, { method: "DELETE" });
+
+    const r = await fetch(`/api/admin/delivery-zones/${id}`, {
+      method: "DELETE",
+    });
+
     if (!r.ok) {
       const j = await r.json().catch(() => ({}));
       setError(j?.error || "Błąd usuwania.");
       return;
     }
+
     setZones((prev) => prev.filter((x) => x.id !== id));
   }
 
-  function editLocal(id: string, key: keyof Zone, val: any) {
-    setZones((prev) => prev.map((z) => (z.id === id ? { ...z, [key]: val } : z)));
+  function editLocal<K extends keyof Zone>(id: string, key: K, val: Zone[K]) {
+    setZones((prev) =>
+      prev.map((z) => (z.id === id ? { ...z, [key]: val } : z))
+    );
   }
 
   return (
     <div className="space-y-4">
-      {error && <div className="rounded-md border border-rose-200 bg-rose-50 p-3 text-rose-700">{error}</div>}
+      {error && (
+        <div className="rounded-md border border-rose-200 bg-rose-50 p-3 text-rose-700">
+          {error}
+        </div>
+      )}
 
-      {/* Lista stref */}
       <div className="rounded-md border bg-white">
         <div className="border-b p-3 font-semibold">Strefy dostawy</div>
+
         <div className="divide-y">
           {loading ? (
             <div className="p-4 text-sm text-slate-600">Ładowanie…</div>
@@ -126,16 +155,56 @@ export default function DeliveryZonesForm() {
             <div className="p-4 text-sm text-slate-600">Brak stref.</div>
           ) : (
             sorted.map((z) => (
-              <div key={z.id} className="grid grid-cols-1 gap-3 p-3 md:grid-cols-12 md:items-center">
-                <Num label="Min km" value={z.min_distance_km} onChange={(v) => editLocal(z.id, "min_distance_km", v)} />
-                <Num label="Max km" value={z.max_distance_km} onChange={(v) => editLocal(z.id, "max_distance_km", v)} />
-                <Num label="Min zam. (zł)" value={z.min_order_value} onChange={(v) => editLocal(z.id, "min_order_value", v)} />
-                <Num label="Koszt (zł)" value={z.cost} onChange={(v) => editLocal(z.id, "cost", v)} />
-                <Num label="Free od (zł)" value={z.free_over ?? 0} nullable onChange={(v) => editLocal(z.id, "free_over", v)} />
-                <Num label="ETA min" value={z.eta_min_minutes} onChange={(v) => editLocal(z.id, "eta_min_minutes", v)} />
-                <Num label="ETA max" value={z.eta_max_minutes} onChange={(v) => editLocal(z.id, "eta_max_minutes", v)} />
-                <Num label="Stała (zł)" value={z.cost_fixed} onChange={(v) => editLocal(z.id, "cost_fixed", v)} />
-                <Num label="zł/km" value={z.cost_per_km} onChange={(v) => editLocal(z.id, "cost_per_km", v)} />
+              <div
+                key={z.id}
+                className="grid grid-cols-1 gap-3 p-3 md:grid-cols-12 md:items-center"
+              >
+                <Num
+                  label="Min km"
+                  value={z.min_distance_km}
+                  onChange={(v) => editLocal(z.id, "min_distance_km", v)}
+                />
+                <Num
+                  label="Max km"
+                  value={z.max_distance_km}
+                  onChange={(v) => editLocal(z.id, "max_distance_km", v)}
+                />
+                <Num
+                  label="Min zam. (zł)"
+                  value={z.min_order_value}
+                  onChange={(v) => editLocal(z.id, "min_order_value", v)}
+                />
+                <Num
+                  label="Koszt (legacy)"
+                  value={z.cost}
+                  onChange={(v) => editLocal(z.id, "cost", v)}
+                />
+                <NumNullable
+                  label="Free od (zł)"
+                  value={z.free_over}
+                  onChange={(v) => editLocal(z.id, "free_over", v)}
+                />
+                <Num
+                  label="ETA min"
+                  value={z.eta_min_minutes}
+                  onChange={(v) => editLocal(z.id, "eta_min_minutes", v)}
+                />
+                <Num
+                  label="ETA max"
+                  value={z.eta_max_minutes}
+                  onChange={(v) => editLocal(z.id, "eta_max_minutes", v)}
+                />
+                <Num
+                  label="Stała (zł)"
+                  value={z.cost_fixed}
+                  onChange={(v) => editLocal(z.id, "cost_fixed", v)}
+                />
+                <Num
+                  label="zł/km"
+                  value={z.cost_per_km}
+                  onChange={(v) => editLocal(z.id, "cost_per_km", v)}
+                />
+
                 <div className="md:col-span-2 flex gap-2">
                   <button
                     onClick={() => save(z)}
@@ -157,19 +226,56 @@ export default function DeliveryZonesForm() {
         </div>
       </div>
 
-      {/* Dodawanie */}
       <div className="rounded-md border bg-white">
         <div className="border-b p-3 font-semibold">Dodaj strefę</div>
+
         <div className="grid grid-cols-1 gap-3 p-3 md:grid-cols-12 md:items-center">
-          <Num label="Min km" value={draft.min_distance_km} onChange={(v) => setDraft({ ...draft, min_distance_km: v })} />
-          <Num label="Max km" value={draft.max_distance_km} onChange={(v) => setDraft({ ...draft, max_distance_km: v })} />
-          <Num label="Min zam. (zł)" value={draft.min_order_value} onChange={(v) => setDraft({ ...draft, min_order_value: v })} />
-          <Num label="Koszt (zł)" value={draft.cost} onChange={(v) => setDraft({ ...draft, cost: v })} />
-          <Num label="Free od (zł)" value={draft.free_over ?? 0} nullable onChange={(v) => setDraft({ ...draft, free_over: v })} />
-          <Num label="ETA min" value={draft.eta_min_minutes} onChange={(v) => setDraft({ ...draft, eta_min_minutes: v })} />
-          <Num label="ETA max" value={draft.eta_max_minutes} onChange={(v) => setDraft({ ...draft, eta_max_minutes: v })} />
-          <Num label="Stała (zł)" value={draft.cost_fixed} onChange={(v) => setDraft({ ...draft, cost_fixed: v })} />
-          <Num label="zł/km" value={draft.cost_per_km} onChange={(v) => setDraft({ ...draft, cost_per_km: v })} />
+          <Num
+            label="Min km"
+            value={draft.min_distance_km}
+            onChange={(v) => setDraft({ ...draft, min_distance_km: v })}
+          />
+          <Num
+            label="Max km"
+            value={draft.max_distance_km}
+            onChange={(v) => setDraft({ ...draft, max_distance_km: v })}
+          />
+          <Num
+            label="Min zam. (zł)"
+            value={draft.min_order_value}
+            onChange={(v) => setDraft({ ...draft, min_order_value: v })}
+          />
+          <Num
+            label="Koszt (legacy)"
+            value={draft.cost}
+            onChange={(v) => setDraft({ ...draft, cost: v })}
+          />
+          <NumNullable
+            label="Free od (zł)"
+            value={draft.free_over}
+            onChange={(v) => setDraft({ ...draft, free_over: v })}
+          />
+          <Num
+            label="ETA min"
+            value={draft.eta_min_minutes}
+            onChange={(v) => setDraft({ ...draft, eta_min_minutes: v })}
+          />
+          <Num
+            label="ETA max"
+            value={draft.eta_max_minutes}
+            onChange={(v) => setDraft({ ...draft, eta_max_minutes: v })}
+          />
+          <Num
+            label="Stała (zł)"
+            value={draft.cost_fixed}
+            onChange={(v) => setDraft({ ...draft, cost_fixed: v })}
+          />
+          <Num
+            label="zł/km"
+            value={draft.cost_per_km}
+            onChange={(v) => setDraft({ ...draft, cost_per_km: v })}
+          />
+
           <div className="md:col-span-2">
             <button
               onClick={create}
@@ -185,17 +291,38 @@ export default function DeliveryZonesForm() {
   );
 }
 
-function Num({
-  label,
-  value,
-  onChange,
-  nullable = false,
-}: {
+/** number-only (nie-null) */
+function Num(props: {
+  label: string;
+  value: number;
+  onChange: (v: number) => void;
+}) {
+  const { label, value, onChange } = props;
+
+  return (
+    <label className="flex flex-col gap-1 md:col-span-1">
+      <span className="text-[12px] text-slate-600">{label}</span>
+      <input
+        type="number"
+        className="h-9 rounded-md border px-2"
+        value={Number.isFinite(value) ? value : 0}
+        onChange={(e) => {
+          const n = Number(e.target.value);
+          onChange(Number.isFinite(n) ? n : 0);
+        }}
+      />
+    </label>
+  );
+}
+
+/** number|null */
+function NumNullable(props: {
   label: string;
   value: number | null;
   onChange: (v: number | null) => void;
-  nullable?: boolean;
 }) {
+  const { label, value, onChange } = props;
+
   return (
     <label className="flex flex-col gap-1 md:col-span-1">
       <span className="text-[12px] text-slate-600">{label}</span>
@@ -204,9 +331,13 @@ function Num({
         className="h-9 rounded-md border px-2"
         value={value ?? ""}
         onChange={(e) => {
-          const v = e.target.value;
-          if (nullable && v === "") onChange(null);
-          else onChange(Number(v));
+          const raw = e.target.value;
+          if (raw === "") {
+            onChange(null);
+            return;
+          }
+          const n = Number(raw);
+          onChange(Number.isFinite(n) ? n : null);
         }}
       />
     </label>

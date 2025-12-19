@@ -4,6 +4,9 @@ import React, { useEffect, useState } from "react";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 import Link from "next/link";
 
+const APP_TZ = "Europe/Warsaw";
+
+
 export default function OrdersTable({ limit }: { limit?: number }) {
   const supabase = createClientComponentClient();
   const [orders, setOrders] = useState<any[]>([]);
@@ -33,7 +36,7 @@ export default function OrdersTable({ limit }: { limit?: number }) {
             <td>{o.customer_name}</td>
             <td>{o.total_price} zł</td>
             <td>{o.status}</td>
-            <td>{new Date(o.created_at).toLocaleString()}</td>
+            <td>{new Date(o.created_at).toLocaleString("pl-PL", { timeZone: APP_TZ })}</td>
           </tr>
         ))}
       </tbody>

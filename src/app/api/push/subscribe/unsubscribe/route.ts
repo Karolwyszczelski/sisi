@@ -4,30 +4,20 @@ import type { Database } from "@/types/supabase";
 import { cookies } from "next/headers";
 
 export async function POST(req: Request) {
-  const sub = await req.json().catch(() => ({}));
+  const body = await req.json().catch(() => ({}));
   const supabase = createRouteHandlerClient<Database>({ cookies });
 
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  if (!sub?.endpoint || !sub?.keys) {
-    return NextResponse.json({ error: "Nieprawidłowa subskrypcja." }, { status: 400 });
-  }
-
-  const userAgent = req.headers.get("user-agent");
+  const endpoint = body?.endpoint;
+  if (!endpoint) return NextResponse.json({ error: "Brak endpoint." }, { status: 400 });
 
   const { error } = await supabase
     .from("push_subscriptions")
-    .upsert(
-      {
-        user_id: user.id,
-        endpoint: sub.endpoint,
-        keys: sub.keys,
-        user_agent: userAgent,
-        last_seen_at: new Date().toISOString(),
-      },
-      { onConflict: "endpoint" }
-    );
+    .delete()
+    .eq("endpoint", endpoint)
+    .eq("user_id", user.id);
 
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
 

@@ -4,7 +4,8 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { toZonedTime } from "date-fns-tz";
+import { toZonedTime, fromZonedTime } from "date-fns-tz";
+import { sendNewOrderPush } from "@/lib/pushServer";
 
 /* === email + link śledzenia === */
 import { trackingUrl } from "@/lib/orderLink";
@@ -72,6 +73,16 @@ const normalizePhone = (phone?: string | null): string | null => {
   const e164 = "+" + digits;
   return /^\+[1-9]\d{8,14}$/.test(e164) ? e164 : null;
 };
+
+// === START INSERT: normalizeOrderNote ===
+const normalizeOrderNote = (v: any): string | null => {
+  if (typeof v !== "string") return null;
+  const s = v.trim();
+  if (!s) return null;
+  return s.slice(0, 500);
+};
+// === END INSERT: normalizeOrderNote ===
+
 
 const toArray = (val: any): any[] =>
   Array.isArray(val) ? val : val == null ? [] : [val];
@@ -238,6 +249,95 @@ const haversineKm = (a:{lat:number;lng:number}, b:{lat:number;lng:number}) => {
   return 2 * R * Math.asin(Math.sqrt(s1));
 };
 
+// === START INSERT: Google driving distance (optional) ===
+const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY || "";
+
+async function getDrivingDistanceKm(
+  origin: { lat: number; lng: number },
+  dest: { lat: number; lng: number }
+): Promise<number | null> {
+  if (!GOOGLE_MAPS_API_KEY) return null;
+
+  const url =
+    `https://maps.googleapis.com/maps/api/distancematrix/json` +
+    `?origins=${encodeURIComponent(`${origin.lat},${origin.lng}`)}` +
+    `&destinations=${encodeURIComponent(`${dest.lat},${dest.lng}`)}` +
+    `&mode=driving&units=metric&key=${GOOGLE_MAPS_API_KEY}`;
+
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) return null;
+
+  const data = await res.json().catch(() => null);
+  if (data?.status !== "OK") return null;
+
+  const el = data?.rows?.[0]?.elements?.[0];
+  if (!el || el.status !== "OK") return null;
+
+  const meters = Number(el.distance?.value);
+  if (!Number.isFinite(meters)) return null;
+
+  return meters / 1000;
+}
+// === END INSERT: Google driving distance (optional) ===
+
+
+// === START INSERT: TZ helpers (Europe/Warsaw) ===
+const APP_TZ = "Europe/Warsaw";
+
+type TzParts = {
+  year: number; month: number; day: number;
+  hour: number; minute: number; second: number;
+};
+
+const getTzParts = (date: Date, timeZone: string): TzParts => {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+
+  const out: Record<string, string> = {};
+  for (const p of parts) if (p.type !== "literal") out[p.type] = p.value;
+
+  return {
+    year: Number(out.year),
+    month: Number(out.month),
+    day: Number(out.day),
+    hour: Number(out.hour),
+    minute: Number(out.minute),
+    second: Number(out.second),
+  };
+};
+
+const getOffsetMs = (date: Date, timeZone: string): number => {
+  const p = getTzParts(date, timeZone);
+  const asUtc = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second);
+  return asUtc - date.getTime();
+};
+
+const zonedDateTimeToUtc = (
+  p: { year: number; month: number; day: number; hour: number; minute: number; second?: number },
+  timeZone: string
+): Date => {
+  const desiredAsUtc = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second ?? 0);
+
+  // 1) pierwsze przybliżenie
+  let utc = desiredAsUtc - getOffsetMs(new Date(desiredAsUtc), timeZone);
+
+  // 2) drugi przebieg (ważne na granicach DST)
+  const off2 = getOffsetMs(new Date(utc), timeZone);
+  utc = desiredAsUtc - off2;
+
+  return new Date(utc);
+};
+// === END INSERT: TZ helpers (Europe/Warsaw) ===
+
+
 /* ----- Promo picker + czas klienta ----- */
 function pickPromo(v: any): string | null {
   const src = v || {};
@@ -252,25 +352,74 @@ function pickPromo(v: any): string | null {
   return null;
 }
 
-function normalizeClientTime(v: any): string | null {
-  if (!v) return null;
-  if (typeof v === "string" && v.toLowerCase() === "asap") return "asap";
-  if (typeof v === "string") {
-    const m = v.match(/^(\d{1,2}):(\d{2})$/);
-    const tz = "Europe/Warsaw";
-    if (m) {
-      const hh = Math.max(0, Math.min(23, parseInt(m[1], 10)));
-      const mm = Math.max(0, Math.min(59, parseInt(m[2], 10)));
-      const now = toZonedTime(new Date(), tz);
-      const dt = new Date(now);
-      dt.setHours(hh, mm, 0, 0);
-      if (dt.getTime() < now.getTime()) dt.setDate(dt.getDate() + 1);
-      return dt.toISOString();
-    }
-    const d = new Date(v);
-    if (!isNaN(d.getTime())) return d.toISOString();
+type ClientTimeNorm = { client_delivery_time: string | null; delivery_time: string | null };
+
+function normalizeClientTime(v: any): ClientTimeNorm {
+  if (!v) return { client_delivery_time: null, delivery_time: null };
+
+  if (typeof v === "string" && v.trim().toLowerCase() === "asap") {
+    return { client_delivery_time: "asap", delivery_time: null };
   }
-  return null;
+
+  const tz = APP_TZ;
+  const pad2 = (n: number) => String(n).padStart(2, "0");
+  const ymd = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+
+  const parseHHMM = (s: string) => {
+    const m = s.match(/^(\d{1,2}):(\d{2})$/);
+    if (!m) return null;
+    const hh = Math.max(0, Math.min(23, parseInt(m[1], 10)));
+    const mm = Math.max(0, Math.min(59, parseInt(m[2], 10)));
+    return { hh, mm };
+  };
+
+  if (typeof v === "string") {
+    const s = v.trim();
+    const hm = parseHHMM(s);
+
+    // 1) "HH:mm" z FE -> client_delivery_time="HH:mm", deliveryTime=UTC ISO (dziś/jutro w PL)
+    if (hm) {
+      const { hh, mm } = hm;
+
+      const nowUtc = new Date();
+      const nowPl = toZonedTime(nowUtc, tz);
+
+      const localIsoToday = `${ymd(nowPl)}T${pad2(hh)}:${pad2(mm)}:00`;
+      let utcDate = fromZonedTime(localIsoToday, tz);
+
+      if (utcDate.getTime() < nowUtc.getTime()) {
+        const tomorrowPl = new Date(nowPl);
+        tomorrowPl.setDate(tomorrowPl.getDate() + 1);
+        const localIsoTomorrow = `${ymd(tomorrowPl)}T${pad2(hh)}:${pad2(mm)}:00`;
+        utcDate = fromZonedTime(localIsoTomorrow, tz);
+      }
+
+      return {
+        client_delivery_time: `${pad2(hh)}:${pad2(mm)}`,
+        delivery_time: utcDate.toISOString(),
+      };
+    }
+
+    // 2) Jeśli przyszło ISO/date-string -> client_delivery_time wyliczamy w PL, deliveryTime = ISO UTC
+    const d = new Date(s);
+    if (!isNaN(d.getTime())) {
+      const pl = toZonedTime(d, tz);
+      return {
+        client_delivery_time: `${pad2(pl.getHours())}:${pad2(pl.getMinutes())}`,
+        delivery_time: d.toISOString(),
+      };
+    }
+  }
+
+  if (v instanceof Date && !isNaN(v.getTime())) {
+    const pl = toZonedTime(v, tz);
+    return {
+      client_delivery_time: `${pad2(pl.getHours())}:${pad2(pl.getMinutes())}`,
+      delivery_time: v.toISOString(),
+    };
+  }
+
+  return { client_delivery_time: null, delivery_time: null };
 }
 
 /* ============== Normalizacja BODY ============== */
@@ -329,6 +478,16 @@ function normalizeBody(raw: any, req: Request) {
     name: base?.name ?? base?.customer_name ?? null,
     phone: base?.phone ?? null, // surowy, walidujemy niżej twardo
     contact_email: base?.contact_email ?? base?.email ?? null,
+        // === START INSERT: order_note ===
+    order_note: normalizeOrderNote(
+      base?.order_note ??
+      base?.orderNote ??
+      raw?.order_note ??
+      raw?.orderNote ??
+      null
+    ),
+    // === END INSERT: order_note ===
+
     address: base?.address ?? null,
     street: base?.street ?? null,
     postal_code: base?.postal_code ?? null,
@@ -345,8 +504,15 @@ function normalizeBody(raw: any, req: Request) {
     delivery_lat: num(base?.delivery_lat ?? base?.lat, null),
     delivery_lng: num(base?.delivery_lng ?? base?.lng, null),
     status: sanitizeOrderStatus(base?.status),
-    client_delivery_time: normalizeClientTime(base?.client_delivery_time ?? base?.delivery_time ?? null),
-    deliveryTime: null,
+    // czas dostawy (canonical) + legacy kolumna "deliveryTime" (case-sensitive)
+    client_delivery_time: (() => {
+      const v = normalizeClientTime(base?.client_delivery_time ?? base?.delivery_time ?? null);
+      return v;
+    })(),
+    delivery_time: (() => {
+      const v = normalizeClientTime(base?.client_delivery_time ?? base?.delivery_time ?? null);
+      return v;
+    })(),
     eta: base?.eta ?? null,
     user: base?.user ?? base?.user_id ?? null,
     legal_accept,
@@ -677,10 +843,14 @@ if (TURNSTILE_SECRET_KEY) {
         return NextResponse.json({ error: "Brak konfiguracji stref dostawy." }, { status: 500 });
       }
 
-      const distance_km = haversineKm(
-        { lat: Number(rest.lat), lng: Number(rest.lng) },
-        { lat: Number(n.delivery_lat), lng: Number(n.delivery_lng) }
-      );
+            const originLL = { lat: Number(rest.lat), lng: Number(rest.lng) };
+const destLL = { lat: Number(n.delivery_lat), lng: Number(n.delivery_lng) };
+
+// 1) Google (dystans drogowy) → 2) fallback: Haversine (po prostej)
+const googleKm = await getDrivingDistanceKm(originLL, destLL).catch(() => null);
+const distance_km = googleKm ?? haversineKm(originLL, destLL);
+
+
 
       const zone = (zones as any[])
         .sort((a, b) => Number(a.min_distance_km) - Number(b.min_distance_km))
@@ -699,13 +869,36 @@ if (TURNSTILE_SECRET_KEY) {
         );
       }
 
-      const pricingType: string =
-        (zone.pricing_type as string) ?? (Number(zone.min_distance_km) === 0 ? "flat" : "per_km");
+            const pricingTypeRaw = String((zone as any).pricing_type ?? "").toLowerCase();
+const pricingType =
+  pricingTypeRaw === "per_km" || pricingTypeRaw === "flat"
+    ? pricingTypeRaw
+    : Number(zone.min_distance_km) === 0
+    ? "flat"
+    : "per_km";
 
-      const perKmRate = Number((zone as any).cost_per_km ?? (zone as any).per_km ?? (zone as any).zl_per_km ?? zone.cost ?? 0);
-      const flatCost  = Number((zone as any).flat_cost ?? (zone as any).stala ?? zone.cost ?? 0);
 
-      let serverCost = pricingType === "per_km" ? perKmRate * distance_km : flatCost;
+      // Twoje realne kolumny: cost (legacy), cost_fixed, cost_per_km
+      const costLegacy = Number((zone as any).cost ?? 0);
+      const costFixed = Number((zone as any).cost_fixed ?? 0);
+      const costPerKm = Number((zone as any).cost_per_km ?? 0);
+
+      let serverCost = 0;
+
+      if (pricingType === "per_km") {
+  const perKmRate = costPerKm > 0 ? costPerKm : costLegacy;
+
+  // liczymy tylko nadwyżkę ponad min_distance_km danej strefy
+  const minKm = Number((zone as any).min_distance_km ?? 0);
+  const billableKm = Math.max(0, distance_km - minKm);
+
+  serverCost = Math.max(0, costFixed) + Math.max(0, perKmRate) * billableKm;
+} else {
+  // flat
+  serverCost = costFixed > 0 ? costFixed : costLegacy;
+}
+
+
 
       if (zone.free_over != null && baseFromItems >= Number(zone.free_over)) {
         serverCost = 0;
@@ -746,6 +939,7 @@ if (TURNSTILE_SECRET_KEY) {
         name: n.name,
         phone: n.phone,
         contact_email: n.contact_email,
+        order_note: (n as any).order_note ?? null,
         address: n.address,
         street: n.street,
         postal_code: n.postal_code,
@@ -761,7 +955,7 @@ if (TURNSTILE_SECRET_KEY) {
         delivery_min_required: deliveryMinRequired,   // NOWE
         status: n.status,
         client_delivery_time: n.client_delivery_time,
-        deliveryTime: n.deliveryTime,
+        ["delivery_time"]: n.delivery_time,
         eta: n.eta,
         user: n.user,
         promo_code: null,     // policzymy niżej
@@ -989,6 +1183,19 @@ if (Array.isArray(n.itemsArray) && n.itemsArray.length > 0) {
     console.warn("[orders.create] order_items insert not executed:", e?.message);
   }
 }
+
+    // 6.9) Web Push do obsługi (ekran blokady / dymek systemowy)
+    try {
+      await sendNewOrderPush({
+        orderId: newOrderId,
+        totalPln: currentTotal,
+        selectedOption: n.selected_option,
+      });
+    } catch (pushErr) {
+      console.error("[orders.create] push error:", pushErr);
+    }
+
+
 
     // 6.1) e-mail
     try {

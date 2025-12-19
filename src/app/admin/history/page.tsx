@@ -60,6 +60,9 @@ const getOptionLabel = (opt?: string) => {
   return "—";
 };
 
+const APP_TZ = "Europe/Warsaw";
+
+
 /** Hook do media query */
 function useMediaQuery(query: string) {
   const [matches, setMatches] = useState(() => {
@@ -300,7 +303,7 @@ export default function HistoryPage() {
                     </div>
                     <div className="text-xs text-gray-500 mt-1">
                       {o.created_at
-                        ? new Date(o.created_at).toLocaleString("pl-PL")
+                        ? new Date(o.created_at).toLocaleString("pl-PL", { timeZone: APP_TZ })
                         : "—"}
                     </div>
                   </div>
@@ -358,7 +361,7 @@ export default function HistoryPage() {
                     <td className="px-4 py-3 align-top">{(page - 1) * PAGE_SIZE + i + 1}</td>
                     <td className="px-4 py-3 align-top">
                       {o.created_at
-                        ? new Date(o.created_at).toLocaleString("pl-PL")
+                        ? new Date(o.created_at).toLocaleString("pl-PL", { timeZone: APP_TZ })
                         : "—"}
                     </td>
                     <td className="px-4 py-3 align-top">

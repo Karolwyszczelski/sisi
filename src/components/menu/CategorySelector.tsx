@@ -1,10 +1,13 @@
-'use client';
+"use client";
 
 interface CategorySelectorProps {
   selectedCategory: string;
   setSelectedCategory: (category: string) => void;
-  selectedSubcategory: string | null;
-  setSelectedSubcategory: (subcategory: string | null) => void;
+
+  // UJEDNOLICONE: zawsze string ("" = brak)
+  selectedSubcategory: string;
+  setSelectedSubcategory: (subcategory: string) => void;
+
   subcategories: string[];
 }
 
@@ -15,7 +18,7 @@ export default function CategorySelector({
   setSelectedSubcategory,
   subcategories,
 }: CategorySelectorProps) {
-  const categories = ['Burger', 'Pancake', 'Kids', 'Frytki', 'Napoje'];
+  const categories = ["Burger", "Pancake", "Kids", "Frytki", "Napoje"];
 
   return (
     <div className="w-full max-w-5xl mx-auto">
@@ -26,13 +29,14 @@ export default function CategorySelector({
             key={cat}
             onClick={() => {
               setSelectedCategory(cat);
-              setSelectedSubcategory(null);
+              setSelectedSubcategory(""); // zamiast null
             }}
             className={`px-4 py-2 rounded-full border font-semibold ${
               selectedCategory === cat
-                ? 'bg-black text-white'
-                : 'bg-white text-black border-black'
+                ? "bg-black text-white"
+                : "bg-white text-black border-black"
             }`}
+            type="button"
           >
             {cat}
           </button>
@@ -40,7 +44,7 @@ export default function CategorySelector({
       </div>
 
       {/* subkategorie */}
-      {selectedCategory === 'Burger' && (
+      {selectedCategory === "Burger" && (
         <div className="flex flex-wrap items-center justify-center gap-2 mt-4 w-full text-center">
           {subcategories.map((sub) => (
             <button
@@ -48,9 +52,10 @@ export default function CategorySelector({
               onClick={() => setSelectedSubcategory(sub)}
               className={`px-3 py-1 text-sm rounded-full border ${
                 selectedSubcategory === sub
-                  ? 'bg-yellow-400 text-black'
-                  : 'bg-white text-black border-black'
+                  ? "bg-yellow-400 text-black"
+                  : "bg-white text-black border-black"
               }`}
+              type="button"
             >
               {sub}
             </button>
