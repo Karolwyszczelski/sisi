@@ -62,13 +62,15 @@ export async function PATCH(
 
   const orderId = params.orderId;
 
-  const employeeTime: string | undefined = body.deliveryTime ?? body.employee_delivery_time;
-  const clientTime: string | undefined = body.client_delivery_time ?? body.delivery_time;
+  // Panel pracownika: delivery_time = deadline realizacji (ISO), client_delivery_time = deklaracja klienta
+const employeeTime: string | undefined = body.delivery_time ?? body.employee_delivery_time;
+const clientTime: string | undefined = body.client_delivery_time;
+
 
   const updateData: Record<string, any> = {};
   if (body.status) updateData.status = body.status;
-  if (employeeTime) updateData.deliveryTime = employeeTime;
-  if (clientTime) updateData.client_delivery_time = clientTime;
+if (employeeTime) updateData.delivery_time = employeeTime;
+if (clientTime) updateData.client_delivery_time = clientTime;
   if (body.items !== undefined) updateData.items = typeof body.items === "string" ? body.items : JSON.stringify(body.items);
   if (body.selected_option) updateData.selected_option = body.selected_option;
   if (body.payment_method) updateData.payment_method = body.payment_method;
@@ -101,7 +103,7 @@ export async function PATCH(
   if (!data) return NextResponse.json({ error: "Order not found after update" }, { status: 404 });
 
   const updated = data as any;
-  const when: string | null = updated.deliveryTime ?? updated.client_delivery_time ?? null;
+const when: string | null = updated.delivery_time ?? updated.client_delivery_time ?? null;
 
   // Przydatne w sekcji e-maili
   const onlyTimeUpdate = !!employeeTime && updated.status === "accepted" && body.status !== "accepted";

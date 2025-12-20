@@ -51,6 +51,10 @@ const toNumber = (x: any, d = 0) => {
   return isFinite(n) ? n : d;
 };
 
+const isValidDateString = (s: any) =>
+  typeof s === "string" && s.trim().length > 0 && !Number.isNaN(Date.parse(s));
+
+
 /* -------------------------------- produkty -------------------------------- */
 
 const parseProducts = (itemsData: any): any[] => {
@@ -473,8 +477,9 @@ export default function PickupOrdersPage() {
         promo_code: o.promo_code ?? null,
         created_at: o.created_at,
         status: o.status,
-        clientDelivery: o.client_delivery_time ?? o.delivery_time ?? o.clientDelivery,
-        delivery_time: o.delivery_time ?? o.delivery_time ?? undefined,
+        clientDelivery: o.client_delivery_time ?? o.clientDelivery,
+delivery_time: o.delivery_time ?? undefined,
+
         address:
           o.selected_option === "delivery"
             ? `${o.street || ""}${o.flat_number ? `, nr ${o.flat_number}` : ""}${o.city ? `, ${o.city}` : ""}`
@@ -814,8 +819,9 @@ useEffect(() => {
                     </div>
                   </div>
                   <div className="flex items-center gap-3 text-sm">
-                    {o.status === "accepted" && o.delivery_time && <InlineCountdown targetTime={o.delivery_time} onComplete={() => completeOrder(o.id)} />}
-<span className="text-slate-600">
+{o.status === "accepted" && isValidDateString(o.delivery_time) && (
+  <InlineCountdown targetTime={o.delivery_time!} onComplete={() => completeOrder(o.id)} />
+)}<span className="text-slate-600">
   {new Date(o.created_at).toLocaleString("pl-PL", { timeZone: APP_TZ })}
 </span>
                   </div>
