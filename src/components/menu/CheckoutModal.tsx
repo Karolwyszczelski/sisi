@@ -268,7 +268,7 @@ const ProductItem: React.FC<{
             <div className="font-semibold mt-2">Dodatkowe mięso:</div>
             <div className="flex items-center gap-2 flex-wrap">
               <button onClick={() => addExtraMeat(prod.name)} className="px-2 py-1 text-xs bg-gray-200 rounded border border-gray-300">
-                +1 mięso (+10 zł)
+                +1 mięso (+15 zł)
               </button>
               {prod.extraMeatCount > 0 && (
                 <button onClick={() => removeExtraMeat(prod.name)} className="px-2 py-1 text-xs bg-red-100 text-red-700 rounded border border-red-200">
