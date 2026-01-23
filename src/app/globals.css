@@ -1,0 +1,96 @@
+/* 1. @font-face musi być przed @tailwind base */
+@font-face {
+  font-family: 'MrBedfort';
+  src: url('/fonts/mr-bedfort-regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply bg-[#fff800] text-black font-sans;
+}
+
+.icon-plus path, 
+.icon-check path {
+  fill: #000 !important;
+  stroke: #000 !important;
+  display: inline !important;
+  opacity: 1 !important;
+}
+
+
+@layer utilities {
+  .font-permanent-marker {
+    font-family: var(--font-permanent-marker);
+  }
+
+  @keyframes slideInRight {
+    from {
+      opacity: 0;
+      transform: translateX(100px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+
+  @keyframes fadeDown {
+    from {
+      opacity: 0;
+      transform: translateY(-30px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+      transform: scale(0.95);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+
+  @keyframes gentleShake {
+    0% {
+      background-position: right 0 top -290px;
+    }
+    25% {
+      background-position: right 0 top -288px; /* minimalne przesunięcie */
+    }
+    50% {
+      background-position: right 0 top -292px; /* minimalne przesunięcie */
+    }
+    75% {
+      background-position: right 0 top -289px; /* minimalne przesunięcie */
+    }
+    100% {
+      background-position: right 0 top -290px;
+    }
+  }
+
+  .gochi-hand {
+    font-family: 'Gochi Hand', cursive;
+  }
+}
+
+/* mobilny hit-testing i skalowanie */
+html, body { -webkit-text-size-adjust: 100%; touch-action: manipulation; }
+@media (max-width: 1024px) {
+  html, body { transform: none !important; zoom: 1 !important; }
+}
+/* opcjonalnie brak podświetlenia tapów */
+* { -webkit-tap-highlight-color: transparent; }
+
+
