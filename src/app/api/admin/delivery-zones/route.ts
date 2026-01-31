@@ -6,11 +6,12 @@ import { createClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { getSessionAndRole } from "@/lib/serverAuth";
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  { auth: { persistSession: false } }
-);
+const getSupabaseAdmin = () => {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) throw new Error("Missing Supabase environment variables");
+  return createClient(url, key, { auth: { persistSession: false } });
+};
 
 // Schemat zgodny z formularzem DeliveryZonesForm
 const Zone = z.object({
@@ -31,7 +32,7 @@ export async function GET() {
   if (!session || (role !== "admin" && role !== "employee"))
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await getSupabaseAdmin()
     .from("delivery_zones")
     .select("*")
     .order("min_distance_km");
@@ -61,7 +62,7 @@ export async function POST(req: Request) {
   if (!parsed.success)
     return NextResponse.json({ error: "Validation", details: parsed.error.format() }, { status: 400 });
 
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await getSupabaseAdmin()
     .from("delivery_zones")
     .insert(parsed.data)
     .select()

@@ -1,7 +1,22 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
-import productsData from "@/data/product.json";
+import React, { useState, useEffect, useMemo } from "react";
+import { createClient } from "@supabase/supabase-js";
+
+const getSupabase = () => {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !key) throw new Error("Missing Supabase environment variables");
+  return createClient(url, key);
+};
+
+let _supabase: ReturnType<typeof getSupabase> | null = null;
+const supabase = new Proxy({} as ReturnType<typeof getSupabase>, {
+  get(_, prop) {
+    if (!_supabase) _supabase = getSupabase();
+    return (_supabase as any)[prop];
+  },
+});
 
 // --- pomocnicze typy ---
 export interface Product {
@@ -23,50 +38,20 @@ interface EditOrderButtonProps {
   onEditEnd?: () => void;
 }
 
-// --- dane pomocnicze ---
-function flattenProducts(data: any[]): { name: string; price: number }[] {
-  let products: { name: string; price: number }[] = [];
-  data.forEach((category) => {
-    if (category.subcategories) {
-      category.subcategories.forEach((subcat: any) => {
-        if (subcat.items) {
-          products = products.concat(
-            subcat.items.map((item: any) => ({
-              name: item.name,
-              price: item.price,
-            }))
-          );
-        }
-      });
-    }
-    if (category.items) {
-      products = products.concat(
-        category.items.map((item: any) => ({
-          name: item.name,
-          price: item.price,
-        }))
-      );
-    }
-  });
-  return products;
+interface MenuProduct {
+  name: string;
+  price: number;
+  available_addons: string[] | null;
 }
 
-const MENU_PRODUCTS = flattenProducts(productsData);
-
-const ALL_ADDONS = [
-  "Ser",
-  "Bekon",
-  "Jalapeño",
-  "Ogórek",
-  "Rukola",
-  "Czerwona cebula",
-  "Pomidor",
-  "Pikle",
-  "Nachosy",
-  "Konfitura z cebuli",
-  "Gruszka",
-  "Płynny ser",
-];
+// Typ dla dodatku z bazy
+interface Addon {
+  id: string;
+  name: string;
+  price: number;
+  category: string;
+  available: boolean;
+}
 
 // --- normalizacja nazwy bez błędu jeśli undefined ---
 function normalizeName(str?: string): string {
@@ -97,17 +82,74 @@ export default function EditOrderButton({
 }: EditOrderButtonProps) {
   const [showModal, setShowModal] = useState(false);
   const [products, setProducts] = useState<Product[]>([]);
+  const [menuProducts, setMenuProducts] = useState<MenuProduct[]>([]);
+  const [packagingCostSetting, setPackagingCostSetting] = useState<number>(2);
+  const [addonsFromDb, setAddonsFromDb] = useState<Addon[]>([]);
   const [selectedOption, setSelectedOption] = useState<"local" | "takeaway" | "delivery">(
     currentSelectedOption
   );
   const [showAddProduct, setShowAddProduct] = useState(false);
 
+  // Funkcja do pobierania ceny dodatku z bazy
+  const getAddonPrice = (addonName: string): number => {
+    const addon = addonsFromDb.find(
+      (a) => a.name.toLowerCase() === addonName.toLowerCase()
+    );
+    if (addon) return addon.price;
+    // Fallback jeśli nie znaleziono
+    if (addonName.toLowerCase() === "płynny ser") return 6;
+    if (["amerykański", "ketchup", "majonez", "musztarda", "meksykański", "serowy chili", "czosnkowy", "musztardowo-miodowy", "bbq"].includes(addonName.toLowerCase())) return 3;
+    return 4;
+  };
+
+  // Pobierz produkty, packaging_cost i dodatki z bazy
+  useEffect(() => {
+    // Pobierz produkty z bazy
+    supabase
+      .from("products")
+      .select("name, price, available_addons")
+      .then((r) => {
+        if (!r.error && r.data) {
+          const parsed = r.data.map((p: any) => ({
+            name: p.name || "",
+            price: typeof p.price === "number" ? p.price : parseFloat(String(p.price).replace(",", ".")) || 0,
+            available_addons: Array.isArray(p.available_addons) ? p.available_addons : null,
+          }));
+          setMenuProducts(parsed);
+        }
+      });
+
+    // Pobierz packaging_cost
+    supabase
+      .from("restaurant_info")
+      .select("packaging_cost")
+      .eq("id", 1)
+      .single()
+      .then((r) => {
+        if (!r.error && r.data && typeof r.data.packaging_cost === "number") {
+          setPackagingCostSetting(r.data.packaging_cost);
+        }
+      });
+
+    // Pobierz dodatki z bazy
+    supabase
+      .from("addons")
+      .select("id, name, price, category, available")
+      .eq("available", true)
+      .order("display_order", { ascending: true })
+      .then((r) => {
+        if (!r.error && r.data) {
+          setAddonsFromDb(r.data as Addon[]);
+        }
+      });
+  }, []);
+
   // inicjalizacja lokalnego stanu przy otwarciu
   useEffect(() => {
-    if (showModal) {
+    if (showModal && menuProducts.length > 0) {
       onEditStart?.();
       const normalized = currentProducts.map((item) => {
-        const found = MENU_PRODUCTS.find(
+        const found = menuProducts.find(
           (p) => normalizeName(p.name) === normalizeName(item.name)
         );
         if (!found) {
@@ -127,7 +169,7 @@ export default function EditOrderButton({
       setSelectedOption(currentSelectedOption);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showModal]);
+  }, [showModal, menuProducts]);
 
   // zamknięcie modala - wywołaj onEditEnd
   const closeModal = () => {
@@ -183,14 +225,14 @@ export default function EditOrderButton({
   const calculateBaseTotal = () => {
     return products.reduce((acc, item) => {
       const quantity = item.quantity || 1;
-      const addonsCost = (item.addons || []).reduce((sum: number, addon: string) => sum + (addon.toLowerCase() === "płynny ser" ? 6 : 4), 0);
+      const addonsCost = (item.addons || []).reduce((sum: number, addon: string) => sum + getAddonPrice(addon), 0);
       const extraMeatCost = (item.extraMeatCount || 0) * 15;
       return acc + (item.price + addonsCost + extraMeatCost) * quantity;
     }, 0);
   };
 
   const getPackagingCost = () => {
-    return selectedOption === "takeaway" || selectedOption === "delivery" ? 2 : 0;
+    return selectedOption === "takeaway" || selectedOption === "delivery" ? packagingCostSetting : 0;
   };
 
   const calculateTotalWithPackaging = () => {
@@ -278,23 +320,37 @@ export default function EditOrderButton({
         <div className="mt-2">
           <span className="font-semibold text-sm">Dodatki:</span>
           <div className="flex flex-wrap gap-2 mt-1">
-            {ALL_ADDONS.map((addon) => {
-              const hasAddon = product.addons?.includes(addon);
-              return (
-                <button
-                  key={addon}
-                  type="button"
-                  onClick={() => toggleAddon(index, addon)}
-                  className={`border text-xs px-2 py-1 rounded-full flex-shrink-0 min-w-[60px] ${
-                    hasAddon
-                      ? "bg-gray-800 text-white"
-                      : "bg-white text-black"
-                  }`}
-                >
-                  {hasAddon ? `✓ ${addon}` : `+ ${addon}`}
-                </button>
+            {(() => {
+              // Znajdź produkt w menuProducts żeby pobrać jego available_addons
+              const menuProduct = menuProducts.find(
+                (p) => normalizeName(p.name) === normalizeName(product.name)
               );
-            })}
+              // Użyj dodatków z produktu lub wszystkich z bazy (tylko kategoria "dodatek" i "premium")
+              const allDbAddonNames = addonsFromDb
+                .filter(a => a.category === "dodatek" || a.category === "premium")
+                .map(a => a.name);
+              const addons = menuProduct?.available_addons?.length 
+                ? menuProduct.available_addons 
+                : allDbAddonNames.length > 0 ? allDbAddonNames : ["Ser", "Bekon", "Jalapeño", "Ogórek", "Rukola", "Czerwona cebula", "Pomidor", "Pikle", "Nachosy", "Konfitura z cebuli", "Gruszka", "Płynny ser"];
+              return addons.map((addon) => {
+                const hasAddon = product.addons?.includes(addon);
+                const price = getAddonPrice(addon);
+                return (
+                  <button
+                    key={addon}
+                    type="button"
+                    onClick={() => toggleAddon(index, addon)}
+                    className={`border text-xs px-2 py-1 rounded-full flex-shrink-0 min-w-[60px] ${
+                      hasAddon
+                        ? "bg-gray-800 text-white"
+                        : "bg-white text-black"
+                    }`}
+                  >
+                    {hasAddon ? `✓ ${addon} (+${price}zł)` : `+ ${addon} (+${price}zł)`}
+                  </button>
+                );
+              });
+            })()}
           </div>
         </div>
 
@@ -328,7 +384,7 @@ export default function EditOrderButton({
               >
                 +
               </button>
-              <span className="text-xs text-gray-500 ml-2">x +10 zł</span>
+              <span className="text-xs text-gray-500 ml-2">x +15 zł</span>
             </div>
           </div>
 

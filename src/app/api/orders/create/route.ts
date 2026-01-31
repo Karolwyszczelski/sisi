@@ -12,11 +12,21 @@ import { trackingUrl } from "@/lib/orderLink";
 import { sendEmail } from "@/lib/mailer";
 
 /* ============== Supabase admin ============== */
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  { auth: { persistSession: false } }
-);
+const getSupabaseAdmin = () => {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) throw new Error("Missing Supabase environment variables");
+  return createClient(url, key, { auth: { persistSession: false } });
+};
+
+// Lazy-loaded singleton for backward compatibility
+let _supabaseAdmin: ReturnType<typeof getSupabaseAdmin> | null = null;
+const supabaseAdmin = new Proxy({} as ReturnType<typeof getSupabaseAdmin>, {
+  get(_, prop) {
+    if (!_supabaseAdmin) _supabaseAdmin = getSupabaseAdmin();
+    return (_supabaseAdmin as any)[prop];
+  },
+});
 
 /* ================= Turnstile =================== */
 const TURNSTILE_SECRET_KEY = process.env.TURNSTILE_SECRET_KEY || "";
@@ -525,30 +535,87 @@ const SAUCES = [
   "Amerykański","Ketchup","Majonez","Musztarda","Meksykański","Serowy chili","Czosnkowy","Musztardowo-miodowy","BBQ",
 ];
 
-function calcSubtotalFromItems(selected_option: string, itemsArray: Any[]): number {
-  const packaging = (selected_option === "delivery" || selected_option === "takeaway") ? 2 : 0;
+// Kaucja za butelki/puszki (1 zł) - dla napojów oprócz wody
+const DEPOSIT_AMOUNT = 1;
+
+const isDrinkWithDeposit = (category?: string, name?: string): boolean => {
+  const cat = (category || "").toLowerCase();
+  const n = (name || "").toLowerCase();
+  
+  // Sprawdź czy to napój
+  const isDrink = cat === "napoje" || cat === "napój";
+  if (!isDrink) return false;
+  
+  // Woda nie ma kaucji
+  const isWater = n.includes("woda") || n.includes("kropla");
+  return !isWater;
+};
+
+// Mapa cen dodatków pobierana z bazy
+type AddonPriceMap = Map<string, number>;
+
+function getAddonPriceFromMap(addonName: string, addonPriceMap: AddonPriceMap): number {
+  const price = addonPriceMap.get(addonName.toLowerCase());
+  if (price !== undefined) return price;
+  // Fallback jeśli nie znaleziono w mapie
+  if (addonName.toLowerCase() === "płynny ser") return 6;
+  if (SAUCES.map(s => s.toLowerCase()).includes(addonName.toLowerCase())) return 3;
+  return 4;
+}
+
+// Mapa kategorii produktów
+type ProductCategoryMap = Map<string, string>;
+
+function calcSubtotalFromItems(selected_option: string, itemsArray: Any[], packagingCostSetting: number = 2, addonPriceMap: AddonPriceMap = new Map(), productCategoryMap: ProductCategoryMap = new Map()): number {
+  const packaging = (selected_option === "delivery" || selected_option === "takeaway") ? packagingCostSetting : 0;
   const itemsSum = itemsArray.reduce((acc, it) => {
     const qty = Number(it.quantity ?? 1) || 1;
     const basePrice = money(it.price ?? it.unit_price ?? 0);
     const addons = Array.isArray(it?.options?.addons) ? it.options.addons : (Array.isArray(it.addons) ? it.addons : []);
-    const addonsCost = (addons ?? []).reduce((s: number, a: any) => s + (String(a).toLowerCase() === "płynny ser" ? 6 : SAUCES.includes(String(a)) ? 3 : 4), 0);
+    const addonsCost = (addons ?? []).reduce((s: number, a: any) => s + getAddonPriceFromMap(String(a), addonPriceMap), 0);
     const extraMeat = Number(it?.options?.extraMeatCount ?? 0) || 0;
     const extraMeatCost = extraMeat * 15;
-    return acc + (basePrice + addonsCost + extraMeatCost) * qty;
+    
+    // Kaucja za napoje (oprócz wody)
+    const productName = String(it.name || "");
+    const productCategory = productCategoryMap.get(productName.toLowerCase()) || it.category || "";
+    const depositCost = isDrinkWithDeposit(productCategory, productName) ? DEPOSIT_AMOUNT : 0;
+    
+    return acc + (basePrice + addonsCost + extraMeatCost + depositCost) * qty;
   }, 0);
   return Math.max(0, Math.round((itemsSum + packaging) * 100) / 100);
 }
 
 /* ===================== Handler ===================== */
 export async function POST(req: Request) {
+  // Domyślna wartość packaging_cost (fallback)
+  let packagingCostSetting = 2;
+  // Mapa cen dodatków z bazy
+  let addonPriceMap: AddonPriceMap = new Map();
+  // Mapa kategorii produktów (dla kaucji)
+  let productCategoryMap: ProductCategoryMap = new Map();
+
   try {
-    // 0) Kill-switch
+    // 0) Kill-switch + packaging_cost + addon prices + product categories
     {
-      const { data: cfg, error: cfgErr } = await supabaseAdmin
-        .from("restaurant_info")
-        .select("ordering_open")
-        .eq("id", 1)
-        .single();
+      const [cfgRes, addonsRes, productsRes] = await Promise.all([
+        supabaseAdmin
+          .from("restaurant_info")
+          .select("ordering_open,packaging_cost")
+          .eq("id", 1)
+          .single(),
+        supabaseAdmin
+          .from("addons")
+          .select("name, price")
+          .eq("available", true),
+        supabaseAdmin
+          .from("products")
+          .select("name, category"),
+      ]);
+
+      const { data: cfg, error: cfgErr } = cfgRes;
+      const { data: addons, error: addonsErr } = addonsRes;
+      const { data: products, error: productsErr } = productsRes;
 
       if (cfgErr || !cfg) {
         return NextResponse.json({ error: "Konfiguracja sklepu niedostępna." }, { status: 503 });
@@ -558,6 +625,28 @@ export async function POST(req: Request) {
           { error: "Zamawianie jest tymczasowo wyłączone. Zapraszamy później!" },
           { status: 503 }
         );
+      }
+      // Pobierz packaging_cost z bazy (jeśli istnieje)
+      if (typeof cfg.packaging_cost === "number") {
+        packagingCostSetting = cfg.packaging_cost;
+      }
+
+      // Buduj mapę cen dodatków
+      if (!addonsErr && addons) {
+        for (const addon of addons) {
+          if (addon.name && typeof addon.price === "number") {
+            addonPriceMap.set(addon.name.toLowerCase(), addon.price);
+          }
+        }
+      }
+
+      // Buduj mapę kategorii produktów (dla kaucji)
+      if (!productsErr && products) {
+        for (const product of products) {
+          if (product.name && product.category) {
+            productCategoryMap.set(product.name.toLowerCase(), product.category);
+          }
+        }
       }
     }
 
@@ -708,8 +797,9 @@ export async function POST(req: Request) {
 
         if (dc.max_uses != null && all >= Number(dc.max_uses)) continue;
 
+        // null = brak limitu na użytkownika (nieograniczone użycie)
         const perUserLimit =
-          dc.per_user_max_uses == null ? 1 : Number(dc.per_user_max_uses);
+          dc.per_user_max_uses == null ? Infinity : Number(dc.per_user_max_uses);
 
         if (userId && byUser >= perUserLimit) continue;
         if (emailLower && byEmail >= perUserLimit) continue;
@@ -820,7 +910,7 @@ if (TURNSTILE_SECRET_KEY) {
     }
 
     // 2.1) Subtotal po stronie serwera
-    const baseFromItems = calcSubtotalFromItems(n.selected_option, n.itemsArray);
+    const baseFromItems = calcSubtotalFromItems(n.selected_option, n.itemsArray, packagingCostSetting, addonPriceMap, productCategoryMap);
     const discount = 0;
 
     let deliveryMinRequired = 0;
@@ -1002,8 +1092,9 @@ const pricingType =
           throw new Error("limit_exhausted");
         }
 
+        // null = brak limitu na użytkownika (nieograniczone użycie)
         const perUserLimit =
-          dc.per_user_max_uses == null ? 1 : Number(dc.per_user_max_uses);
+          dc.per_user_max_uses == null ? Infinity : Number(dc.per_user_max_uses);
 
         if (n.user && byUser >= perUserLimit) {
           throw new Error("used_by_user");

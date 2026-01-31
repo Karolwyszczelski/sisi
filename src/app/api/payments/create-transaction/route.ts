@@ -6,13 +6,18 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { amountToGrosze, hostFromEnv, p24SignRegisterMD5 } from "@/lib/p24";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  { auth: { persistSession: false } }
-);
+// Lazy initialization - klient tworzony dopiero przy pierwszym użyciu
+const getSupabase = () => {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) {
+    throw new Error("Missing Supabase environment variables");
+  }
+  return createClient(url, key, { auth: { persistSession: false } });
+};
 
 export async function POST(req: Request) {
+  const supabase = getSupabase();
   try {
     // przyjmij body lub query; tylko orderId jest wymagane
     let body: any = {};

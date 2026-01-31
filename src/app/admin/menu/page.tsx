@@ -23,7 +23,15 @@ interface Product {
 }
 
 /* Supabase klient (po stronie klienta) */
-const supabase = createClientComponentClient();
+const getSupabase = () => createClientComponentClient();
+
+let _supabase: ReturnType<typeof getSupabase> | null = null;
+const supabase = new Proxy({} as ReturnType<typeof getSupabase>, {
+  get(_, prop) {
+    if (!_supabase) _supabase = getSupabase();
+    return (_supabase as any)[prop];
+  },
+});
 
 /* ===================== Modal edycji ===================== */
 function EditProductModal({
@@ -58,9 +66,9 @@ function EditProductModal({
     setErr(null);
     setSaving(true);
     try {
-      const payload: Partial<Product> = {
+      const payload = {
         name: form.name || null,
-        price: form.price ?? null,
+        price: form.price || null,
         description: form.description || null,
         category: form.category || null,
         subcategory: form.subcategory || null,
@@ -70,7 +78,7 @@ function EditProductModal({
       };
 
       const { data, error } = await supabase
-        .from<Product>("products")
+        .from("products")
         .update(payload)
         .eq("id", product.id)
         .select("*")
@@ -80,6 +88,7 @@ function EditProductModal({
       onSaved(data as Product);
       onClose();
     } catch (e: any) {
+      console.error("Błąd zapisu produktu:", e);
       setErr(e.message || "Nie udało się zapisać zmian.");
     } finally {
       setSaving(false);
@@ -223,7 +232,7 @@ export default function AdminMenuPage() {
     try {
       const [{ data, error: err }, ri] = await Promise.all([
         supabase
-          .from<Product>("products")
+          .from("products")
           .select("*")
           .order("category", { ascending: true })
           .order("subcategory", { ascending: true })
@@ -232,7 +241,7 @@ export default function AdminMenuPage() {
       ]);
 
       if (err) throw err;
-      setProducts(data ?? []);
+      setProducts((data as Product[]) ?? []);
       if (!ri.error && ri.data) setOrderingOpen(Boolean((ri.data as any).ordering_open));
       setError(null);
     } catch (e: any) {

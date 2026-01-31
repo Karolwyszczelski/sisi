@@ -17,11 +17,20 @@ const TERMS_URL = process.env.TERMS_URL || "https://www.sisiciechanow.pl/regulam
 const PRIVACY_URL = process.env.PRIVACY_URL || "https://www.sisiciechanow.pl/polityka-prywatnosci";
 
 /** Admin Supabase (do pobrania e-maila użytkownika, jeśli brak w zamówieniu) */
-const admin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  { auth: { persistSession: false } }
-);
+const getAdmin = () => {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) throw new Error("Missing Supabase environment variables");
+  return createClient(url, key, { auth: { persistSession: false } });
+};
+
+let _admin: ReturnType<typeof getAdmin> | null = null;
+const admin = new Proxy({} as ReturnType<typeof getAdmin>, {
+  get(_, prop) {
+    if (!_admin) _admin = getAdmin();
+    return (_admin as any)[prop];
+  },
+});
 
 /** Bezpieczny nadawca dla Resend/SMTP (usuwa przypadkowe cudzysłowy/spacje) */
 const EMAIL_FROM =

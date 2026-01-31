@@ -6,11 +6,12 @@ import { createClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { getSessionAndRole } from "@/lib/serverAuth";
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  { auth: { persistSession: false } }
-);
+const getSupabaseAdmin = () => {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) throw new Error("Missing Supabase environment variables");
+  return createClient(url, key, { auth: { persistSession: false } });
+};
 
 // To samo, czego oczekuje TableLayoutForm (mapka)
 const TableRow = z.object({
@@ -27,7 +28,7 @@ export async function GET() {
   if (!session || (role !== "admin" && role !== "employee"))
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await getSupabaseAdmin()
     .from("restaurant_tables")
     .select("*")
     .order("table_number", { ascending: true });
@@ -51,7 +52,7 @@ export async function POST(req: Request) {
   if (!parsed.success)
     return NextResponse.json({ error: "Validation", details: parsed.error.format() }, { status: 400 });
 
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await getSupabaseAdmin()
     .from("restaurant_tables")
     .insert(parsed.data)
     .select()

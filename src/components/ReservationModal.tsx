@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { X } from "lucide-react";
 import { DayPicker } from "react-day-picker";
 import "react-day-picker/dist/style.css";
@@ -8,10 +8,20 @@ import { format, startOfMonth, endOfMonth, isSameDay } from "date-fns";
 import { pl } from "date-fns/locale";
 import { createClient } from "@supabase/supabase-js";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+const getSupabase = () => {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !key) throw new Error("Missing Supabase environment variables");
+  return createClient(url, key);
+};
+
+let _supabase: ReturnType<typeof getSupabase> | null = null;
+const supabase = new Proxy({} as ReturnType<typeof getSupabase>, {
+  get(_, prop) {
+    if (!_supabase) _supabase = getSupabase();
+    return (_supabase as any)[prop];
+  },
+});
 
 type Props = { isOpen: boolean; onClose: () => void; id?: string };
 

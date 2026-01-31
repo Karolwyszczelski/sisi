@@ -5,16 +5,25 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/supabase";
 
-const supabaseAdmin = createClient<Database>(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  {
+const getSupabaseAdmin = () => {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) throw new Error("Missing Supabase environment variables");
+  return createClient<Database>(url, key, {
     auth: {
       persistSession: false,
       detectSessionInUrl: false,
     },
-  }
-);
+  });
+};
+
+let _supabaseAdmin: ReturnType<typeof getSupabaseAdmin> | null = null;
+const supabaseAdmin = new Proxy({} as ReturnType<typeof getSupabaseAdmin>, {
+  get(_, prop) {
+    if (!_supabaseAdmin) _supabaseAdmin = getSupabaseAdmin();
+    return (_supabaseAdmin as any)[prop];
+  },
+});
 
 type DiscountCode = {
   id: string;
@@ -141,8 +150,9 @@ export async function POST(req: Request) {
 
     if (dc.max_uses != null && all >= Number(dc.max_uses)) continue;
 
+    // null = brak limitu na użytkownika (nieograniczone użycie)
     const perUserLimit =
-      dc.per_user_max_uses == null ? 1 : Number(dc.per_user_max_uses);
+      dc.per_user_max_uses == null ? Infinity : Number(dc.per_user_max_uses);
 
     if (userId && byUser >= perUserLimit) continue;
     if (emailLower && byEmail >= perUserLimit) continue;
