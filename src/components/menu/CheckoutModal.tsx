@@ -94,7 +94,8 @@ type Addon = {
 const SAUCES = [
   "Amerykański","Ketchup","Majonez","Musztarda","Meksykański","Serowy chili","Czosnkowy","Musztardowo-miodowy","BBQ",
 ];
-const AVAILABLE_ADDONS = ["Ser","Bekon","Jalapeño","Ogórek","Rukola","Czerwona cebula","Pomidor","Pikle", ...SAUCES];
+const PREMIUM_ADDONS = ["Płynny ser"];
+const AVAILABLE_ADDONS = ["Ser","Bekon","Jalapeño","Ogórek","Rukola","Czerwona cebula","Pomidor","Pikle","Nachosy","Konfitura z cebuli","Gruszka","Ser cheddar", ...PREMIUM_ADDONS, ...SAUCES];
 
 /* helper ceny: zamienia "20,90" -> 20.90 */
 const toPrice = (v: any): number => {
@@ -229,16 +230,30 @@ const ProductItem: React.FC<{
   const fries = isFries(meta, prod?.name);
   const drinkWithDeposit = isDrinkWithDeposit(meta, prod?.name);
 
-  // Używamy available_addons z bazy dla danego produktu, lub wszystkie dodatki z tabeli addons
-  const productAddons = meta?.available_addons ?? [];
-  // Dla burgerów: dodatki produktu lub wszystkie z bazy, dla frytek: sosy + płynny ser
-  const allAddonNames = allAddons.filter(a => a.category !== 'sos').map(a => a.name);
-  const allSauceNames = allAddons.filter(a => a.category === 'sos').map(a => a.name);
-  const premiumAddons = allAddons.filter(a => a.category === 'premium').map(a => a.name);
+  // Dla burgerów i frytek - zawsze wszystkie dodatki z bazy (lub fallback)
+  // Fallback do AVAILABLE_ADDONS gdy baza nie zwróci danych
+  const allAddonNames = allAddons.length > 0 
+    ? allAddons.filter(a => a.category !== 'sos').map(a => a.name)
+    : AVAILABLE_ADDONS.filter(n => !SAUCES.includes(n));
+  const allSauceNames = allAddons.length > 0
+    ? allAddons.filter(a => a.category === 'sos').map(a => a.name)
+    : SAUCES;
+  const premiumAddons = allAddons.length > 0
+    ? allAddons.filter(a => a.category === 'premium').map(a => a.name)
+    : PREMIUM_ADDONS;
+  
+  // Dla frytek: sprawdź czy nazwa zawiera "ser" - jeśli tak, nie pokazuj płynnego sera
+  const friesHasCheese = fries && (prod?.name || "").toLowerCase().includes("ser");
+  const friesAddons = friesHasCheese 
+    ? allSauceNames 
+    : [...allSauceNames, ...premiumAddons];
+  
+  // Burgery: zawsze wszystkie dodatki + sosy
+  // Frytki: sosy + płynny ser (chyba że mają ser w nazwie)
   const addonPool = burger 
-    ? (productAddons.length > 0 ? productAddons : (allAddonNames.length > 0 ? [...allAddonNames, ...allSauceNames] : AVAILABLE_ADDONS)) 
+    ? [...allAddonNames, ...allSauceNames]
     : fries 
-      ? [...(allSauceNames.length > 0 ? allSauceNames : SAUCES), ...(premiumAddons.length > 0 ? premiumAddons : ['Płynny ser'])]
+      ? friesAddons
       : [];
   const sanitizedAddons: string[] = (prod.addons ?? []).filter((a: string) => addonPool.includes(a));
 
@@ -585,7 +600,12 @@ export default function CheckoutModal() {
       .eq("available", true)
       .order("display_order", { ascending: true })
       .then((r) => {
-        if (!r.error && r.data) setAddonsFromDb(r.data as Addon[]);
+        if (r.error) {
+          console.error("[CheckoutModal] Błąd pobierania addons:", r.error.message);
+        } else if (r.data) {
+          console.log("[CheckoutModal] Pobrano addons z bazy:", r.data.length, "pozycji");
+          setAddonsFromDb(r.data as Addon[]);
+        }
       });
 
     supabase
@@ -732,15 +752,25 @@ export default function CheckoutModal() {
       const fries = isFries(meta, it?.name);
       const drinkWithDeposit = isDrinkWithDeposit(meta, it?.name);
 
-      // Pobierz listę dodatków dla produktu lub wszystkich z bazy
-      const productAddons = meta?.available_addons ?? [];
-      const allAddonNames = addonsFromDb.filter(a => a.category !== 'sos').map(a => a.name);
-      const allSauceNames = addonsFromDb.filter(a => a.category === 'sos').map(a => a.name);
-      const premiumAddons = addonsFromDb.filter(a => a.category === 'premium').map(a => a.name);
+      // Pobierz listę dodatków - zawsze wszystkie z bazy lub fallback
+      const allAddonNames = addonsFromDb.length > 0 
+        ? addonsFromDb.filter(a => a.category !== 'sos').map(a => a.name)
+        : AVAILABLE_ADDONS.filter(n => !SAUCES.includes(n));
+      const allSauceNames = addonsFromDb.length > 0
+        ? addonsFromDb.filter(a => a.category === 'sos').map(a => a.name)
+        : SAUCES;
+      const premiumAddons = addonsFromDb.length > 0
+        ? addonsFromDb.filter(a => a.category === 'premium').map(a => a.name)
+        : PREMIUM_ADDONS;
+      
+      // Dla frytek: sprawdź czy nazwa zawiera "ser"
+      const friesHasCheese = fries && (it.name || "").toLowerCase().includes("ser");
+      const friesAddons = friesHasCheese ? allSauceNames : [...allSauceNames, ...premiumAddons];
+      
       const addonPool = burger 
-        ? (productAddons.length > 0 ? productAddons : (allAddonNames.length > 0 ? [...allAddonNames, ...allSauceNames] : AVAILABLE_ADDONS)) 
+        ? [...allAddonNames, ...allSauceNames]
         : fries 
-          ? [...(allSauceNames.length > 0 ? allSauceNames : SAUCES), ...(premiumAddons.length > 0 ? premiumAddons : ['Płynny ser'])]
+          ? friesAddons
           : [];
       const sanitizedAddons: string[] = (it.addons ?? []).filter((a: string) => addonPool.includes(a));
 
@@ -1377,45 +1407,45 @@ export default function CheckoutModal() {
                     <h2 className="text-2xl font-bold text-center">Podsumowanie zamówienia</h2>
 
                     <div className="flex flex-col lg:flex-row gap-6">
-                      {/* EDITOWALNE PRODUKTY */}
-                      <div className="flex-1 space-y-3 max-h-[350px] overflow-y-auto">
-                        {items.map((item, idx) => {
-                          const meta = findMetaByName(item.name);
-                          const defaultMeat = inferDefaultMeat(meta, item.name);
-                          return (
-                            <div key={idx}>
-                              <ProductItem
-  prod={item}
-  meta={meta}
-  defaultMeat={defaultMeat}
-  getAddonPrice={getAddonPrice}
-  allAddons={addonsFromDb}
-  helpers={productHelpers}
-/>
-
-                              <textarea className="w-full text-xs border rounded px-2 py-1 mt-1" placeholder="Notatka do produktu" value={notes[idx] || ""} onChange={(e) => setNotes({ ...notes, [idx]: e.target.value })} />
-                            </div>
-                          );
-                        })}
-                        {items.length === 0 && <p className="text-center text-gray-500">Brak produktów w koszyku.</p>}
+                      {/* EDITOWALNE PRODUKTY + NOTATKA DO ZAMÓWIENIA */}
+                      <div className="flex-1 space-y-3">
+                        <div className="max-h-[350px] overflow-y-auto space-y-3">
+                          {items.map((item, idx) => {
+                            const meta = findMetaByName(item.name);
+                            const defaultMeat = inferDefaultMeat(meta, item.name);
+                            return (
+                              <div key={idx}>
+                                <ProductItem
+                                  prod={item}
+                                  meta={meta}
+                                  defaultMeat={defaultMeat}
+                                  getAddonPrice={getAddonPrice}
+                                  allAddons={addonsFromDb}
+                                  helpers={productHelpers}
+                                />
+                                <textarea className="w-full text-xs border rounded px-2 py-1 mt-1" placeholder="Notatka do produktu" value={notes[idx] || ""} onChange={(e) => setNotes({ ...notes, [idx]: e.target.value })} />
+                              </div>
+                            );
+                          })}
+                          {items.length === 0 && <p className="text-center text-gray-500">Brak produktów w koszyku.</p>}
+                        </div>
+                        
+                        {/* NOTATKA DO ZAMÓWIENIA - POD PRODUKTAMI */}
+                        <div className="mt-4 pt-4 border-t">
+                          <h3 className="font-semibold text-sm mb-1">Notatka do zamówienia (opcjonalnie)</h3>
+                          <textarea
+                            className="w-full text-sm border rounded px-3 py-2"
+                            placeholder="Np. nie dzwonić domofonem, proszę o sztućce, itp."
+                            value={orderNote}
+                            onChange={(e) => setOrderNote(e.target.value)}
+                            maxLength={500}
+                            disabled={submitting}
+                          />
+                          <div className="text-[11px] text-gray-500 mt-1">
+                            Maks. 500 znaków.
+                          </div>
+                        </div>
                       </div>
-                      
-<div className="flex-1">
-  <div className="mt-3">
-    <h3 className="font-semibold text-sm mb-1">Notatka do zamówienia (opcjonalnie)</h3>
-    <textarea
-      className="w-full text-sm border rounded px-3 py-2"
-      placeholder="Np. nie dzwonić domofonem, proszę o sztućce, itp."
-      value={orderNote}
-      onChange={(e) => setOrderNote(e.target.value)}
-      maxLength={500}
-      disabled={submitting}
-    />
-    <div className="text-[11px] text-gray-500 mt-1">
-      Maks. 500 znaków.
-    </div>
-  </div>
-</div>
 
 
 
