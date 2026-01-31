@@ -48,10 +48,20 @@ const Spinner = () => (
   </svg>
 );
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+const getSupabase = () => {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !key) throw new Error("Missing Supabase environment variables");
+  return createClient(url, key);
+};
+
+let _supabase: ReturnType<typeof getSupabase> | null = null;
+const supabase = new Proxy({} as ReturnType<typeof getSupabase>, {
+  get(_, prop) {
+    if (!_supabase) _supabase = getSupabase();
+    return (_supabase as any)[prop];
+  },
+});
 
 const TERMS_VERSION = process.env.NEXT_PUBLIC_TERMS_VERSION || "2025-09-15";
 const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || "";
@@ -64,11 +74,21 @@ type Zone = {
   max_distance_km: number;
   min_order_value: number;
   cost: number;
+  cost_fixed?: number;
+  cost_per_km?: number;
   free_over: number | null;
   eta_min_minutes: number;
   eta_max_minutes: number;
   pricing_type?: "per_km" | "flat";
   active?: boolean;
+};
+
+type Addon = {
+  id: string;
+  name: string;
+  price: number;
+  category: string;
+  available: boolean;
 };
 
 const SAUCES = [
@@ -87,7 +107,7 @@ const toPrice = (v: any): number => {
   return 0;
 };
 
-type Product = { id: number; name: string; category: string | null; subcategory: string | null };
+type Product = { id: number; name: string; category: string | null; subcategory: string | null; available_addons: string[] | null };
 
 /* === normalizacja nazw dla pewnego dopasowania product_id === */
 const normalizeName = (s?: string) =>
@@ -162,6 +182,21 @@ const isFries = (meta?: Product, name?: string) => {
   );
 };
 
+// Kaucja za butelki/puszki (1 zł) - dla napojów oprócz wody
+const DEPOSIT_AMOUNT = 1;
+
+const isDrinkWithDeposit = (meta?: Product, name?: string) => {
+  const cat = (meta?.category || "").toLowerCase();
+  const n = (name || meta?.name || "").toLowerCase();
+  
+  // Sprawdź czy to napój
+  const isDrink = cat === "napoje" || cat === "napój";
+  if (!isDrink) return false;
+  
+  // Woda nie ma kaucji
+  const isWater = n.includes("woda") || n.includes("kropla");
+  return !isWater;
+};
 
 const MEAT_OPTIONS: Array<"wołowina" | "kurczak"> = ["wołowina", "kurczak"];
 
@@ -170,7 +205,9 @@ const ProductItem: React.FC<{
   prod: any;
   meta?: Product | undefined;
   defaultMeat: "wołowina" | "kurczak" | null;
-    helpers: {
+  getAddonPrice: (addonName: string) => number;
+  allAddons: Addon[];
+  helpers: {
     changeMeatType: (name: string, type: "wołowina" | "kurczak") => void;
     addExtraMeat: (name: string) => void;
     removeExtraMeat: (name: string) => void;
@@ -180,7 +217,7 @@ const ProductItem: React.FC<{
     removeItem: (name: string) => void;
     removeWholeItem: (name: string) => void;
   };
-}> = ({ prod, meta, defaultMeat, helpers }) => {
+}> = ({ prod, meta, defaultMeat, getAddonPrice, allAddons, helpers }) => {
   const { changeMeatType, addExtraMeat, removeExtraMeat, addAddon, removeAddon, swapIngredient, removeItem, removeWholeItem } =
     helpers;
 
@@ -190,19 +227,30 @@ const ProductItem: React.FC<{
     // burger: pełne dodatki; frytki: tylko sosy
   const burger = isBurger(meta, prod?.name);
   const fries = isFries(meta, prod?.name);
+  const drinkWithDeposit = isDrinkWithDeposit(meta, prod?.name);
 
-  const addonPool = burger ? AVAILABLE_ADDONS : fries ? SAUCES : [];
+  // Używamy available_addons z bazy dla danego produktu, lub wszystkie dodatki z tabeli addons
+  const productAddons = meta?.available_addons ?? [];
+  // Dla burgerów: dodatki produktu lub wszystkie z bazy, dla frytek: sosy + płynny ser
+  const allAddonNames = allAddons.filter(a => a.category !== 'sos').map(a => a.name);
+  const allSauceNames = allAddons.filter(a => a.category === 'sos').map(a => a.name);
+  const premiumAddons = allAddons.filter(a => a.category === 'premium').map(a => a.name);
+  const addonPool = burger 
+    ? (productAddons.length > 0 ? productAddons : (allAddonNames.length > 0 ? [...allAddonNames, ...allSauceNames] : AVAILABLE_ADDONS)) 
+    : fries 
+      ? [...(allSauceNames.length > 0 ? allSauceNames : SAUCES), ...(premiumAddons.length > 0 ? premiumAddons : ['Płynny ser'])]
+      : [];
   const sanitizedAddons: string[] = (prod.addons ?? []).filter((a: string) => addonPool.includes(a));
 
-  const addonsCost = burger
-    ? sanitizedAddons.reduce((sum: number, addon: string) => sum + (addon.toLowerCase() === "płynny ser" ? 6 : SAUCES.includes(addon) ? 3 : 4), 0)
-    : fries
-      ? sanitizedAddons.length * 3
-      : 0;
+  // Używamy cen z bazy danych
+  const addonsCost = sanitizedAddons.reduce((sum: number, addon: string) => sum + getAddonPrice(addon), 0);
 
   const extraMeatCost = burger ? (prod.extraMeatCount || 0) * 15 : 0;
+  
+  // Kaucja za napoje (oprócz wody)
+  const depositCost = drinkWithDeposit ? DEPOSIT_AMOUNT * (prod.quantity || 1) : 0;
 
-  const lineTotal = (priceNum + addonsCost + extraMeatCost) * (prod.quantity || 1);
+  const lineTotal = (priceNum + addonsCost + extraMeatCost) * (prod.quantity || 1) + depositCost;
 
   const selectedMeat =
     (prod.meatType as string | undefined) ?? (burger ? defaultMeat : null) ?? null;
@@ -217,6 +265,12 @@ const ProductItem: React.FC<{
         <span>{prod.name} x{prod.quantity || 1}</span>
         <span>{lineTotal.toFixed(2).replace(".", ",")} zł</span>
       </div>
+      
+      {drinkWithDeposit && (
+        <div className="text-xs text-orange-600 mb-2">
+          +{(DEPOSIT_AMOUNT * (prod.quantity || 1)).toFixed(2).replace(".", ",")} zł kaucja za butelkę/puszkę
+        </div>
+      )}
 
       <div className="text-xs text-gray-700 space-y-2">
         {supportsMeat && (
@@ -431,7 +485,9 @@ export default function CheckoutModal() {
 
   const [products, setProducts] = useState<Product[]>([]);
   const [zones, setZones] = useState<Zone[]>([]);
+  const [addonsFromDb, setAddonsFromDb] = useState<Addon[]>([]);
   const [restLoc, setRestLoc] = useState<{ lat: number; lng: number } | null>(null);
+  const [packagingCostSetting, setPackagingCostSetting] = useState<number>(2); // domyślnie 2zł, pobierany z bazy
   const [deliveryInfo, setDeliveryInfo] = useState<{ cost: number; eta: string } | null>(null);
 
   const [legalAccepted, setLegalAccepted] = useState(false);
@@ -511,7 +567,7 @@ export default function CheckoutModal() {
   useEffect(() => {
     supabase
       .from("products")
-      .select("id,name,category,subcategory")
+      .select("id,name,category,subcategory,available_addons")
       .then((r) => {
         if (!r.error && r.data) setProducts((r.data as Product[]) || []);
       });
@@ -522,13 +578,49 @@ export default function CheckoutModal() {
       .order("min_distance_km", { ascending: true })
       .then((r) => { if (!r.error && r.data) setZones(r.data as Zone[]); });
 
+    // Pobierz dodatki z tabeli addons
+    supabase
+      .from("addons")
+      .select("id,name,price,category,available")
+      .eq("available", true)
+      .order("display_order", { ascending: true })
+      .then((r) => {
+        if (!r.error && r.data) setAddonsFromDb(r.data as Addon[]);
+      });
+
     supabase
       .from("restaurant_info")
-      .select("lat,lng")
+      .select("lat,lng,packaging_cost")
       .eq("id", 1)
       .single()
-      .then((r) => { if (!r.error && r.data) setRestLoc({ lat: r.data.lat, lng: r.data.lng }); });
+      .then((r) => {
+        if (!r.error && r.data) {
+          setRestLoc({ lat: r.data.lat, lng: r.data.lng });
+          if (typeof r.data.packaging_cost === "number") {
+            setPackagingCostSetting(r.data.packaging_cost);
+          }
+        }
+      });
   }, []);
+
+  /* Mapa cen dodatków z bazy */
+  const addonPriceMap = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const a of addonsFromDb) {
+      m.set(a.name.toLowerCase(), a.price);
+    }
+    return m;
+  }, [addonsFromDb]);
+
+  /* Funkcja do pobierania ceny dodatku */
+  const getAddonPrice = (addonName: string): number => {
+    const price = addonPriceMap.get(addonName.toLowerCase());
+    if (price !== undefined) return price;
+    // Fallback do starych cen jeśli nie ma w bazie
+    if (addonName.toLowerCase() === "płynny ser") return 6;
+    if (SAUCES.map(s => s.toLowerCase()).includes(addonName.toLowerCase())) return 3;
+    return 4;
+  };
 
   /* szybka mapa name->product z normalizacją */
   const productByNorm = useMemo(() => {
@@ -636,25 +728,36 @@ export default function CheckoutModal() {
       const qty = it.quantity || 1;
       const priceNum = toPrice(it.price);
       const meta = productByNorm.get(normalizeName(it.name));
-            const burger = isBurger(meta, it?.name);
+      const burger = isBurger(meta, it?.name);
       const fries = isFries(meta, it?.name);
+      const drinkWithDeposit = isDrinkWithDeposit(meta, it?.name);
 
-      const addonPool = burger ? AVAILABLE_ADDONS : fries ? SAUCES : [];
+      // Pobierz listę dodatków dla produktu lub wszystkich z bazy
+      const productAddons = meta?.available_addons ?? [];
+      const allAddonNames = addonsFromDb.filter(a => a.category !== 'sos').map(a => a.name);
+      const allSauceNames = addonsFromDb.filter(a => a.category === 'sos').map(a => a.name);
+      const premiumAddons = addonsFromDb.filter(a => a.category === 'premium').map(a => a.name);
+      const addonPool = burger 
+        ? (productAddons.length > 0 ? productAddons : (allAddonNames.length > 0 ? [...allAddonNames, ...allSauceNames] : AVAILABLE_ADDONS)) 
+        : fries 
+          ? [...(allSauceNames.length > 0 ? allSauceNames : SAUCES), ...(premiumAddons.length > 0 ? premiumAddons : ['Płynny ser'])]
+          : [];
       const sanitizedAddons: string[] = (it.addons ?? []).filter((a: string) => addonPool.includes(a));
 
-      const addonsCost = burger
-        ? sanitizedAddons.reduce((sum: number, addon: string) => sum + (addon.toLowerCase() === "płynny ser" ? 6 : SAUCES.includes(addon) ? 3 : 4), 0)
-        : fries
-          ? sanitizedAddons.length * 3
-          : 0;
+      // Używamy cen z bazy
+      const addonsCost = sanitizedAddons.reduce((sum: number, addon: string) => sum + getAddonPrice(addon), 0);
 
       const extraMeatCost = burger ? (it.extraMeatCount || 0) * 15 : 0;
-      return acc + (priceNum + addonsCost + extraMeatCost) * qty;
+      
+      // Kaucja za napoje (oprócz wody)
+      const depositCost = drinkWithDeposit ? DEPOSIT_AMOUNT : 0;
+      
+      return acc + (priceNum + addonsCost + extraMeatCost + depositCost) * qty;
 
     }, 0);
-  }, [items, productByNorm]);
+  }, [items, productByNorm, addonsFromDb, getAddonPrice]);
 
-  const packagingCost = selectedOption === "takeaway" || selectedOption === "delivery" ? 2 : 0;
+  const packagingCost = selectedOption === "takeaway" || selectedOption === "delivery" ? packagingCostSetting : 0;
   const subtotal = baseTotal + packagingCost;
 
   const calcDelivery = async (custLat: number, custLng: number) => {
@@ -679,7 +782,13 @@ export default function CheckoutModal() {
       setOutOfRange(false);
 
       const perKm = (zone.pricing_type ?? (zone.min_distance_km === 0 ? "flat" : "per_km")) === "per_km";
-      let cost = perKm ? zone.cost * distance_km : zone.cost;
+      // Używamy nowych pól cost_fixed/cost_per_km jeśli dostępne, fallback do starego cost
+      let cost: number;
+      if (perKm) {
+        cost = (zone.cost_per_km ?? zone.cost ?? 0) * distance_km;
+      } else {
+        cost = zone.cost_fixed ?? zone.cost ?? 0;
+      }
 
       if (zone.free_over != null && subtotal >= zone.free_over) cost = 0;
 
@@ -1279,6 +1388,8 @@ export default function CheckoutModal() {
   prod={item}
   meta={meta}
   defaultMeat={defaultMeat}
+  getAddonPrice={getAddonPrice}
+  allAddons={addonsFromDb}
   helpers={productHelpers}
 />
 
@@ -1313,7 +1424,7 @@ export default function CheckoutModal() {
                         <div className="border rounded p-4 bg-gray-50 space-y-3">
                           <h3 className="text-lg font-semibold">Podsumowanie</h3>
                           <div className="flex justify-between text-sm"><span>Produkty:</span><span>{baseTotal.toFixed(2)} zł</span></div>
-                          {(selectedOption === "takeaway" || selectedOption === "delivery") && <div className="flex justify-between text-sm"><span>Opakowanie:</span><span>2.00 zł</span></div>}
+                          {(selectedOption === "takeaway" || selectedOption === "delivery") && <div className="flex justify-between text-sm"><span>Opakowanie:</span><span>{packagingCost.toFixed(2)} zł</span></div>}
                           {deliveryInfo && <div className="flex justify-between text-sm"><span>Dostawa:</span><span>{deliveryInfo.cost.toFixed(2)} zł</span></div>}
 
                           {selectedOption === "delivery" && outOfRange && (
@@ -1425,7 +1536,7 @@ export default function CheckoutModal() {
               <div className="sticky top-16 bg-white border rounded-md shadow p-5 space-y-4">
                 <h2 className="text-xl font-bold">Podsumowanie</h2>
                 <div className="flex justify-between"><span>Produkty:</span><span>{baseTotal.toFixed(2)} zł</span></div>
-                {(selectedOption === "takeaway" || selectedOption === "delivery") && <div className="flex justify-between"><span>Opakowanie:</span><span>2.00 zł</span></div>}
+                {(selectedOption === "takeaway" || selectedOption === "delivery") && <div className="flex justify-between"><span>Opakowanie:</span><span>{packagingCost.toFixed(2)} zł</span></div>}
                 {deliveryInfo && <div className="flex justify-between"><span>Dostawa:</span><span>{deliveryInfo.cost.toFixed(2)} zł</span></div>}
 
                 {selectedOption === "delivery" && outOfRange && (

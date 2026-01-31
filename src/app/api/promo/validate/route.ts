@@ -4,13 +4,18 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  { auth: { persistSession: false } }
-);
+// Lazy initialization - klient tworzony dopiero przy pierwszym użyciu
+const getSupabase = () => {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) {
+    throw new Error("Missing Supabase environment variables");
+  }
+  return createClient(url, key, { auth: { persistSession: false } });
+};
 
 export async function POST(req: Request) {
+  const supabase = getSupabase();
   let body: any = {};
   try {
     body = await req.json();
@@ -90,8 +95,9 @@ export async function POST(req: Request) {
     );
   }
 
+  // null = brak limitu na użytkownika (nieograniczone użycie)
   const perUserLimit =
-    dc.per_user_max_uses == null ? 1 : Number(dc.per_user_max_uses);
+    dc.per_user_max_uses == null ? Infinity : Number(dc.per_user_max_uses);
 
   // limit po użytkowniku
   if (userId) {

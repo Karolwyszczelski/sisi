@@ -1,10 +1,8 @@
 // src/app/components/AcceptButton.tsx
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
-
-const supabase = createClientComponentClient();
 
 interface Props {
   orderId: string;
@@ -19,6 +17,7 @@ interface Settings {
 }
 
 export default function AcceptButton({ orderId, orderType, onAccept }: Props) {
+  const supabase = useMemo(() => createClientComponentClient(), []);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [settings, setSettings] = useState<Settings | null>(null);
 
@@ -37,7 +36,7 @@ export default function AcceptButton({ orderId, orderType, onAccept }: Props) {
           setSettings(fetchedSettings);
         }
       });
-  }, []);
+  }, [supabase]);
 
   if (!settings) {
     return <button className="px-4 py-2 bg-gray-400 text-white rounded-full" disabled>Ładowanie...</button>;

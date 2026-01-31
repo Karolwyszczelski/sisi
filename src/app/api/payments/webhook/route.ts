@@ -9,11 +9,20 @@ import {
   parseP24Amount,
 } from "@/lib/p24";
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  { auth: { persistSession: false } }
-);
+const getSupabaseAdmin = () => {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) throw new Error("Missing Supabase environment variables");
+  return createClient(url, key, { auth: { persistSession: false } });
+};
+
+let _supabaseAdmin: ReturnType<typeof getSupabaseAdmin> | null = null;
+const supabaseAdmin = new Proxy({} as ReturnType<typeof getSupabaseAdmin>, {
+  get(_, prop) {
+    if (!_supabaseAdmin) _supabaseAdmin = getSupabaseAdmin();
+    return (_supabaseAdmin as any)[prop];
+  },
+});
 
 // P24 wysyła application/x-www-form-urlencoded
 async function readFormOrJson(req: Request) {

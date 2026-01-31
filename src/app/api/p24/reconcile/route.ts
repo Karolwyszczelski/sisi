@@ -7,19 +7,22 @@ import { headers } from "next/headers";
 import { createClient } from "@supabase/supabase-js";
 import { hostFromEnv, p24SignVerifyMD5, parseP24Amount } from "@/lib/p24";
 
-const {
-  NEXT_PUBLIC_SUPABASE_URL,
-  SUPABASE_SERVICE_ROLE_KEY,
-  P24_MERCHANT_ID,
-  P24_POS_ID,
-  CRON_SECRET,
-} = process.env;
+const { P24_MERCHANT_ID, P24_POS_ID, CRON_SECRET } = process.env;
 
-const supabase = createClient(
-  NEXT_PUBLIC_SUPABASE_URL!,
-  SUPABASE_SERVICE_ROLE_KEY!,
-  { auth: { persistSession: false } }
-);
+const getSupabase = () => {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) throw new Error("Missing Supabase environment variables");
+  return createClient(url, key, { auth: { persistSession: false } });
+};
+
+let _supabase: ReturnType<typeof getSupabase> | null = null;
+const supabase = new Proxy({} as ReturnType<typeof getSupabase>, {
+  get(_, prop) {
+    if (!_supabase) _supabase = getSupabase();
+    return (_supabase as any)[prop];
+  },
+});
 
 export async function GET(req: NextRequest) {
   // auth: Bearer <CRON_SECRET> lub ?token=<CRON_SECRET>

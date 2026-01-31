@@ -6,11 +6,12 @@ import { z } from "zod";
 import { createClient } from "@supabase/supabase-js";
 import { getSessionAndRole } from "@/lib/serverAuth";
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  { auth: { persistSession: false } }
-);
+const getSupabaseAdmin = () => {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) throw new Error("Missing Supabase environment variables");
+  return createClient(url, key, { auth: { persistSession: false } });
+};
 
 const PatchSchema = z.object({
   min_distance_km: z.number().nonnegative().optional(),
@@ -34,7 +35,7 @@ export async function PATCH(_: Request, { params }: { params: { id: string } }) 
   if (!parsed.success)
     return NextResponse.json({ error: parsed.error.message }, { status: 400 });
 
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await getSupabaseAdmin()
     .from("delivery_zones")
     .update(parsed.data)
     .eq("id", params.id)
@@ -50,7 +51,7 @@ export async function DELETE(_: Request, { params }: { params: { id: string } })
   if (!session || (role !== "admin" && role !== "employee"))
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { error } = await supabaseAdmin.from("delivery_zones").delete().eq("id", params.id);
+  const { error } = await getSupabaseAdmin().from("delivery_zones").delete().eq("id", params.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ ok: true });
 }

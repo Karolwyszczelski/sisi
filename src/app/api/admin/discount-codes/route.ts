@@ -6,13 +6,12 @@ import { createClient } from "@supabase/supabase-js";
 import { getSessionAndRole } from "@/lib/serverAuth";
 import type { Database } from "@/types/supabase";
 
-const supabaseAdmin = createClient<Database>(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  {
-    auth: { persistSession: false, detectSessionInUrl: false },
-  }
-);
+const getSupabaseAdmin = () => {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) throw new Error("Missing Supabase environment variables");
+  return createClient<Database>(url, key, { auth: { persistSession: false, detectSessionInUrl: false } });
+};
 
 function parseDate(v: any): string | null {
   if (!v) return null;
@@ -27,7 +26,7 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await getSupabaseAdmin()
     .from("discount_codes")
     .select(
       "id, code, type, value, active, public, auto_apply, min_order, max_uses, per_user_max_uses, used_count, starts_at, expires_at"
@@ -109,7 +108,7 @@ export async function POST(req: Request) {
     expires_at,
   };
 
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await getSupabaseAdmin()
     .from("discount_codes")
     .insert(row)
     .select(

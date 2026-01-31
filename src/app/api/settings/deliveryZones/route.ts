@@ -1,12 +1,18 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-const sb = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+// Lazy initialization - klient tworzony dopiero przy pierwszym użyciu
+const getSupabase = () => {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !key) {
+    throw new Error("Missing Supabase environment variables");
+  }
+  return createClient(url, key);
+};
 
 export async function GET() {
+  const sb = getSupabase();
   const { data, error } = await sb
     .from("delivery_zones")
     .select("*")
@@ -16,6 +22,7 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  const sb = getSupabase();
   const zones = (await req.json()) as Array<{
     id?: string;
     min_distance_km: number;
