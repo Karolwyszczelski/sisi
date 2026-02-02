@@ -9,7 +9,7 @@ import clsx from "clsx";
 
 const BG_DESKTOP = "/graffitiburger2.webp";   // desktop/tablet (zostaje)
 const BG_MOBILE = "/backgroundsisi.jpg";      // mobile: ma być backgroundsisi.jpg
-const MONTH_IMG = "/halloween.png";           // obraz burgera miesiąca
+const MONTH_IMG = "/halloween.svg";           // obraz burgera miesiąca
 
 const PlusSVG = (
   <svg
