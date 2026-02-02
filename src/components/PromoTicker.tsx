@@ -36,7 +36,7 @@ type Ann = {
 
 const FALLBACK: Ann = {
   id: "fallback-10",
-  text: "PROMO -10% NA CAŁE MENU! Tylko do 30 grudnia!",
+  text: "PROMO -10% NA CAŁE MENU! Zamów teraz!",
   link_href: "/#menu",
   dismiss_key: "sisi-10",
   bg: "#de1d13",
