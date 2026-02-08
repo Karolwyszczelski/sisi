@@ -978,11 +978,8 @@ const pricingType =
       if (pricingType === "per_km") {
   const perKmRate = costPerKm > 0 ? costPerKm : costLegacy;
 
-  // liczymy tylko nadwyżkę ponad min_distance_km danej strefy
-  const minKm = Number((zone as any).min_distance_km ?? 0);
-  const billableKm = Math.max(0, distance_km - minKm);
-
-  serverCost = Math.max(0, costFixed) + Math.max(0, perKmRate) * billableKm;
+  // mnożymy stawkę za km przez całą odległość
+  serverCost = Math.max(0, costFixed) + Math.max(0, perKmRate) * distance_km;
 } else {
   // flat
   serverCost = costFixed > 0 ? costFixed : costLegacy;
