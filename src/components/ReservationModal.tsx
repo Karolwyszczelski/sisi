@@ -1,12 +1,13 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { X } from "lucide-react";
+import { X, Menu, ChevronLeft, Calendar } from "lucide-react";
 import { DayPicker } from "react-day-picker";
 import "react-day-picker/dist/style.css";
 import { format, startOfMonth, endOfMonth, isSameDay } from "date-fns";
 import { pl } from "date-fns/locale";
 import { createClient } from "@supabase/supabase-js";
+import Image from "next/image";
 
 const getSupabase = () => {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -23,9 +24,9 @@ const supabase = new Proxy({} as ReturnType<typeof getSupabase>, {
   },
 });
 
-type Props = { isOpen: boolean; onClose: () => void; id?: string };
+type Props = { isOpen: boolean; onClose: () => void; id?: string; onOpenMenu?: () => void };
 
-export default function ReservationModal({ isOpen, onClose, id }: Props) {
+export default function ReservationModal({ isOpen, onClose, id, onOpenMenu }: Props) {
   // sloty 11:30–22:00 co 90 min
   const SLOT_DURATION_MIN = 90;
   const START_HOUR = 11;
@@ -128,11 +129,11 @@ export default function ReservationModal({ isOpen, onClose, id }: Props) {
   } as const;
 
   const modifiersClassNames = {
-    past: "text-gray-300",
-    free: "bg-green-200 hover:bg-green-300",
-    partial: "bg-yellow-200 hover:bg-yellow-300",
-    full: "bg-red-200 text-red-700 cursor-not-allowed",
-    selected: "bg-black text-white",
+    past: "text-white/20 cursor-not-allowed",
+    free: "bg-white/5 hover:bg-white/10 text-white",
+    partial: "bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-400",
+    full: "bg-red-500/20 text-red-400 cursor-not-allowed",
+    selected: "!bg-yellow-400 !text-black font-bold",
   } as const;
 
   const isValid = Boolean(selectedDate && selectedTime && customerName.trim() && customerPhone.trim());
@@ -170,129 +171,208 @@ export default function ReservationModal({ isOpen, onClose, id }: Props) {
 
   return (
     <div
-      className="fixed inset-0 z-[70] flex items-center justify-center"
+      className="fixed inset-0 z-40 md:z-[70] flex items-center justify-center md:p-4"
       role="dialog"
       aria-modal="true"
       id={id || "reservation-modal"}
       onMouseDown={onClose}
     >
-      <div className="absolute inset-0 bg-black/60" aria-hidden="true" />
+      {/* Backdrop - widoczny tylko na desktop */}
+      <div className="absolute inset-0 bg-black/80 backdrop-blur-sm hidden md:block" aria-hidden="true" />
+      
+      {/* Modal container - fullscreen na mobile, centered na desktop */}
       <div
-        className="relative z-[71] bg-white text-black w-full max-w-md max-h-[90vh] rounded-2xl overflow-y-auto shadow-2xl"
+        className="relative z-[41] md:z-[71] bg-zinc-950 md:bg-zinc-900 md:border md:border-white/10 text-white w-full h-full md:h-auto md:max-h-[90vh] md:max-w-md md:rounded-2xl overflow-hidden shadow-2xl"
         onMouseDown={(e) => e.stopPropagation()}
       >
-        <button
-          type="button"
-          onClick={onClose}
-          className="absolute top-3 right-4 z-20 text-gray-500 hover:text-gray-800"
-          aria-label="Zamknij"
-        >
-          <X size={22} />
-        </button>
+        {/* Header - różny na mobile i desktop */}
+        <div className="sticky top-0 z-20 bg-zinc-950/95 backdrop-blur-xl md:bg-zinc-900 border-b border-white/10">
+          {/* Mobile header - prosty i czytelny */}
+          <div className="flex md:hidden items-center justify-between h-14 px-4">
+            {/* Lewo: Przycisk cofania */}
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex items-center gap-2 text-white/80 active:text-white transition-colors"
+              aria-label="Wróć"
+            >
+              <ChevronLeft size={24} strokeWidth={2.5} />
+              <span className="text-sm font-medium">Wróć</span>
+            </button>
 
-        <form onSubmit={handleSubmit}>
-          <div className="p-4 border-b">
-            <h2 className="text-lg font-semibold">Rezerwacja stolika</h2>
+            {/* Prawo: Menu hamburger */}
+            {onOpenMenu && (
+              <button
+                type="button"
+                onClick={onOpenMenu}
+                className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center text-white/80 active:bg-white/10 active:scale-95 transition-all"
+                aria-label="Otwórz menu"
+              >
+                <Menu size={22} />
+              </button>
+            )}
           </div>
 
-          <div className="p-6 space-y-4">
-            <DayPicker
-              mode="single"
-              className="rounded-lg shadow-inner bg-gray-50"
-              captionLayout="dropdown"
-              month={currentMonth}
-              onMonthChange={setCurrentMonth}
-              selected={selectedDate}
-              onSelect={setSelectedDate}
-              locale={pl}
-              fromDate={new Date()}
-              modifiers={modifiers as any}
-              modifiersClassNames={modifiersClassNames as any}
-            />
+          {/* Desktop header */}
+          <div className="hidden md:flex items-center justify-between p-4">
+            <button
+              type="button"
+              onClick={onClose}
+              className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center text-white/70 active:bg-white/20 transition-colors"
+              aria-label="Zamknij"
+            >
+              <X size={20} />
+            </button>
+            <h2 className="text-lg font-bold">Rezerwacja stolika</h2>
+            <div className="w-10" /> {/* Spacer */}
+          </div>
+        </div>
+
+        {/* Scrollable content */}
+        <div className="overflow-y-auto h-[calc(100%-56px)] md:h-auto md:max-h-[calc(90vh-64px)] pb-32 md:pb-0">
+          <form onSubmit={handleSubmit} className="p-5 md:p-6 space-y-6">
+            
+            {/* Nagłówek sekcji - tylko mobile */}
+            <div className="md:hidden text-center py-4">
+              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-yellow-400/20 to-amber-500/10 flex items-center justify-center mx-auto mb-4 border border-yellow-400/20">
+                <Calendar size={32} className="text-yellow-400" />
+              </div>
+              <h3 className="text-3xl font-black text-white mb-1">Rezerwacja</h3>
+              <p className="text-white/50 text-sm">Wybierz datę i godzinę wizyty</p>
+            </div>
+
+            {/* Kalendarz */}
+            <div className="bg-white/5 rounded-2xl p-3 md:p-4 border border-white/10 overflow-hidden">
+              <DayPicker
+                mode="single"
+                className="reservation-calendar !bg-transparent"
+                captionLayout="dropdown"
+                month={currentMonth}
+                onMonthChange={setCurrentMonth}
+                selected={selectedDate}
+                onSelect={setSelectedDate}
+                locale={pl}
+                fromDate={new Date()}
+                modifiers={modifiers as any}
+                modifiersClassNames={modifiersClassNames as any}
+              />
+            </div>
 
             {selectedDate && (
-              <>
-                <label className="block font-medium">Godzina</label>
-                <select
-                  className="w-full border rounded py-2 px-3"
-                  value={selectedTime}
-                  onChange={(e) => setSelectedTime(e.target.value)}
-                >
-                  <option value="">— wybierz godzinę —</option>
-                  {generateSlots().map((slot) => (
-                    <option
-                      key={slot}
-                      value={slot}
-                      disabled={(countsPerSlot[slot] || 0) >= MAX_PER_SLOT}
+              <div className="space-y-3">
+                <label className="block font-semibold text-white text-sm uppercase tracking-wider text-white/60">
+                  Wybierz godzinę
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {generateSlots().map((slot) => {
+                    const isFull = (countsPerSlot[slot] || 0) >= MAX_PER_SLOT;
+                    const isSelected = selectedTime === slot;
+                    return (
+                      <button
+                        key={slot}
+                        type="button"
+                        disabled={isFull}
+                        onClick={() => setSelectedTime(slot)}
+                        className={`py-3.5 px-2 rounded-xl text-base font-semibold transition-all ${
+                          isSelected 
+                            ? "bg-yellow-400 text-black shadow-lg shadow-yellow-400/20" 
+                            : isFull 
+                              ? "bg-white/5 text-white/30 cursor-not-allowed line-through" 
+                              : "bg-white/5 text-white border border-white/10 active:scale-95"
+                        }`}
+                      >
+                        {slot}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {selectedTime && (
+              <div className="space-y-3">
+                <label className="block font-semibold text-sm uppercase tracking-wider text-white/60">
+                  Liczba gości
+                </label>
+                <div className="flex gap-2">
+                  {[1, 2, 3, 4, 5, 6].map((num) => (
+                    <button
+                      key={num}
+                      type="button"
+                      onClick={() => setGuestCount(num)}
+                      className={`flex-1 h-14 rounded-xl text-base font-bold transition-all ${
+                        guestCount === num 
+                          ? "bg-yellow-400 text-black shadow-lg shadow-yellow-400/20" 
+                          : "bg-white/5 text-white border border-white/10 active:scale-95"
+                      }`}
                     >
-                      {slot}{" "}
-                      {(countsPerSlot[slot] || 0) >= MAX_PER_SLOT
-                        ? "(pełny)"
-                        : `(${countsPerSlot[slot] || 0}/${MAX_PER_SLOT})`}
-                    </option>
+                      {num}
+                    </button>
                   ))}
-                </select>
-              </>
+                </div>
+              </div>
             )}
 
             {selectedTime && (
-              <>
-                <label className="block font-medium">Liczba gości</label>
-                <input
-                  type="number"
-                  min={1}
-                  max={10}
-                  value={guestCount}
-                  onChange={(e) => setGuestCount(Number(e.target.value))}
-                  className="border rounded w-24 py-1 px-2"
-                />
-              </>
-            )}
-
-            {selectedTime && (
-              <>
-                <label className="block font-medium">Twoje dane</label>
+              <div className="space-y-3">
+                <label className="block font-semibold text-sm uppercase tracking-wider text-white/60">
+                  Twoje dane
+                </label>
                 <input
                   type="text"
                   placeholder="Imię i nazwisko"
                   value={customerName}
                   onChange={(e) => setCustomerName(e.target.value)}
-                  className="w-full border rounded py-2 px-3 mb-2"
+                  className="w-full bg-white/5 border border-white/10 rounded-xl py-4 px-4 text-white placeholder:text-white/40 focus:outline-none focus:border-yellow-400/50 focus:bg-white/10 transition-all text-base"
                 />
                 <input
                   type="tel"
-                  placeholder="Telefon"
+                  placeholder="Numer telefonu"
                   value={customerPhone}
                   onChange={(e) => setCustomerPhone(e.target.value)}
-                  className="w-full border rounded py-2 px-3"
+                  className="w-full bg-white/5 border border-white/10 rounded-xl py-4 px-4 text-white placeholder:text-white/40 focus:outline-none focus:border-yellow-400/50 focus:bg-white/10 transition-all text-base"
                 />
-              </>
+              </div>
             )}
 
             {selectedTime && (
-              <>
-                <label className="block font-medium">Uwagi</label>
+              <div className="space-y-3">
+                <label className="block font-semibold text-sm uppercase tracking-wider text-white/60">
+                  Uwagi <span className="normal-case text-white/40">(opcjonalnie)</span>
+                </label>
                 <textarea
                   rows={3}
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
-                  className="w-full border rounded py-2 px-3"
-                  placeholder="Dodatkowe informacje..."
+                  className="w-full bg-white/5 border border-white/10 rounded-xl py-4 px-4 text-white placeholder:text-white/40 focus:outline-none focus:border-yellow-400/50 focus:bg-white/10 transition-all resize-none text-base"
+                  placeholder="Np. stolik przy oknie, krzesełko dla dziecka..."
                 />
-              </>
+              </div>
             )}
 
-            {errorMsg && <div className="text-sm text-red-600">{errorMsg}</div>}
+            {errorMsg && (
+              <div className="text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-xl p-4">
+                {errorMsg}
+              </div>
+            )}
 
-            <button
-              type="submit"
-              disabled={!isValid || loading}
-              className="w-full bg-yellow-500 text-black py-2 rounded font-semibold disabled:opacity-50 hover:bg-yellow-400 transition"
-            >
-              {loading ? "Wysyłanie..." : "Zarezerwuj"}
-            </button>
-          </div>
-        </form>
+            {/* Submit button */}
+            <div className="pt-2 pb-4">
+              <button
+                type="submit"
+                disabled={!isValid || loading}
+                className="w-full bg-gradient-to-r from-yellow-400 to-amber-500 text-black py-5 rounded-2xl font-bold text-lg disabled:opacity-50 active:scale-[0.98] transition-all shadow-lg shadow-yellow-500/25"
+              >
+                {loading ? "Wysyłanie..." : "Zarezerwuj stolik"}
+              </button>
+              
+              {/* Info pod przyciskiem */}
+              <p className="text-center text-white/30 text-xs mt-3">
+                Potwierdzenie otrzymasz E-mailem.
+              </p>
+            </div>
+          </form>
+        </div>
       </div>
     </div>
   );

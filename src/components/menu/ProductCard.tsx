@@ -1,14 +1,13 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Plus } from "lucide-react";
+import { Plus, Check } from "lucide-react";
 import useCartStore from "@/store/cartStore";
 
 interface Product {
   name: string;
   price: number;
   description?: string;
-  // skład może przyjść jako tablica lub string (czasem JSON-string)
   ingredients?: string[] | string | null;
 }
 
@@ -19,189 +18,158 @@ interface ProductCardProps {
 
 function parseIngredients(v: any): string[] {
   if (!v) return [];
-
-  // tablica
   if (Array.isArray(v)) {
     return v.map(String).map((s) => s.trim()).filter(Boolean);
   }
-
-  // string: może być CSV albo JSON
   if (typeof v === "string") {
     const s = v.trim();
     if (!s) return [];
-
-    // JSON array/object
     try {
       const parsed = JSON.parse(s);
       return parseIngredients(parsed);
     } catch {
-      // CSV fallback
-      return s
-        .split(",")
-        .map((x) => x.trim())
-        .filter(Boolean);
+      return s.split(",").map((x) => x.trim()).filter(Boolean);
     }
   }
-
-  // obiekt (np. { items: [...] } albo {0:"a",1:"b"})
   if (typeof v === "object") {
     if (Array.isArray((v as any).items)) return parseIngredients((v as any).items);
     return Object.values(v).map(String).map((s) => s.trim()).filter(Boolean);
   }
-
   return [];
 }
 
 export default function ProductCard({ product, index }: ProductCardProps) {
   const addItem = useCartStore((state) => state.addItem);
   const isFirst = index === 0;
-
+  const [added, setAdded] = useState(false);
   const [expanded, setExpanded] = useState(false);
 
   const ing = useMemo(() => parseIngredients(product.ingredients), [product.ingredients]);
   const bodyText = useMemo(() => {
-    if (ing.length) return ing.join(", ");
+    if (ing.length) return ing.join(" · ");
     return (product.description ?? "").trim();
   }, [ing, product.description]);
 
-  // heurystyka: pokaż przełącznik jeśli tekst raczej będzie ucinany
-  const canExpand = useMemo(() => {
-    if (!bodyText) return false;
-    return bodyText.length > 90 || ing.length > 6;
-  }, [bodyText, ing.length]);
+  // Sprawdź czy tekst jest dłuższy niż 3 linie (około 80 znaków)
+  const isLongText = bodyText.length > 80;
 
   const handleAddToCart = () => {
     addItem({ name: product.name, price: product.price });
+    setAdded(true);
+    setTimeout(() => setAdded(false), 1500);
   };
 
-  const toggleBtnClass = isFirst
-    ? "mt-2 text-[11px] font-semibold text-black/70 hover:text-black"
-    : "mt-2 text-[11px] font-semibold text-white/80 hover:text-white group-hover:text-black/70";
+  const toggleExpand = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setExpanded(!expanded);
+  };
 
-  const textClass = isFirst
-    ? "mt-1 text-xs leading-tight text-black"
-    : "mt-1 text-xs leading-tight text-white group-hover:text-black";
-
-  const priceBubbleClass = isFirst
-    ? "absolute top-3 left-3 w-10 h-10 rounded-full flex items-center justify-center text-xs font-bold bg-black text-white transition-colors duration-300 group-hover:bg-white group-hover:text-black"
-    : "absolute top-3 left-3 w-10 h-10 rounded-full flex items-center justify-center text-xs font-bold bg-black text-white transition-colors duration-300 group-hover:bg-white group-hover:text-black";
-
-  const plusBtnClass = isFirst
-    ? "absolute bottom-3 right-3 w-8 h-8 rounded-full flex items-center justify-center bg-black text-white transition-colors duration-300 hover:bg-white hover:text-black"
-    : "absolute bottom-3 right-3 w-8 h-8 rounded-full flex items-center justify-center bg-white text-black transition-colors duration-300 group-hover:bg-black group-hover:text-white";
-
-  // ====== RENDER: pierwsza karta ======
-  if (isFirst) {
-    return (
-      <div
-        onClick={handleAddToCart}
-        className="
-          relative p-4 min-h-[220px] rounded-2xl bg-yellow-400 text-black
-          transition-all duration-300 group hover:scale-105 hover:shadow-lg
-          cursor-pointer h-full flex flex-col
-        "
-      >
-        <div className={priceBubbleClass}>{product.price} zł</div>
-
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            handleAddToCart();
-          }}
-          className={plusBtnClass}
-          aria-label="Dodaj do koszyka"
-          type="button"
-        >
-          <Plus size={16} />
-        </button>
-
-        <h3 className="mt-14 text-sm font-extrabold uppercase leading-tight">{product.name}</h3>
-
-        {bodyText && (
-          <>
-            <p
-              className={`${textClass} ${
-                expanded ? "max-h-28 overflow-auto pr-1" : "line-clamp-3"
-              }`}
-            >
-              {bodyText}
-            </p>
-
-            {canExpand && (
-              <button
-                type="button"
-                className={toggleBtnClass}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setExpanded((v) => !v);
-                }}
-              >
-                {expanded ? "Zwiń" : "Więcej"}
-              </button>
-            )}
-          </>
-        )}
-      </div>
-    );
-  }
-
-  // ====== RENDER: pozostałe karty ======
   return (
     <div
       onClick={handleAddToCart}
-      className="
-        relative p-4 min-h-[220px] rounded-2xl bg-transparent border border-white
-        transition-all duration-300 group hover:scale-105 hover:shadow-lg hover:bg-yellow-400
-        text-white cursor-pointer h-full flex flex-col
-      "
+      className={`
+        group relative cursor-pointer h-full
+        rounded-3xl overflow-hidden
+        transition-all duration-500 ease-out
+        ${isFirst 
+          ? "bg-gradient-to-br from-yellow-400 via-yellow-400 to-amber-500 shadow-lg shadow-yellow-500/20 hover:shadow-2xl hover:shadow-yellow-500/30 hover:-translate-y-2" 
+          : "bg-gradient-to-br from-zinc-800/90 to-zinc-900 border border-white/5 hover:border-yellow-400/40 hover:-translate-y-2 hover:shadow-xl hover:shadow-yellow-400/10"
+        }
+      `}
     >
-      <div className={priceBubbleClass}>{product.price} zł</div>
-
-      <button
-        onClick={(e) => {
-          e.stopPropagation();
-          handleAddToCart();
-        }}
-        className={plusBtnClass}
-        aria-label="Dodaj do koszyka"
-        type="button"
-      >
-        <Plus size={16} />
-      </button>
-
-      <h3
-        className="
-          mt-14 text-sm font-extrabold uppercase leading-tight
-          text-yellow-400 group-hover:text-black
-        "
-      >
-        {product.name}
-      </h3>
-
-      {bodyText && (
-        <>
-          <p
-            className={`${textClass} ${
-              expanded ? "max-h-28 overflow-auto pr-1" : "line-clamp-3"
-            }`}
-          >
-            {bodyText}
-          </p>
-
-          {canExpand && (
-            <button
-              type="button"
-              className={toggleBtnClass}
-              onClick={(e) => {
-                e.stopPropagation();
-                setExpanded((v) => !v);
-              }}
-            >
-              {expanded ? "Zwiń" : "Więcej"}
-            </button>
-          )}
-        </>
+      {/* Świecący akcent na górze przy hover */}
+      {!isFirst && (
+        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-yellow-400 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
       )}
+
+      {/* Główna zawartość */}
+      <div className="relative p-6 flex flex-col h-full min-h-[220px]">
+        
+        {/* Górna część - nazwa i badge */}
+        <div className="flex-1 text-center">
+          {isFirst && (
+            <span className="inline-block bg-black text-yellow-400 text-[9px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full mb-3">
+              HIT
+            </span>
+          )}
+          <h3 className={`
+            text-lg font-extrabold uppercase tracking-tight leading-tight
+            transition-colors duration-300
+            ${isFirst ? "text-black" : "text-white group-hover:text-yellow-400"}
+          `}>
+            {product.name}
+          </h3>
+          
+          {/* Składniki */}
+          {bodyText && (
+            <div className="mt-3">
+              <p className={`
+                text-[13px] leading-relaxed
+                ${expanded ? "" : "line-clamp-2"}
+                ${isFirst ? "text-black/50" : "text-white/40"}
+              `}>
+                {bodyText}
+              </p>
+              {isLongText && (
+                <button
+                  type="button"
+                  onClick={toggleExpand}
+                  className={`
+                    mt-1.5 text-[11px] font-semibold
+                    ${isFirst ? "text-black/70 hover:text-black" : "text-yellow-400/80 hover:text-yellow-400"}
+                    transition-colors
+                  `}
+                >
+                  {expanded ? "Zwiń ▲" : "Więcej ▼"}
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Dolna część - cena i przycisk */}
+        <div className={`
+          flex items-end justify-between mt-5 pt-4
+          ${isFirst ? "border-t border-black/10" : "border-t border-white/5"}
+        `}>
+          <div className="flex items-baseline gap-1">
+            <span className={`
+              text-3xl font-black tracking-tight
+              ${isFirst ? "text-black" : "text-white"}
+            `}>
+              {product.price}
+            </span>
+            <span className={`
+              text-base font-semibold
+              ${isFirst ? "text-black/40" : "text-white/30"}
+            `}>
+              zł
+            </span>
+          </div>
+
+          <button
+            onClick={(e) => { e.stopPropagation(); handleAddToCart(); }}
+            className={`
+              relative w-12 h-12 rounded-2xl flex items-center justify-center
+              transition-all duration-300
+              ${isFirst 
+                ? "bg-black text-yellow-400 hover:scale-110 hover:rotate-3" 
+                : "bg-yellow-400 text-black hover:scale-110 hover:rotate-3 hover:bg-yellow-300"
+              }
+              ${added ? "scale-110 rotate-12" : ""}
+            `}
+            aria-label="Dodaj do koszyka"
+            type="button"
+          >
+            <div className={`transition-all duration-300 ${added ? "scale-0" : "scale-100"}`}>
+              <Plus size={22} strokeWidth={2.5} />
+            </div>
+            <div className={`absolute transition-all duration-300 ${added ? "scale-100" : "scale-0"}`}>
+              <Check size={22} strokeWidth={3} />
+            </div>
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

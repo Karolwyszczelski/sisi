@@ -6,13 +6,20 @@ import Image from "next/image";
 import { DotLottieReact } from "@lottiefiles/dotlottie-react";
 import { Facebook, Instagram } from "lucide-react";
 
-export default function Hero() {
-  const [showIntro, setShowIntro] = useState(true);
+interface HeroProps {
+  onNavigateToMenu?: () => void;
+  onNavigateToBurger?: () => void;
+  onOpenReservation?: () => void;
+}
+
+const INTRO_SHOWN_KEY = "sisi_intro_shown";
+
+export default function Hero({ onNavigateToMenu, onNavigateToBurger, onOpenReservation }: HeroProps) {
+  const [showIntro, setShowIntro] = useState(false); // Start as false, then check
   const [slide, setSlide] = useState<0 | 1>(0);
   const [reducedMotion, setReducedMotion] = useState(false);
 
   useEffect(() => {
-    // prefers-reduced-motion
     if (typeof window !== "undefined") {
       const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
       setReducedMotion(mq.matches);
@@ -22,265 +29,296 @@ export default function Hero() {
     }
   }, []);
 
-  // Intro — krótsze przy reduced motion całkiem pomijamy
+  // Check if intro was already shown this session
   useEffect(() => {
-    if (reducedMotion) {
+    if (typeof window === "undefined") return;
+    
+    const alreadyShown = sessionStorage.getItem(INTRO_SHOWN_KEY);
+    if (alreadyShown || reducedMotion) {
       setShowIntro(false);
       return;
     }
-    const t = setTimeout(() => setShowIntro(false), 3000);
+    
+    // Show intro for first visit
+    setShowIntro(true);
+    sessionStorage.setItem(INTRO_SHOWN_KEY, "true");
+    
+    const t = setTimeout(() => setShowIntro(false), 1800);
     return () => clearTimeout(t);
   }, [reducedMotion]);
 
-  // Automatyczny slider (wstrzymany przy reduced motion)
   useEffect(() => {
     if (reducedMotion) return;
     const id = setInterval(() => setSlide((s) => (s === 0 ? 1 : 0)), 3500);
     return () => clearInterval(id);
   }, [reducedMotion]);
 
-  /** ---------- INTRO OVERLAY (bez H1) ---------- */
   if (showIntro) {
     return (
-      <section className="fixed inset-0 z-50 flex items-center justify-center bg-black text-white">
-        <div className="flex flex-col items-center -mt-4">
-          <div className="w-56 h-56 sm:w-72 sm:h-72">
-            <DotLottieReact
-              src="https://lottie.host/94a05476-cced-433a-b1ed-ec400e6ac153/3H4yjKz5rT.lottie"
-              loop
-              autoplay
-              className="w-full h-full"
-            />
-          </div>
-          <p className="mt-2 text-[28px] sm:text-3xl font-bold leading-tight">Cześć!</p>
-          <p className="mt-1 text-base sm:text-xl leading-tight">co dziś zamawiamy?</p>
+      <section className="intro-section fixed inset-0 z-50 flex items-center justify-center bg-black text-white overflow-hidden">
+        {/* Burger spadający z góry */}
+        <div className="burger-drop absolute w-40 h-40 sm:w-48 sm:h-48 z-30 will-change-transform">
+          <Image
+            src="/burgerpng.png"
+            alt=""
+            width={192}
+            height={192}
+            className="w-full h-full object-contain drop-shadow-[0_0_60px_rgba(251,191,36,0.9)]"
+            priority
+          />
         </div>
+
+        {/* Ślad świetlny za burgerem */}
+        <div className="trail-vertical absolute inset-0 flex justify-center pointer-events-none">
+          <div className="trail-glow-vertical" />
+        </div>
+
+        {/* Tekst odsłaniany przez burgera */}
+        <div className="relative z-20 flex flex-col items-center text-center px-6">
+          <p className="intro-text text-4xl sm:text-5xl md:text-6xl font-black leading-tight tracking-tight">
+            Witaj w <span className="text-yellow-400">SISI</span>! 🍔
+          </p>
+          <p className="intro-subtext text-white/50 mt-3 text-lg sm:text-xl">Najlepsze burgery w mieście</p>
+        </div>
+
+        <style jsx>{`
+          .intro-section {
+            animation: fadeOutSection 0.4s ease-in 1.4s forwards;
+          }
+
+          @keyframes fadeOutSection {
+            0% { opacity: 1; }
+            100% { opacity: 0; }
+          }
+
+          .burger-drop {
+            top: -200px;
+            left: 50%;
+            transform: translateX(-50%) rotate(-20deg);
+            animation: dropDown 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+          }
+          
+          @keyframes dropDown {
+            0% {
+              top: -200px;
+              transform: translateX(-50%) rotate(-20deg) scale(0.8);
+              opacity: 0;
+            }
+            15% {
+              opacity: 1;
+            }
+            60% {
+              top: 50%;
+              transform: translateX(-50%) translateY(-50%) rotate(10deg) scale(1.1);
+            }
+            80% {
+              transform: translateX(-50%) translateY(-50%) rotate(-5deg) scale(1);
+            }
+            100% {
+              top: 50%;
+              transform: translateX(-50%) translateY(-50%) rotate(0deg) scale(1);
+              opacity: 0;
+            }
+          }
+
+          .trail-glow-vertical {
+            position: absolute;
+            top: 0;
+            width: 120px;
+            height: 0;
+            background: linear-gradient(180deg, rgba(251, 191, 36, 0.8) 0%, rgba(251, 191, 36, 0.4) 50%, transparent 100%);
+            border-radius: 100px;
+            filter: blur(40px);
+            will-change: height, opacity;
+            animation: trailGrow 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards, trailFade 0.3s ease-out 0.5s forwards;
+          }
+
+          @keyframes trailGrow {
+            0% { height: 0; opacity: 0; }
+            20% { opacity: 0.8; }
+            100% { height: 60vh; opacity: 0.6; }
+          }
+
+          @keyframes trailFade {
+            0% { opacity: 0.6; }
+            100% { opacity: 0; }
+          }
+          
+          .intro-text {
+            opacity: 0;
+            animation: revealText 0.5s ease-out 0.4s forwards, fadeOutText 0.3s ease-in 1.1s forwards;
+          }
+
+          .intro-subtext {
+            opacity: 0;
+            animation: revealSubtext 0.4s ease-out 0.55s forwards, fadeOutText 0.3s ease-in 1.1s forwards;
+          }
+          
+          @keyframes revealText {
+            0% {
+              opacity: 0;
+              transform: translateY(30px) scale(0.9);
+              filter: blur(10px);
+            }
+            100% {
+              opacity: 1;
+              transform: translateY(0) scale(1);
+              filter: blur(0);
+            }
+          }
+
+          @keyframes revealSubtext {
+            0% {
+              opacity: 0;
+              transform: translateY(20px);
+            }
+            100% {
+              opacity: 1;
+              transform: translateY(0);
+            }
+          }
+
+          @keyframes fadeOutText {
+            0% { opacity: 1; }
+            100% { opacity: 0; }
+          }
+        `}</style>
       </section>
     );
   }
 
-  /** ---------- MAIN ---------- */
   return (
     <section className="relative w-full min-h-[100svh] overflow-hidden text-white">
-      {/* Jedna, kanoniczna H1 (SEO) */}
       <h1 className="sr-only">
-        SISI Burger &amp; Pancakes — burgery i pancake w Ciechanowie
+        SISI Burger and Pancakes — najlepsze burgery i pancake w Ciechanowie
       </h1>
 
       {/* DESKTOP */}
       <div className="hidden md:block relative w-full h-screen">
-        {/* TŁO */}
         <div className="absolute inset-0 -z-10">
           <Image
-            src="/tloburger.png"
-            alt=""
+            src="/tloburger.webp"
+            alt="SISI Burger and Pancake - wnętrze restauracji"
             fill
             priority
-            className="object-cover md:object-[right_bottom] md:[animation:gentleShake_5s_ease-in-out_infinite]"
+            className="object-cover object-left"
           />
+          <div className="absolute inset-0 bg-black/50" />
         </div>
 
-        {/* KONTENT */}
-        <div className="relative z-10 h-full flex items-center">
-          <div className="w-full max-w-7xl mx-auto px-6 lg:px-16">
-            <div className="flex flex-col-reverse md:flex-row md:items-center">
-              <div className="hidden md:block md:w-1/2" />
-              <div className="w-full md:w-[46%] md:ml-auto flex flex-col items-center md:items-end text-center md:text-right px-2 pt-8 md:pt-0 md:pr-8 lg:pr-16">
-                {/* Dekoracyjne „SiSi” (bez roli nagłówka) */}
-                <div aria-hidden className="relative font-mrBedfort italic font-bold text-8xl sm:text-9xl md:text-[170px] leading-none mb-1 drop-shadow-2xl">
-                  SiSi
-                  <span className="absolute left-0 bottom-0 w-full h-6 overflow-hidden hidden md:block">
-                    <svg viewBox="0 0 100 10" preserveAspectRatio="none" className="w-full h-full">
-                      <path
-                        d="M0,6 20,5 40,8 C50,8 10,4 30,7 C75,9 40,5 100,6 L90,10 L0,10 Z"
-                        fill="#FBBF24"
-                        opacity="0.85"
-                      />
-                    </svg>
-                  </span>
-                </div>
+        <div className="relative z-10 h-full flex items-center justify-center">
+          <div className="text-center max-w-4xl mx-auto px-6">
 
-                <h2 className="text-xl md:text-3xl mb-2 drop-shadow-md">
-                  BURGER &amp; PANCAKE
-                </h2>
+            <h2 className="text-5xl md:text-6xl lg:text-7xl font-black text-white leading-[1.1] mb-6">
+              Najlepsze <span className="text-yellow-400">burgery</span>
+              <br />
+              w Ciechanowie
+            </h2>
 
-                <p className="text-sm md:text-lg max-w-md px-4 md:px-0 leading-snug mb-4 drop-shadow">
-                  Najlepsza restauracja z burgerami oraz pancake’ami w Ciechanowie i okolicy!
-                </p>
+            <div className="w-20 h-1 bg-yellow-400 mx-auto mb-8" />
 
-                <a
-                  href="#menu"
-                  className="px-6 py-2 border border-white rounded-md font-semibold hover:bg-white hover:text-black transition text-sm drop-shadow-md"
-                >
-                  ZAMÓW TERAZ!
-                </a>
-              </div>
+            <p className="text-lg md:text-xl text-white/70 max-w-2xl mx-auto leading-relaxed mb-10">
+              Świeże składniki, soczyste mięso i autorskie receptury. 
+              Zamów online lub odwiedź nas!
+            </p>
+
+            <div className="flex flex-wrap gap-5 justify-center">
+              <a
+                href="#menu"
+                className="group px-10 py-4 bg-gradient-to-r from-yellow-400 via-yellow-500 to-amber-500 text-black font-bold text-base rounded-xl hover:from-yellow-300 hover:via-yellow-400 hover:to-amber-400 hover:scale-105 transition-all duration-300 shadow-xl shadow-yellow-400/25"
+              >
+                ZOBACZ MENU
+                <span className="inline-block ml-2 group-hover:translate-x-1 transition-transform">→</span>
+              </a>
+              <a
+                href="tel:+48515433488"
+                className="px-10 py-4 bg-white/10 backdrop-blur-sm border border-white/20 text-white font-bold text-base rounded-xl hover:bg-white hover:text-black transition-all duration-300"
+              >
+                ZADZWOŃ
+              </a>
             </div>
           </div>
-        </div>
-
-        {/* Social (desktop) */}
-        <div className="hidden md:flex flex-col gap-6 absolute right-4 sm:right-6 top-1/2 -translate-y-1/2 z-20">
-          <a
-            href="https://facebook.com/sisiciechanow"
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label="Facebook SISI Ciechanów"
-            className="hover:scale-110 transition drop-shadow"
-          >
-            <Facebook className="w-5 h-5" />
-          </a>
-          <a
-            href="https://instagram.com/sisiciechanow"
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label="Instagram SISI Ciechanów"
-            className="hover:scale-110 transition drop-shadow"
-          >
-            <Instagram className="w-5 h-5" />
-          </a>
         </div>
       </div>
 
       {/* MOBILE */}
-      <div className="md:hidden relative w-full min-h-[100svh] flex flex-col pb-[calc(env(safe-area-inset-bottom)+96px)]">
-        {/* Tło mobile */}
+      <div className="md:hidden relative w-full min-h-[100svh] flex flex-col justify-center">
         <div className="absolute inset-0 -z-10">
           <Image
-            src="/heromobileburger.jpg"
-            alt=""
+            src="/hero-mobile-burger.webp"
+            alt="SISI Burger and Pancake"
             fill
             priority
             className="object-cover"
             sizes="100vw"
           />
+          <div className="absolute inset-0 bg-black/50" />
         </div>
 
-        {/* Pasek tytułu (dekoracyjne) */}
-        <div
-          className="absolute inset-x-0 px-4 flex flex-col items-center"
-          style={{ top: "calc(env(safe-area-inset-top) + 50px)" }}
-        >
-          <div aria-hidden className="font-mrBedfort italic font-bold text-4xl leading-none">
-            SiSi
-          </div>
-          <div aria-hidden className="mt-1 text-xs tracking-widest">
-            BURGER &amp; PANCAKE
-          </div>
-        </div>
+        <div className="relative z-10 text-center px-6 pt-20 pb-32">
+          <h2 className="text-4xl font-black text-white leading-[1.15] mb-4">
+            Najlepsze <span className="text-yellow-400">burgery</span>
+            <br />
+            w Ciechanowie
+          </h2>
 
-        {/* Slider */}
-        <div
-          className="mt-28 px-4"
-          role="region"
-          aria-roledescription="karuzela"
-          aria-label="Oferta: burger i pancake"
-        >
-          <div className="relative w-full h-72 overflow-hidden">
-            {/* tor slajdów */}
-            <div
-              className="absolute inset-0 will-change-transform"
-              aria-live="polite"
-            >
-              <div
-                className="flex w-[200%] h-full transition-transform duration-500 ease-out"
-                style={{ transform: `translateX(-${slide * 50}%)` }}
-              >
-                {/* SLIDE 1 */}
-                <div className="w-1/2 h-full flex items-start justify-center" role="group" aria-label="Burger">
-                  <div className="relative w-full max-w-sm mx-auto">
-                    <span aria-hidden className="block text-center text-[clamp(44px,18vw,68px)] font-extrabold leading-none z-0 mt-[100px]">
-                      Burger
-                    </span>
-                    <Image
-                      src="/burgerpng.png"
-                      alt="Soczysty burger"
-                      width={250}
-                      height={250}
-                      className="absolute left-1/2 -translate-x-1/2 top-[100px] z-10 pointer-events-none select-none drop-shadow"
-                      priority
-                    />
-                  </div>
-                </div>
+          <div className="w-16 h-1 bg-yellow-400 mx-auto mb-6" />
 
-                {/* SLIDE 2 */}
-                <div className="w-1/2 h-full flex items-start justify-center" role="group" aria-label="Pancake">
-                  <div className="relative w-full max-w-sm mx-auto">
-                    <span aria-hidden className="block text-center text-[clamp(44px,18vw,68px)] font-extrabold leading-none z-0 mt-[70px]">
-                      Pancake
-                    </span>
-                    <Image
-                      src="/pancakepng.png"
-                      alt="Puszyste pancake’i"
-                      width={280}
-                      height={280}
-                      className="absolute left-1/2 -translate-x-1/2 top-[80px] z-10 pointer-events-none select-none drop-shadow"
-                      priority
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* kropki */}
-            <div className="absolute bottom-2 left-0 right-0 flex justify-center gap-2">
-              <button
-                aria-label="Pokaż burger"
-                onClick={() => setSlide(0)}
-                className={`h-2.5 w-2.5 rounded-full ${slide === 0 ? "bg-white" : "bg-white/40"}`}
-              />
-              <button
-                aria-label="Pokaż pancake"
-                onClick={() => setSlide(1)}
-                className={`h-2.5 w-2.5 rounded-full ${slide === 1 ? "bg-white" : "bg-white/40"}`}
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* CTA */}
-        <div className="mt-8 px-6 text-center">
-          <div className="flex gap-3 justify-center">
-            <a
-              href="#menu"
-              className="px-4 py-2 bg-white text-black rounded-md font-semibold text-sm"
-            >
-              Zamów teraz
-            </a>
-            <a
-              href="tel:+48515433488"
-              className="px-4 py-2 border border-white rounded-md font-semibold text-sm"
-            >
-              Zadzwoń
-            </a>
-          </div>
-          <p className="mt-5 text-sm leading-snug">
-            Najlepsze burgery i pancake w Ciechanowie i nie tylko!
+          <p className="text-base text-white/70 max-w-sm mx-auto leading-relaxed mb-8">
+            Świeże składniki, soczyste mięso i autorskie receptury. Zamów online lub odwiedź nas!
           </p>
-        </div>
 
-        {/* Social (mobile) */}
-        <div className="mt-6 flex items-center justify-center gap-6">
-          <a
-            href="https://facebook.com/sisiciechanow"
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label="Facebook SISI Ciechanów"
-            className="hover:opacity-80"
-          >
-            <Facebook className="w-5 h-5" />
-          </a>
-          <a
-            href="https://instagram.com/sisiciechanow"
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label="Instagram SISI Ciechanów"
-            className="hover:opacity-80"
-          >
-            <Instagram className="w-5 h-5" />
-          </a>
+          <div className="flex flex-col gap-3 max-w-xs mx-auto">
+            {onNavigateToMenu ? (
+              <button
+                onClick={onNavigateToMenu}
+                className="w-full py-3.5 bg-gradient-to-r from-yellow-400 via-yellow-500 to-amber-500 text-black font-bold text-sm rounded-xl shadow-lg shadow-yellow-400/25"
+              >
+                ZOBACZ MENU →
+              </button>
+            ) : (
+              <a
+                href="#menu"
+                className="w-full py-3.5 bg-gradient-to-r from-yellow-400 via-yellow-500 to-amber-500 text-black font-bold text-sm rounded-xl shadow-lg shadow-yellow-400/25 text-center"
+              >
+                ZOBACZ MENU →
+              </a>
+            )}
+            {onNavigateToBurger ? (
+              <button
+                onClick={onNavigateToBurger}
+                className="w-full py-3.5 bg-white/10 backdrop-blur-sm border border-yellow-400/30 text-yellow-400 font-bold text-sm rounded-xl"
+              >
+                🍔 BURGER MIESIĄCA
+              </button>
+            ) : (
+              <a
+                href="#burger-miesiaca"
+                className="w-full py-3.5 bg-white/10 backdrop-blur-sm border border-yellow-400/30 text-yellow-400 font-bold text-sm rounded-xl text-center"
+              >
+                🍔 BURGER MIESIĄCA
+              </a>
+            )}
+            {onOpenReservation ? (
+              <button
+                onClick={onOpenReservation}
+                className="w-full py-3.5 bg-white/10 backdrop-blur-sm border border-white/20 text-white font-bold text-sm rounded-xl"
+              >
+                ZAREZERWUJ STOLIK
+              </button>
+            ) : (
+              <a
+                href="tel:+48515433488"
+                className="w-full py-3.5 bg-white/10 backdrop-blur-sm border border-white/20 text-white font-bold text-sm rounded-xl text-center"
+              >
+                ZADZWOŃ
+              </a>
+            )}
+          </div>
         </div>
       </div>
+
+      <div className="absolute bottom-0 left-0 right-0 h-32 md:h-48 bg-gradient-to-b from-transparent to-black pointer-events-none z-20" />
     </section>
   );
 }
