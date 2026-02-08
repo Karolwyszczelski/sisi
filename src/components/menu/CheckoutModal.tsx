@@ -590,6 +590,7 @@ export default function CheckoutModal() {
     supabase
       .from("delivery_zones")
       .select("*")
+      .eq("active", true)
       .order("min_distance_km", { ascending: true })
       .then((r) => { if (!r.error && r.data) setZones(r.data as Zone[]); });
 
@@ -797,9 +798,21 @@ export default function CheckoutModal() {
       const { distance_km, error } = await resp.json();
       if (error) { console.error("Distance API:", error); return; }
 
-      const zone = zones
+      console.log("[calcDelivery] distance_km:", distance_km, "zones:", zones.map(z => ({
+        min: z.min_distance_km, max: z.max_distance_km, pricing_type: z.pricing_type, 
+        cost: z.cost, cost_fixed: z.cost_fixed, cost_per_km: z.cost_per_km
+      })));
+
+      // Konwersja na number + sortowanie dla pewności (Supabase może zwrócić stringi)
+      const sortedZones = zones
         .filter(z => z.active !== false)
-        .find(z => distance_km >= z.min_distance_km && distance_km <= z.max_distance_km);
+        .sort((a, b) => Number(a.min_distance_km) - Number(b.min_distance_km));
+      
+      const zone = sortedZones.find(z => 
+        distance_km >= Number(z.min_distance_km) && distance_km <= Number(z.max_distance_km)
+      );
+
+      console.log("[calcDelivery] selected zone:", zone);
 
       if (!zone) {
         setOutOfRange(true);
@@ -811,22 +824,32 @@ export default function CheckoutModal() {
 
       setOutOfRange(false);
 
-      const perKm = (zone.pricing_type ?? (zone.min_distance_km === 0 ? "flat" : "per_km")) === "per_km";
-      // Używamy nowych pól cost_fixed/cost_per_km jeśli dostępne, fallback do starego cost
+      // Konwersja wszystkich wartości na number (Supabase może zwrócić stringi)
+      const pricingType = zone.pricing_type ?? (Number(zone.min_distance_km) === 0 ? "flat" : "per_km");
+      const perKm = pricingType === "per_km";
+      
       let cost: number;
       if (perKm) {
-        cost = (zone.cost_per_km ?? zone.cost ?? 0) * distance_km;
+        // Mnożymy stawkę za km przez całą odległość
+        const perKmRate = Number(zone.cost_per_km ?? zone.cost ?? 0);
+        const costFixed = Number(zone.cost_fixed ?? 0);
+        cost = costFixed + perKmRate * distance_km;
+        console.log("[calcDelivery] per_km calc:", { perKmRate, costFixed, distance_km, cost });
       } else {
-        cost = zone.cost_fixed ?? zone.cost ?? 0;
+        cost = Number(zone.cost_fixed ?? zone.cost ?? 0);
+        console.log("[calcDelivery] flat calc:", { cost });
       }
 
-      if (zone.free_over != null && subtotal >= zone.free_over) cost = 0;
+      const freeOver = zone.free_over != null ? Number(zone.free_over) : null;
+      if (freeOver != null && subtotal >= freeOver) cost = 0;
 
-      const minOk = subtotal >= (zone.min_order_value || 0);
+      const minOrderValue = Number(zone.min_order_value || 0);
+      const minOk = subtotal >= minOrderValue;
       setDeliveryMinOk(minOk);
-      setDeliveryMinRequired(zone.min_order_value || 0);
+      setDeliveryMinRequired(minOrderValue);
 
       const eta = `${zone.eta_min_minutes}-${zone.eta_max_minutes} min`;
+      console.log("[calcDelivery] final cost:", cost, "eta:", eta);
       setDeliveryInfo({ cost: Math.max(0, Math.round(cost * 100) / 100), eta });
     } catch (e) {
       console.error("calcDelivery error:", e);
