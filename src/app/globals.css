@@ -62,6 +62,21 @@ body {
     }
   }
 
+  @keyframes slideUp {
+    from {
+      opacity: 0;
+      transform: translateY(100%);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .animate-slide-up {
+    animation: slideUp 0.3s ease-out forwards;
+  }
+
   @keyframes gentleShake {
     0% {
       background-position: right 0 top -290px;
@@ -93,4 +108,185 @@ html, body { -webkit-text-size-adjust: 100%; touch-action: manipulation; }
 /* opcjonalnie brak podświetlenia tapów */
 * { -webkit-tap-highlight-color: transparent; }
 
+/* Custom styles for reservation calendar dark theme */
+.reservation-calendar {
+  --rdp-cell-size: 40px;
+  --rdp-accent-color: #facc15;
+  --rdp-background-color: rgba(250, 204, 21, 0.2);
+  margin: 0 auto;
+}
 
+/* Kontener główny kalendarza */
+.reservation-calendar .rdp-root {
+  width: 100%;
+}
+
+.reservation-calendar .rdp-months {
+  display: flex;
+  justify-content: center;
+}
+
+.reservation-calendar .rdp-month {
+  width: 100%;
+}
+
+/* Nagłówek z miesiącem i strzałkami */
+.reservation-calendar .rdp-caption,
+.reservation-calendar .rdp-month_caption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 0 16px 0;
+}
+
+.reservation-calendar .rdp-caption_label,
+.reservation-calendar .rdp-month_caption {
+  font-weight: 700;
+  font-size: 1rem;
+  color: white;
+}
+
+/* Nawigacja - strzałki */
+.reservation-calendar .rdp-nav {
+  display: flex;
+  gap: 8px;
+}
+
+.reservation-calendar .rdp-nav button,
+.reservation-calendar .rdp-button_previous,
+.reservation-calendar .rdp-button_next {
+  color: white !important;
+  background: rgba(255, 255, 255, 0.05);
+  border: none;
+  border-radius: 8px;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.reservation-calendar .rdp-nav button:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* SVG w strzałkach - biały kolor */
+.reservation-calendar .rdp-nav svg,
+.reservation-calendar .rdp-chevron,
+.reservation-calendar .rdp-button_previous svg,
+.reservation-calendar .rdp-button_next svg {
+  color: white !important;
+  fill: white !important;
+  stroke: white !important;
+  width: 16px;
+  height: 16px;
+}
+
+/* Dni tygodnia - nagłówek */
+.reservation-calendar .rdp-weekdays,
+.reservation-calendar .rdp-head {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  margin-bottom: 8px;
+}
+
+.reservation-calendar .rdp-weekday,
+.reservation-calendar .rdp-head_cell {
+  color: rgba(255, 255, 255, 0.5);
+  font-weight: 500;
+  font-size: 0.75rem;
+  text-align: center;
+  padding: 8px 0;
+}
+
+/* Tabela z dniami */
+.reservation-calendar .rdp-weeks,
+.reservation-calendar .rdp-tbody {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.reservation-calendar .rdp-week,
+.reservation-calendar .rdp-row {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 0;
+}
+
+/* Komórki dni */
+.reservation-calendar .rdp-day,
+.reservation-calendar .rdp-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.reservation-calendar .rdp-day_button,
+.reservation-calendar .rdp-day button {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  border: none;
+  background: transparent;
+  color: white;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.reservation-calendar .rdp-day_button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* Wybrany dzień */
+.reservation-calendar .rdp-selected .rdp-day_button,
+.reservation-calendar .rdp-day_selected,
+.reservation-calendar [aria-selected="true"] .rdp-day_button,
+.reservation-calendar [aria-selected="true"] button {
+  background: #facc15 !important;
+  color: black !important;
+  font-weight: 700;
+}
+
+/* Dzisiejszy dzień */
+.reservation-calendar .rdp-today .rdp-day_button,
+.reservation-calendar .rdp-day_today {
+  border: 2px solid #facc15;
+  color: #facc15;
+  font-weight: 700;
+}
+
+/* Wyłączone dni */
+.reservation-calendar .rdp-disabled .rdp-day_button,
+.reservation-calendar .rdp-day_button:disabled,
+.reservation-calendar .rdp-day_disabled {
+  color: rgba(255, 255, 255, 0.2);
+  cursor: not-allowed;
+}
+
+/* Dropdowny miesiąc/rok */
+.reservation-calendar .rdp-dropdown,
+.reservation-calendar .rdp-dropdown_root select,
+.reservation-calendar select {
+  background-color: #27272a;
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 4px 8px;
+  font-weight: 600;
+}
+
+.reservation-calendar .rdp-dropdown option,
+.reservation-calendar select option {
+  background-color: #27272a;
+  color: white;
+}
+
+/* Usunięcie domyślnych fokusów */
+.reservation-calendar .rdp-day_button:focus,
+.reservation-calendar button:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(250, 204, 21, 0.3);}

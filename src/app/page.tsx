@@ -9,6 +9,7 @@ import ContactSection from "@/components/ContactSection";
 import FloatingAuthButtons from "@/components/FloatingLoginButton";
 import ReservationFloatingButton from "@/components/ReservationFloatingButton";
 import PromoTickerMount from "@/components/PromoTickerMount";
+import MobilePageWrapper from "@/components/MobilePageWrapper";
 
 export const metadata: Metadata = {
   alternates: { canonical: "/" },
@@ -17,7 +18,8 @@ export const metadata: Metadata = {
 export default function Home() {
   return (
     <>
-      <main>
+      {/* Desktop: standardowy layout */}
+      <main className="hidden md:block">
         <PromoTickerMount />
         <Hero />
         <BurgerMiesiaca />
@@ -26,10 +28,15 @@ export default function Home() {
         <ContactSection />
       </main>
 
-      {/* pływające guziki tylko na stronie głównej */}
-      <PromoTickerMount />
-      <FloatingAuthButtons />
-      <ReservationFloatingButton />
+      {/* Mobile: app-like experience */}
+      <MobilePageWrapper />
+
+      {/* pływające guziki tylko na desktop */}
+      <div className="hidden md:block">
+        <PromoTickerMount />
+        <FloatingAuthButtons />
+        <ReservationFloatingButton />
+      </div>
     </>
   );
 }

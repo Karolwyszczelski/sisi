@@ -117,7 +117,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <PromoTickerMount />
           <ClientWrapper>{children}</ClientWrapper>
         </ClientProvider>
-        <Footer />
+        {/* Footer ukryty na mobile - tam mamy MobilePageWrapper z własnym layoutem */}
+        <div className="hidden md:block">
+          <Footer />
+        </div>
         <CookieBanner />
       </body>
     </html>

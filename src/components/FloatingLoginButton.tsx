@@ -106,17 +106,17 @@ const RegistrationModal = memo(({
   captchaToken: string; setCaptchaToken: React.Dispatch<React.SetStateAction<string>>;
   acceptTerms: boolean; setAcceptTerms: React.Dispatch<React.SetStateAction<boolean>>;
 }) => (
-  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-    <div className="bg-white p-6 rounded-lg max-w-md w-full relative max-h-[80vh] overflow-y-auto">
-      <button aria-label="Zamknij" onClick={onClose} className="absolute top-3 right-3 text-gray-500 hover:text-black">
-        <X size={20} />
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+    <div className="bg-zinc-900 border border-white/10 p-6 rounded-2xl max-w-md w-full relative max-h-[85vh] overflow-y-auto mx-4 shadow-2xl shadow-black/50">
+      <button aria-label="Zamknij" onClick={onClose} className="absolute top-4 right-4 w-8 h-8 rounded-full bg-white/10 flex items-center justify-center hover:bg-white/20 transition-colors text-white/70">
+        <X size={16} />
       </button>
-      <h2 className="text-xl font-bold mb-4 text-center">Utwórz konto</h2>
+      <h2 className="text-xl font-bold mb-6 text-center text-white">Utwórz konto</h2>
       <form onSubmit={handleSubmitRegister} className="space-y-4">
         <input
           type="text"
           placeholder="Imię i nazwisko"
-          className="w-full border rounded-lg px-3 py-2"
+          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder:text-white/40 focus:outline-none focus:border-yellow-400/50 transition-all"
           value={fullName}
           onChange={e => setFullName(e.target.value)}
           required
@@ -125,7 +125,7 @@ const RegistrationModal = memo(({
           type="tel"
           inputMode="tel"
           placeholder="Telefon (+48… lub 9 cyfr)"
-          className="w-full border rounded-lg px-3 py-2"
+          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder:text-white/40 focus:outline-none focus:border-yellow-400/50 transition-all"
           value={phone}
           onChange={e => setPhone(e.target.value)}
           required
@@ -133,7 +133,7 @@ const RegistrationModal = memo(({
         <input
           type="email"
           placeholder="Email"
-          className="w-full border rounded-lg px-3 py-2"
+          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder:text-white/40 focus:outline-none focus:border-yellow-400/50 transition-all"
           value={email}
           onChange={e => setEmail(e.target.value)}
           required
@@ -141,7 +141,7 @@ const RegistrationModal = memo(({
         <input
           type="password"
           placeholder="Hasło"
-          className="w-full border rounded-lg px-3 py-2"
+          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder:text-white/40 focus:outline-none focus:border-yellow-400/50 transition-all"
           value={password}
           onChange={e => setPassword(e.target.value)}
           required
@@ -149,46 +149,46 @@ const RegistrationModal = memo(({
         <input
           type="password"
           placeholder="Powtórz hasło"
-          className="w-full border rounded-lg px-3 py-2"
+          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder:text-white/40 focus:outline-none focus:border-yellow-400/50 transition-all"
           value={confirmPassword}
           onChange={e => setConfirmPassword(e.target.value)}
           required
         />
 
         {TURNSTILE_SITE_KEY ? (
-          <div>
+          <div className="flex justify-center">
             <TurnstileBox onVerify={setCaptchaToken} />
             {!captchaToken && (
-              <p className="mt-1 text-xs text-gray-500">
+              <p className="mt-1 text-xs text-white/50">
                 Zaznacz proszę weryfikację, aby kontynuować.
               </p>
             )}
           </div>
         ) : (
-          <div className="text-xs text-amber-600">
+          <div className="text-xs text-amber-400/80 bg-amber-400/10 border border-amber-400/20 rounded-lg p-2">
             Uwaga: brak klucza <code>NEXT_PUBLIC_TURNSTILE_SITE_KEY</code>.
           </div>
         )}
 
-        <label className="flex items-start gap-2 text-sm">
+        <label className="flex items-start gap-3 text-sm text-white/70">
           <input
             type="checkbox"
             checked={acceptTerms}
             onChange={e => setAcceptTerms(e.target.checked)}
             required
-            className="mt-1"
+            className="mt-1 w-4 h-4 accent-yellow-400"
           />
           <span>
             Akceptuję{" "}
-            <a href={TERMS_URL} target="_blank" className="text-blue-600 underline">regulamin</a>{" "}
+            <a href={TERMS_URL} target="_blank" className="text-yellow-400 hover:text-yellow-300 underline underline-offset-2">regulamin</a>{" "}
             oraz{" "}
-            <a href={PRIVACY_URL} target="_blank" className="text-blue-600 underline">politykę prywatności</a>.
+            <a href={PRIVACY_URL} target="_blank" className="text-yellow-400 hover:text-yellow-300 underline underline-offset-2">politykę prywatności</a>.
           </span>
         </label>
 
         <button
           type="submit"
-          className="w-full py-2 bg-yellow-500 text-white font-bold rounded-lg hover:bg-yellow-600"
+          className="w-full py-3 bg-gradient-to-r from-yellow-400 via-yellow-500 to-amber-500 text-black font-bold rounded-xl hover:from-yellow-300 hover:via-yellow-400 hover:to-amber-400 transition-all shadow-lg shadow-yellow-500/20"
         >
           Zarejestruj się
         </button>
@@ -205,16 +205,17 @@ const SmallAuthModal: React.FC<{
   password: string; setPassword: React.Dispatch<React.SetStateAction<string>>;
   onSwitchToLarge: () => void;
 }> = ({ onClose, handleSubmitLogin, email, setEmail, password, setPassword, onSwitchToLarge }) => (
-  <div className="fixed bottom-20 right-6 z-50 w-72 bg-white border shadow-lg p-4 rounded-lg">
-    <button aria-label="Zamknij" onClick={onClose} className="absolute top-2 right-2 text-gray-500">
-      <X size={18} />
+  <div className="fixed bottom-20 right-6 z-50 w-80 bg-zinc-900 border border-white/10 shadow-2xl shadow-black/50 p-5 rounded-2xl backdrop-blur-sm">
+    <div className="absolute bottom-[-8px] right-8 w-4 h-4 bg-zinc-900 border-r border-b border-white/10 rotate-45" />
+    <button aria-label="Zamknij" onClick={onClose} className="absolute top-3 right-3 w-8 h-8 rounded-full bg-white/10 flex items-center justify-center hover:bg-white/20 transition-colors text-white/70">
+      <X size={16} />
     </button>
-    <h2 className="text-lg font-bold mb-3 text-center">Zaloguj się</h2>
+    <h2 className="text-lg font-bold mb-4 text-center text-white">Zaloguj się</h2>
     <form onSubmit={handleSubmitLogin} className="space-y-3">
       <input
         type="email"
         placeholder="Email"
-        className="w-full border rounded px-3 py-2"
+        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder:text-white/40 focus:outline-none focus:border-yellow-400/50 transition-all"
         value={email}
         onChange={e => setEmail(e.target.value)}
         required
@@ -222,18 +223,18 @@ const SmallAuthModal: React.FC<{
       <input
         type="password"
         placeholder="Hasło"
-        className="w-full border rounded px-3 py-2"
+        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder:text-white/40 focus:outline-none focus:border-yellow-400/50 transition-all"
         value={password}
         onChange={e => setPassword(e.target.value)}
         required
       />
-      <button type="submit" className="w-full py-2 bg-yellow-500 text-white rounded-lg">
+      <button type="submit" className="w-full py-3 bg-gradient-to-r from-yellow-400 via-yellow-500 to-amber-500 text-black font-bold rounded-xl hover:from-yellow-300 hover:via-yellow-400 hover:to-amber-400 transition-all shadow-lg shadow-yellow-500/20">
         Zaloguj się
       </button>
     </form>
-    <p className="mt-3 text-center text-sm">
+    <p className="mt-4 text-center text-sm text-white/50">
       Nie masz konta?{" "}
-      <button onClick={onSwitchToLarge} className="text-blue-500 underline">
+      <button onClick={onSwitchToLarge} className="text-yellow-400 hover:text-yellow-300 underline underline-offset-2">
         Zarejestruj się
       </button>
     </p>
@@ -252,11 +253,12 @@ const SmallClientModal: React.FC<{
     session?.user?.email ||
     "Klient";
   return (
-    <div className="fixed bottom-20 right-6 z-50 w-72 bg-white border shadow-lg p-4 rounded-lg">
-      <button aria-label="Zamknij" onClick={onClose} className="absolute top-2 right-2 text-gray-500">
-        <X size={18} />
+    <div className="fixed bottom-20 right-6 z-50 w-80 bg-zinc-900 border border-white/10 shadow-2xl shadow-black/50 p-5 rounded-2xl backdrop-blur-sm">
+      <div className="absolute bottom-[-8px] right-8 w-4 h-4 bg-zinc-900 border-r border-b border-white/10 rotate-45" />
+      <button aria-label="Zamknij" onClick={onClose} className="absolute top-3 right-3 w-8 h-8 rounded-full bg-white/10 flex items-center justify-center hover:bg-white/20 transition-colors text-white/70">
+        <X size={16} />
       </button>
-      <p className="text-center mb-3 font-semibold">Hej {name}!</p>
+      <p className="text-center mb-4 font-semibold text-white">Hej <span className="text-yellow-400">{name}</span>!</p>
       <div className="flex flex-col gap-2">
         <button
           type="button"
@@ -264,28 +266,28 @@ const SmallClientModal: React.FC<{
             router.push("/#menu");
             onClose();
           }}
-          className="w-full py-2 bg-yellow-500 text-white rounded-lg"
+          className="w-full py-3 bg-gradient-to-r from-yellow-400 via-yellow-500 to-amber-500 text-black font-bold rounded-xl hover:from-yellow-300 hover:via-yellow-400 hover:to-amber-400 transition-all shadow-lg shadow-yellow-500/20"
         >
           Nowe zamówienie
         </button>
         <button
           type="button"
           onClick={onSwitchToLarge}
-          className="w-full py-2 border border-black rounded-lg"
+          className="w-full py-3 bg-white/5 border border-white/10 text-white rounded-xl hover:bg-white/10 transition-all"
         >
           Historia zamówień
         </button>
         <button
           type="button"
           onClick={onSwitchToLarge}
-          className="w-full py-2 bg-black text-white rounded-lg"
+          className="w-full py-3 bg-white/10 text-white rounded-xl hover:bg-white/20 transition-all"
         >
           Panel Klienta
         </button>
         <button
           type="button"
           onClick={onLogout}
-          className="w-full py-2 border border-red-500 text-red-500 rounded-lg"
+          className="w-full py-3 bg-red-500/10 border border-red-500/30 text-red-400 rounded-xl hover:bg-red-500/20 transition-all"
         >
           Wyloguj się
         </button>
@@ -315,9 +317,9 @@ const OrdersHistory: React.FC<{ supabaseClient: ReturnType<typeof createClientCo
       .finally(() => setLoading(false));
   }, [userId, supabaseClient]);
 
-  if (!userId) return <p className="text-center">Zaloguj się, aby zobaczyć historię.</p>;
-  if (loading) return <p className="text-center">Ładowanie…</p>;
-  if (!orders.length) return <p className="text-center">Brak zamówień.</p>;
+  if (!userId) return <p className="text-center text-white/50">Zaloguj się, aby zobaczyć historię.</p>;
+  if (loading) return <p className="text-center text-white/50">Ładowanie…</p>;
+  if (!orders.length) return <p className="text-center text-white/50">Brak zamówień.</p>;
 
   const label = (s?: string) =>
     s === "placed" ? "Złożone"
@@ -328,22 +330,30 @@ const OrdersHistory: React.FC<{ supabaseClient: ReturnType<typeof createClientCo
     : s === "cancelled" ? "Anulowane"
     : (s ?? "—");
 
+  const statusColor = (s?: string) =>
+    s === "placed" ? "text-blue-400"
+    : s === "preparing" ? "text-yellow-400"
+    : s === "ready" ? "text-green-400"
+    : s === "delivered" || s === "completed" ? "text-green-400"
+    : s === "cancelled" ? "text-red-400"
+    : "text-white/50";
+
   return (
     <div className="space-y-3">
       {orders.map(o => (
-        <div key={o.id} className="border p-3 rounded-lg flex justify-between items-center">
+        <div key={o.id} className="bg-white/5 border border-white/10 p-4 rounded-xl flex justify-between items-center">
           <div>
-            <p className="font-semibold">#{o.id} • {label(o.status)}</p>
-            <p className="text-sm text-gray-600">
+            <p className="font-semibold text-white">#{o.id} <span className={statusColor(o.status)}>• {label(o.status)}</span></p>
+            <p className="text-sm text-white/50">
               {new Date(o.created_at).toLocaleString()} • {o.selected_option === "delivery" ? "Dostawa" : o.selected_option === "takeaway" ? "Na wynos" : "Na miejscu"}
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold">{Number(o.total_price ?? 0).toFixed(2)} zł</span>
+          <div className="flex items-center gap-3">
+            <span className="text-yellow-400 font-semibold">{Number(o.total_price ?? 0).toFixed(2)} zł</span>
             <button
               type="button"
               onClick={() => onRepeat(o)}
-              className="py-1 px-3 bg-black text-white rounded hover:bg-gray-800"
+              className="py-2 px-4 bg-white/10 text-white rounded-lg hover:bg-yellow-400 hover:text-black transition-all text-sm font-medium"
             >
               Zamów ponownie
             </button>
@@ -373,29 +383,30 @@ const LoyaltyProgram: React.FC<{ supabaseClient: ReturnType<typeof createClientC
   }, [userId, supabaseClient]);
 
   return (
-    <div className="space-y-4 text-center">
-      <p>
-        Zdobyłeś <strong>{stamps}</strong> naklejek — do nagrody:{" "}
-        <strong>{Math.max(goal - stamps, 0)}</strong>
+    <div className="space-y-6 text-center">
+      <p className="text-white/70">
+        Zdobyłeś <strong className="text-yellow-400">{stamps}</strong> naklejek — do nagrody:{" "}
+        <strong className="text-yellow-400">{Math.max(goal - stamps, 0)}</strong>
       </p>
       <div className="flex justify-center space-x-2">
         {[...Array(goal)].map((_, i) => (
           <div
             key={i}
-            className={`w-10 h-10 rounded-full border-2 flex items-center justify-center ${
-              i < stamps ? "bg-yellow-400 border-yellow-600" : "bg-gray-200 border-gray-400"
+            className={`w-10 h-10 rounded-full border-2 flex items-center justify-center text-sm font-bold transition-all ${
+              i < stamps ? "bg-yellow-400 border-yellow-500 text-black" : "bg-white/5 border-white/20 text-white/40"
             }`}
           >
-            {i < stamps ? "✔️" : i + 1}
+            {i < stamps ? "✓" : i + 1}
           </div>
         ))}
       </div>
-      <div className="h-2 bg-gray-300 rounded overflow-hidden mx-auto max-w-sm">
+      <div className="h-2 bg-white/10 rounded-full overflow-hidden mx-auto max-w-sm">
         <div
-          className="h-full bg-yellow-500"
+          className="h-full bg-gradient-to-r from-yellow-400 to-amber-500 transition-all duration-500"
           style={{ width: `${Math.min((stamps / goal) * 100, 100)}%` }}
         />
       </div>
+      <p className="text-white/40 text-sm">Zbierz {goal} naklejek i odbierz darmowego burgera!</p>
     </div>
   );
 };
@@ -511,8 +522,8 @@ export default function FloatingAuthButtons() {
 
   return (
     <>
-      {/* przyciski */}
-      <div className="fixed bottom-6 right-6 z-50 flex space-x-4 pointer-events-auto">
+      {/* przyciski - ukryte na mobile */}
+      <div className="fixed bottom-6 right-6 z-50 hidden md:flex items-center gap-6 pointer-events-auto">
         <button
           type="button"
           aria-label="Użytkownik"
@@ -520,19 +531,19 @@ export default function FloatingAuthButtons() {
             setModalType("small");
             setShowModal(true);
           }}
-          className="w-12 h-12 rounded-full bg-white shadow flex items-center justify-center hover:scale-105 transition"
+          className="w-11 h-11 rounded-full bg-zinc-900/90 backdrop-blur-sm border border-white/10 shadow-lg flex items-center justify-center hover:bg-zinc-800 hover:border-white/20 transition-all duration-200"
         >
-          <User className="text-black w-5 h-5" />
+          <User className="text-white/80 w-5 h-5" />
         </button>
         <button
           type="button"
           aria-label="Koszyk"
           onClick={() => toggleCart()}
-          className="w-14 h-14 rounded-full bg-white shadow flex items-center justify-center hover:scale-105 transition relative"
+          className="w-12 h-12 rounded-full bg-yellow-400 shadow-lg shadow-yellow-400/20 flex items-center justify-center hover:bg-yellow-300 hover:scale-105 transition-all duration-200 relative"
         >
-          <ShoppingCart className="text-black w-6 h-6" />
+          <ShoppingCart className="text-black w-5 h-5" />
           {itemCount > 0 && (
-            <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
+            <span className="absolute -top-1 -right-1 bg-black text-yellow-400 text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
               {itemCount}
             </span>
           )}
@@ -643,22 +654,22 @@ const ClientPanelWithTabsWrapper: React.FC<{
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="bg-white p-4 rounded-lg max-w-lg w-full relative max-h-[80vh] overflow-y-auto">
-        <button aria-label="Zamknij" onClick={onClose} className="absolute top-3 right-3 text-gray-500">
-          <X size={20} />
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+      <div className="bg-zinc-900 border border-white/10 p-6 rounded-2xl max-w-lg w-full relative max-h-[85vh] overflow-y-auto mx-4 shadow-2xl shadow-black/50">
+        <button aria-label="Zamknij" onClick={onClose} className="absolute top-4 right-4 w-8 h-8 rounded-full bg-white/10 flex items-center justify-center hover:bg-white/20 transition-colors text-white/70">
+          <X size={16} />
         </button>
-        <div className="flex justify-between mb-4">
+        <div className="flex justify-center gap-2 mb-6 border-b border-white/10 pb-4">
           {["orders", "loyalty", "settings"].map(t => (
             <button
               key={t}
               onClick={() => setTab(t as any)}
-              className={`px-4 py-2 font-semibold ${tab === t ? "border-b-2 border-black" : ""}`}
+              className={`px-4 py-2 font-semibold rounded-lg transition-all ${tab === t ? "bg-yellow-400 text-black" : "text-white/60 hover:text-white hover:bg-white/10"}`}
             >
               {t === "orders"
-                ? "Historia zamówień"
+                ? "Zamówienia"
                 : t === "loyalty"
-                ? "Program lojalnościowy"
+                ? "Lojalnościowy"
                 : "Ustawienia"}
             </button>
           ))}
@@ -671,7 +682,7 @@ const ClientPanelWithTabsWrapper: React.FC<{
               <input
                 type="text"
                 placeholder="Imię i nazwisko"
-                className="w-full border rounded px-3 py-2"
+                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder:text-white/40 focus:outline-none focus:border-yellow-400/50 transition-all"
                 value={localName}
                 onChange={e => setLocalName(e.target.value)}
                 required
@@ -679,7 +690,7 @@ const ClientPanelWithTabsWrapper: React.FC<{
               <input
                 type="tel"
                 placeholder="Telefon (+48…)"
-                className="w-full border rounded px-3 py-2"
+                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder:text-white/40 focus:outline-none focus:border-yellow-400/50 transition-all"
                 value={localPhone}
                 onChange={e => setLocalPhone(e.target.value)}
                 required
@@ -687,7 +698,7 @@ const ClientPanelWithTabsWrapper: React.FC<{
               <input
                 type="email"
                 placeholder="Email"
-                className="w-full border rounded px-3 py-2"
+                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder:text-white/40 focus:outline-none focus:border-yellow-400/50 transition-all"
                 value={localEmail}
                 onChange={e => setLocalEmail(e.target.value)}
                 required
@@ -704,33 +715,37 @@ const ClientPanelWithTabsWrapper: React.FC<{
                   type="text"
                   readOnly
                   value={localAddress}
-                  className="w-full border rounded px-3 py-2 text-gray-700 bg-gray-50"
+                  className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white/70"
                 />
               )}
 
-              <hr />
-              <input
-                type="password"
-                placeholder="Stare hasło"
-                className="w-full border rounded px-3 py-2"
-                value={oldPass}
-                onChange={e => setOldPass(e.target.value)}
-              />
-              <input
-                type="password"
-                placeholder="Nowe hasło"
-                className="w-full border rounded px-3 py-2"
-                value={newPass}
-                onChange={e => setNewPass(e.target.value)}
-              />
-              <input
-                type="password"
-                placeholder="Powtórz nowe hasło"
-                className="w-full border rounded px-3 py-2"
-                value={newPass2}
-                onChange={e => setNewPass2(e.target.value)}
-              />
-              <button type="submit" className="w-full py-2 bg-yellow-500 text-white rounded-lg">
+              <div className="border-t border-white/10 pt-4 mt-4">
+                <p className="text-white/50 text-sm mb-3">Zmiana hasła (opcjonalnie)</p>
+                <div className="space-y-3">
+                  <input
+                    type="password"
+                    placeholder="Stare hasło"
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder:text-white/40 focus:outline-none focus:border-yellow-400/50 transition-all"
+                    value={oldPass}
+                    onChange={e => setOldPass(e.target.value)}
+                  />
+                  <input
+                    type="password"
+                    placeholder="Nowe hasło"
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder:text-white/40 focus:outline-none focus:border-yellow-400/50 transition-all"
+                    value={newPass}
+                    onChange={e => setNewPass(e.target.value)}
+                  />
+                  <input
+                    type="password"
+                    placeholder="Powtórz nowe hasło"
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder:text-white/40 focus:outline-none focus:border-yellow-400/50 transition-all"
+                    value={newPass2}
+                    onChange={e => setNewPass2(e.target.value)}
+                  />
+                </div>
+              </div>
+              <button type="submit" className="w-full py-3 bg-gradient-to-r from-yellow-400 via-yellow-500 to-amber-500 text-black font-bold rounded-xl hover:from-yellow-300 hover:via-yellow-400 hover:to-amber-400 transition-all shadow-lg shadow-yellow-500/20">
                 Zapisz zmiany
               </button>
             </form>

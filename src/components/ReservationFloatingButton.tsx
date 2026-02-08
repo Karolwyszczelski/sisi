@@ -14,14 +14,16 @@ export default function ReservationFloatingButton() {
       <button
         onClick={() => setOpen(true)}
         className="
-          fixed bottom-20 right-16
-          w-11 h-11 bg-yellow-400 text-white
-          rounded-full shadow-lg flex items-center justify-center
-          hover:bg-yellow-300 transition-colors z-50
+          fixed bottom-6 right-[152px]
+          hidden md:flex
+          w-11 h-11 bg-zinc-900/90 backdrop-blur-sm text-white/80
+          rounded-full shadow-lg items-center justify-center
+          border border-white/10 hover:border-white/20
+          hover:bg-zinc-800 transition-all duration-200 z-50
         "
         aria-label="Rezerwuj stolik"
       >
-        <Calendar className="w-6 h-6" />
+        <Calendar className="w-5 h-5" />
       </button>
 
       {/* Przekazujemy isOpen, aby sam modal wiedział, kiedy ma się pokazać */}

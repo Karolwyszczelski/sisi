@@ -275,33 +275,38 @@ const ProductItem: React.FC<{
   const addonsTitle = burger ? "Dodatki:" : "Sosy:";
 
   return (
-    <div className="border p-3 rounded bg-gray-50 relative">
-      <div className="flex justify-between items-center font-semibold mb-2">
-        <span>{prod.name} x{prod.quantity || 1}</span>
-        <span>{lineTotal.toFixed(2).replace(".", ",")} zł</span>
+    <div className="border border-white/10 p-4 rounded-2xl bg-white/5 relative">
+      <div className="flex justify-between items-start mb-3">
+        <div>
+          <span className="text-white font-semibold text-base">{prod.name}</span>
+          <span className="text-white/50 text-sm ml-2">x{prod.quantity || 1}</span>
+        </div>
+        <span className="text-yellow-400 font-bold text-lg">{lineTotal.toFixed(2).replace(".", ",")} zł</span>
       </div>
       
       {drinkWithDeposit && (
-        <div className="text-xs text-orange-600 mb-2">
-          +{(DEPOSIT_AMOUNT * (prod.quantity || 1)).toFixed(2).replace(".", ",")} zł kaucja za butelkę/puszkę
+        <div className="text-xs text-orange-400 mb-3 bg-orange-400/10 px-3 py-1.5 rounded-lg inline-block">
+          +{(DEPOSIT_AMOUNT * (prod.quantity || 1)).toFixed(2).replace(".", ",")} zł kaucja
         </div>
       )}
 
-      <div className="text-xs text-gray-700 space-y-2">
+      <div className="text-xs text-white/70 space-y-2">
         {supportsMeat && (
           <>
-            <div className="font-semibold">Mięso:</div>
-            <div className="flex gap-2 flex-wrap">
+            <div className="font-semibold text-white text-sm">Mięso: <span className="text-white/50 font-normal text-xs">(w cenie)</span></div>
+            <div className="flex gap-2">
               {MEAT_OPTIONS.map((opt) => (
                 <button
                   key={opt}
                   className={clsx(
-                    "px-2 py-1 rounded text-xs border",
-                    selectedMeat === opt ? "bg-yellow-300 border-yellow-400" : "bg-gray-200 border-gray-300"
+                    "flex-1 px-3 py-2.5 rounded-xl text-xs font-medium border transition",
+                    selectedMeat === opt 
+                      ? "bg-yellow-400 border-yellow-500 text-black" 
+                      : "bg-zinc-800 border-white/10 text-white hover:bg-zinc-700"
                   )}
                   onClick={() => changeMeatType(prod.name, opt)}
                 >
-                  {opt === "wołowina" ? "Wołowina" : "Kurczak"}
+                  {opt === "wołowina" ? "🐂 Wołowina" : "🐔 Kurczak"}
                 </button>
               ))}
             </div>
@@ -310,20 +315,24 @@ const ProductItem: React.FC<{
 
                 {supportsAddons && (
           <>
-            <div className="font-semibold mt-2">{addonsTitle}</div>
-            <div className="flex flex-wrap gap-2">
+            <div className="font-semibold mt-3 text-white text-sm">{addonsTitle}</div>
+            <div className="grid grid-cols-2 gap-2 mt-2">
               {addonPool.map((add) => {
                 const has = prod.addons?.includes(add);
+                const price = getAddonPrice(add);
                 return (
                   <button
                     key={add}
                     onClick={() => (has ? removeAddon(prod.name, add) : addAddon(prod.name, add))}
                     className={clsx(
-                      "border text-xs px-2 py-1 rounded",
-                      has ? "bg-gray-800 text-white border-gray-900" : "bg-white text-black hover:bg-gray-50"
+                      "flex items-center justify-between text-xs px-3 py-2.5 rounded-xl transition",
+                      has 
+                        ? "bg-yellow-400 text-black border border-yellow-500" 
+                        : "bg-zinc-800 text-white border border-white/10 hover:bg-zinc-700"
                     )}
                   >
-                    {has ? `✓ ${add}` : `+ ${add}`}
+                    <span className="font-medium truncate">{add}</span>
+                    {price > 0 && <span className={clsx("text-[11px] font-semibold ml-2", has ? "text-black/70" : "text-yellow-400")}>+{price}zł</span>}
                   </button>
                 );
               })}
@@ -334,32 +343,41 @@ const ProductItem: React.FC<{
 
         {supportsMeat && (
           <>
-            <div className="font-semibold mt-2">Dodatkowe mięso:</div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <button onClick={() => addExtraMeat(prod.name)} className="px-2 py-1 text-xs bg-gray-200 rounded border border-gray-300">
-                +1 mięso (+15 zł)
+            <div className="font-semibold mt-3 text-white text-sm">Dodatkowe mięso:</div>
+            <div className="flex items-center gap-3 mt-2 bg-white/5 rounded-lg p-2 border border-white/10">
+              <button 
+                onClick={() => removeExtraMeat(prod.name)} 
+                disabled={!prod.extraMeatCount}
+                className="w-8 h-8 rounded-lg bg-white/10 text-white flex items-center justify-center hover:bg-white/20 transition disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                −
               </button>
-              {prod.extraMeatCount > 0 && (
-                <button onClick={() => removeExtraMeat(prod.name)} className="px-2 py-1 text-xs bg-red-100 text-red-700 rounded border border-red-200">
-                  Usuń mięso
-                </button>
-              )}
-              <span className="text-xs text-gray-600">Ilość: {prod.extraMeatCount || 0}</span>
+              <div className="flex-1 text-center">
+                <span className="text-white font-medium">{prod.extraMeatCount || 0}</span>
+                <span className="text-white/50 text-xs ml-1">szt.</span>
+              </div>
+              <button 
+                onClick={() => addExtraMeat(prod.name)} 
+                className="w-8 h-8 rounded-lg bg-yellow-400 text-black flex items-center justify-center hover:bg-yellow-300 transition font-bold"
+              >
+                +
+              </button>
+              <span className="text-xs text-white/50 ml-2">+15 zł/szt.</span>
             </div>
           </>
         )}
 
         {burger && !!prod.availableSwaps?.length && (
           <>
-            <div className="font-semibold mt-2">Wymiana składnika:</div>
+            <div className="font-semibold mt-2 text-white">Wymiana składnika:</div>
             <div className="flex flex-wrap gap-2">
               {prod.swaps?.map((sw: any, i: number) => (
-                <div key={i} className="bg-gray-200 text-xs px-2 py-1 rounded border border-gray-300">
+                <div key={i} className="bg-white/10 text-xs px-2 py-1 rounded-lg border border-white/20 text-white">
                   {sw.from} → {sw.to}
                 </div>
               ))}
               {prod.availableSwaps?.map((opt: any, i: number) => (
-                <button key={i} onClick={() => swapIngredient(prod.name, opt.from, opt.to)} className="bg-white border px-2 py-1 text-xs rounded hover:bg-gray-100">
+                <button key={i} onClick={() => swapIngredient(prod.name, opt.from, opt.to)} className="bg-white/5 border border-white/10 px-2 py-1 text-xs rounded-lg text-white hover:bg-white/10 transition">
                   {opt.from} → {opt.to}
                 </button>
               ))}
@@ -368,9 +386,13 @@ const ProductItem: React.FC<{
         )}
       </div>
 
-      <div className="flex justify-end items-center mt-2 gap-2 flex-wrap text-[11px]">
-        <button onClick={() => removeItem(prod.name)} className="text-red-600 underline">Usuń 1 szt.</button>
-        <button onClick={() => removeWholeItem(prod.name)} className="text-red-600 underline">Usuń produkt</button>
+      <div className="flex justify-end items-center mt-4 pt-3 border-t border-white/10 gap-3">
+        <button onClick={() => removeItem(prod.name)} className="text-xs text-white/50 hover:text-white transition">
+          Usuń 1 szt.
+        </button>
+        <button onClick={() => removeWholeItem(prod.name)} className="text-xs text-red-400 hover:text-red-300 transition flex items-center gap-1">
+          <span>🗑️</span> Usuń produkt
+        </button>
       </div>
     </div>
   );
@@ -405,7 +427,7 @@ function PromoSectionExternal({
 
   return (
     <div className="mt-2">
-      <h4 className="font-semibold mb-1">Kod promocyjny</h4>
+      <h4 className="font-semibold mb-1 text-white">Kod promocyjny</h4>
       <div className="flex gap-2">
         <input
           type="text"
@@ -415,21 +437,21 @@ function PromoSectionExternal({
           value={localCode}
           onChange={(e) => setLocalCode(e.target.value)}
           placeholder="Wpisz kod"
-          className="flex-1 border rounded px-3 py-2 text-sm"
+          className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-white placeholder-white/40 focus:border-yellow-400/50 focus:outline-none"
         />
         {!promo ? (
-          <button onClick={handleApply} className="px-3 py-2 bg-gray-900 text-white rounded text-sm">Zastosuj</button>
+          <button onClick={handleApply} className="px-4 py-2 bg-white text-black font-semibold rounded-xl text-sm hover:bg-white/90 transition">Zastosuj</button>
         ) : (
-          <button onClick={onClear} className="px-3 py-2 bg-gray-200 rounded text-sm">Usuń kod</button>
+          <button onClick={onClear} className="px-4 py-2 bg-white/10 text-white rounded-xl text-sm border border-white/10 hover:bg-white/20 transition">Usuń kod</button>
         )}
       </div>
       {promoError && (
-        <p className="text-xs text-red-600 mt-1">{promoError}</p>
+        <p className="text-xs text-red-400 mt-1">{promoError}</p>
       )}
 
       {promo && (
-        <p className="text-xs text-green-700 mt-1">
-          Zastosowano kod <b>{promo.code}</b> —{" "}
+        <p className="text-xs text-white/60 mt-1">
+          Zastosowano kod <b className="text-white">{promo.code}</b> —{" "}
           {promo.type === "percent"
             ? `${promo.value}%`
             : `${promo.value.toFixed(2)} zł`}{" "}
@@ -438,7 +460,7 @@ function PromoSectionExternal({
       )}
 
       {!promo && autoPromo && autoPromo.amount > 0 && (
-        <p className="text-xs text-indigo-700 mt-1">
+        <p className="text-xs text-white/50 mt-1">
           Globalna promocja bez kodu:{" "}
           {autoPromo.type === "percent"
             ? `${autoPromo.value}%`
@@ -1226,22 +1248,23 @@ export default function CheckoutModal() {
 
   /* zgody */
   const LegalConsentEl = (
-    <label className="flex items-start gap-2 mt-3 text-xs leading-5">
-      <input type="checkbox" checked={legalAccepted} onChange={(e) => setLegalAccepted(e.target.checked)} className="mt-0.5" />
+    <label className="flex items-start gap-2 mt-3 text-xs leading-5 text-white/80">
+      <input type="checkbox" checked={legalAccepted} onChange={(e) => setLegalAccepted(e.target.checked)} className="mt-0.5 accent-yellow-400" />
       <span>
         Akceptuję{" "}
-        <a href="/legal/regulamin" target="_blank" rel="noopener noreferrer" className="underline">Regulamin</a>{" "}
+        <a href="/legal/regulamin" target="_blank" rel="noopener noreferrer" className="underline text-yellow-400 hover:text-yellow-300">Regulamin</a>{" "}
         oraz{" "}
-        <a href="/legal/polityka-prywatnosci" target="_blank" rel="noopener noreferrer" className="underline">Politykę prywatności</a>{" "}
+        <a href="/legal/polityka-prywatnosci" target="_blank" rel="noopener noreferrer" className="underline text-yellow-400 hover:text-yellow-300">Politykę prywatności</a>{" "}
         (v{TERMS_VERSION}).
       </span>
     </label>
   );
 
-  // UWAGA: nie blokujemy przycisku brakiem tokenu. Token generujemy JIT.
+  // Przycisk nieaktywny gdy brak weryfikacji Turnstile
   const confirmDisabled =
     !paymentMethod ||
     !legalAccepted ||
+    (TURNSTILE_SITE_KEY && !turnstileToken) ||
     (selectedOption === "delivery" && (!!outOfRange || !deliveryMinOk || !custCoords || !deliveryInfo)) ||
     submitting;
 
@@ -1260,17 +1283,17 @@ export default function CheckoutModal() {
       )}
 
       <div
-        className="fixed inset-0 z-50 bg-black/60 flex items-start justify-center p-4 overflow-auto"
+        className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-stretch md:items-center justify-center p-0 md:p-4 overflow-auto"
         role="dialog"
         aria-modal="true"
         onMouseDown={(e) => { if (e.target === e.currentTarget) closeCheckoutModal(); }}
         style={{ transform: "none", WebkitTransform: "none" }}
       >
-        <div className="relative flex flex-col lg:flex-row w-full max-w-4xl gap-6" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="relative flex flex-col lg:flex-row w-full max-w-4xl gap-4 md:my-auto" onMouseDown={(e) => e.stopPropagation()}>
           {/* MAIN CARD */}
-          <div className="flex-1 bg-white rounded-md shadow-lg p-6 overflow-auto max-h-[90vh]">
+          <div className="flex-1 bg-zinc-900 md:rounded-2xl shadow-2xl pt-12 px-5 pb-5 md:p-6 overflow-auto min-h-screen md:min-h-0 md:max-h-[85vh] border-0 md:border md:border-white/10">
             {!orderSent && (
-              <button aria-label="Zamknij" onClick={closeCheckoutModal} className="absolute top-3 right-3 text-gray-700 hover:text-black">
+              <button aria-label="Zamknij" onClick={closeCheckoutModal} className="absolute top-4 right-4 text-white/60 hover:text-white transition z-10">
                 <X size={24} />
               </button>
             )}
@@ -1282,29 +1305,29 @@ export default function CheckoutModal() {
                     <QRCode value={THANKS_QR_URL} size={160} />
                   </div>
                 </div>
-                <h2 className="text-2xl font-bold">Dziękujemy za zamówienie!</h2>
+                <h2 className="text-2xl font-bold text-white">Dziękujemy za zamówienie!</h2>
                 {showBurger ? (
                   <img src="/animations/Animationburger.gif" alt="Animacja burgera" className="mx-auto w-40 h-40 object-contain" />
                 ) : (
-                  <p className="text-xl font-semibold text-yellow-600">Twoje zamówienie ląduje w kuchni...</p>
+                  <p className="text-xl font-semibold text-yellow-400">Twoje zamówienie ląduje w kuchni...</p>
                 )}
                 <div className="flex justify-center gap-4 mt-2 flex-wrap">
-                  <button onClick={() => window.open(THANKS_QR_URL, "_blank")} className="px-4 py-2 bg-blue-500 text-white rounded">
+                  <button onClick={() => window.open(THANKS_QR_URL, "_blank")} className="px-5 py-2.5 bg-gradient-to-r from-yellow-400 via-yellow-500 to-amber-500 text-black font-bold rounded-xl hover:from-yellow-300 hover:via-yellow-400 hover:to-amber-400 transition-all">
                     Zostaw opinię
                   </button>
-                  <button onClick={closeCheckoutModal} className="px-4 py-2 bg-gray-300 text-black rounded">
+                  <button onClick={closeCheckoutModal} className="px-5 py-2.5 bg-white/10 text-white border border-white/20 rounded-xl hover:bg-white/20 transition">
                     Zamknij
                   </button>
                 </div>
               </div>
             ) : (
               <>
-                {errorMessage && !promo && <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-2 rounded">{errorMessage}</div>}
+                {errorMessage && !promo && <div className="mb-4 bg-red-500/20 border border-red-500/30 text-red-400 px-4 py-2 rounded-xl">{errorMessage}</div>}
 
-                {/* STEP 1 */}
-                {checkoutStep === 1 && (
+                {/* STEP 2 - Sposób odbioru */}
+                {checkoutStep === 2 && (
                   <div className="space-y-6">
-                    <h2 className="text-2xl font-bold text-center">Sposób odbioru</h2>
+                    <h2 className="text-2xl font-bold text-center text-white">Sposób odbioru</h2>
                     <div className="grid grid-cols-3 gap-4">
                       {(["local", "takeaway", "delivery"] as const).map((opt) => {
                         const Icon = opt === "local" ? MapPin : opt === "takeaway" ? ShoppingBag : Truck;
@@ -1315,8 +1338,8 @@ export default function CheckoutModal() {
                             onClick={() => setSelectedOption(opt)}
                             disabled={submitting}
                             className={clsx(
-                              "flex flex-col items-center p-4 rounded border transition disabled:opacity-60 disabled:cursor-not-allowed",
-                              selectedOption === opt ? "bg-yellow-400 text-black border-yellow-500" : "bg-gray-100 text-gray-800 hover:bg-gray-200 border-gray-200"
+                              "flex flex-col items-center p-4 rounded-xl border transition disabled:opacity-60 disabled:cursor-not-allowed",
+                              selectedOption === opt ? "bg-yellow-400 text-black border-yellow-500" : "bg-white/5 text-white hover:bg-white/10 border-white/10"
                             )}
                           >
                             <Icon size={24} />
@@ -1328,18 +1351,18 @@ export default function CheckoutModal() {
 
                     {selectedOption === "delivery" && (
                       <div className="space-y-2">
-                        <h3 className="font-semibold">Czas dostawy</h3>
+                        <h3 className="font-semibold text-white">Czas dostawy</h3>
                         <div className="flex flex-wrap gap-6 items-center">
-                          <label className="flex items-center gap-2">
-                            <input type="radio" name="timeOption" value="asap" checked={deliveryTimeOption === "asap"} onChange={() => setDeliveryTimeOption("asap")} disabled={submitting} />
+                          <label className="flex items-center gap-2 text-white/80">
+                            <input type="radio" name="timeOption" value="asap" checked={deliveryTimeOption === "asap"} onChange={() => setDeliveryTimeOption("asap")} disabled={submitting} className="accent-yellow-400" />
                             <span>Jak najszybciej</span>
                           </label>
-                          <label className="flex items-center gap-2">
-                            <input type="radio" name="timeOption" value="schedule" checked={deliveryTimeOption === "schedule"} onChange={() => setDeliveryTimeOption("schedule")} disabled={submitting} />
+                          <label className="flex items-center gap-2 text-white/80">
+                            <input type="radio" name="timeOption" value="schedule" checked={deliveryTimeOption === "schedule"} onChange={() => setDeliveryTimeOption("schedule")} disabled={submitting} className="accent-yellow-400" />
                             <span>Na godzinę</span>
                           </label>
                           {deliveryTimeOption === "schedule" && (
-                            <input type="time" className="border rounded px-2 py-1" min="11:30" max="21:45" value={scheduledTime} onChange={(e) => setScheduledTime(e.target.value)} disabled={submitting} />
+                            <input type="time" className="bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white focus:border-yellow-400/50 focus:outline-none" min="11:30" max="21:45" value={scheduledTime} onChange={(e) => setScheduledTime(e.target.value)} disabled={submitting} />
                           )}
                         </div>
                       </div>
@@ -1348,8 +1371,8 @@ export default function CheckoutModal() {
                     <div className="space-y-3">
                       {!isLoggedIn ? (
                         <>
-                          <input type="text" placeholder="Email" className="w-full px-3 py-2 border rounded" value={email} onChange={(e) => setEmail(e.target.value)} disabled={submitting} />
-                          <input type="password" placeholder="Hasło" className="w-full px-3 py-2 border rounded" value={password} onChange={(e) => setPassword(e.target.value)} disabled={submitting} />
+                          <input type="text" placeholder="Email" className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/40 focus:border-yellow-400/50 focus:outline-none" value={email} onChange={(e) => setEmail(e.target.value)} disabled={submitting} />
+                          <input type="password" placeholder="Hasło" className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/40 focus:border-yellow-400/50 focus:outline-none" value={password} onChange={(e) => setPassword(e.target.value)} disabled={submitting} />
                           <div className="flex flex-col gap-2">
                             <button
                               onClick={async () => {
@@ -1358,225 +1381,344 @@ export default function CheckoutModal() {
                                 else setErrorMessage(error.message);
                               }}
                               disabled={!email || !password || !selectedOption || submitting}
-                              className="w-full bg-yellow-400 py-2 rounded font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+                              className="w-full py-3 bg-gradient-to-r from-yellow-400 via-yellow-500 to-amber-500 text-black font-bold rounded-xl disabled:opacity-50 disabled:cursor-not-allowed hover:from-yellow-300 hover:via-yellow-400 hover:to-amber-400 transition-all"
                             >
                               Zaloguj się
                             </button>
-                            <button onClick={nextStep} disabled={!selectedOption || submitting} className="w-full bg-black text-white py-2 rounded mt-1 disabled:opacity-50 disabled:cursor-not-allowed">
+                            <button onClick={nextStep} disabled={!selectedOption || submitting} className="w-full bg-white/10 text-white py-3 rounded-xl mt-1 font-semibold disabled:opacity-50 disabled:cursor-not-allowed border border-white/10 hover:bg-white/20 transition">
                               Kontynuuj bez logowania
                             </button>
                           </div>
                         </>
                       ) : (
-                        <button onClick={nextStep} className="w-full bg-black text-white py-2 rounded font-semibold disabled:opacity-50 disabled:cursor-not-allowed" disabled={submitting}>
-                          Dalej
-                        </button>
+                        /* Desktop navigation for logged in users */
+                        <div className="hidden lg:flex justify-between">
+                          <button onClick={() => goToStep(1)} className="px-4 py-2 bg-white/10 text-white rounded-xl border border-white/10 hover:bg-white/20 transition disabled:opacity-50 disabled:cursor-not-allowed" disabled={submitting}>← Wstecz</button>
+                          <button onClick={nextStep} className="px-5 py-2 bg-gradient-to-r from-yellow-400 via-yellow-500 to-amber-500 text-black font-bold rounded-xl disabled:opacity-50 disabled:cursor-not-allowed hover:from-yellow-300 hover:via-yellow-400 hover:to-amber-400 transition-all" disabled={!selectedOption || submitting}>
+                            Dalej →
+                          </button>
+                        </div>
                       )}
                     </div>
+
+                    {/* Sticky bottom navigation for mobile - Krok 2 (niezalogowani) */}
+                    {!isLoggedIn && (
+                      <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-zinc-900 border-t border-white/10 p-4 z-50">
+                        <div className="flex gap-3">
+                          <button onClick={() => goToStep(1)} className="flex-1 px-4 py-3 bg-white/10 text-white rounded-xl border border-white/10 hover:bg-white/20 transition disabled:opacity-50 disabled:cursor-not-allowed font-medium" disabled={submitting}>
+                            ← Wstecz
+                          </button>
+                          <button onClick={nextStep} disabled={!selectedOption || submitting} className="flex-[2] py-3 bg-gradient-to-r from-yellow-400 via-yellow-500 to-amber-500 text-black font-bold rounded-xl disabled:opacity-50 disabled:cursor-not-allowed hover:from-yellow-300 hover:via-yellow-400 hover:to-amber-400 transition-all">
+                            Dalej →
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Sticky bottom navigation for mobile - Krok 2 (zalogowani) */}
+                    {isLoggedIn && (
+                      <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-zinc-900 border-t border-white/10 p-4 z-50">
+                        <div className="flex gap-3">
+                          <button onClick={() => goToStep(1)} className="flex-1 px-4 py-3 bg-white/10 text-white rounded-xl border border-white/10 hover:bg-white/20 transition disabled:opacity-50 disabled:cursor-not-allowed font-medium" disabled={submitting}>
+                            ← Wstecz
+                          </button>
+                          <button onClick={nextStep} disabled={!selectedOption || submitting} className="flex-[2] py-3 bg-gradient-to-r from-yellow-400 via-yellow-500 to-amber-500 text-black font-bold rounded-xl disabled:opacity-50 disabled:cursor-not-allowed hover:from-yellow-300 hover:via-yellow-400 hover:to-amber-400 transition-all">
+                            Dalej →
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Spacer for mobile */}
+                    <div className="lg:hidden h-24"></div>
                   </div>
                 )}
 
-                {/* STEP 2 */}
-                {checkoutStep === 2 && (
+                {/* STEP 3 - Dane kontaktowe */}
+                {checkoutStep === 3 && (
                   <div className="space-y-6">
-                    <h2 className="text-2xl font-bold text-center">Dane kontaktowe</h2>
+                    <h2 className="text-2xl font-bold text-center text-white">Dane kontaktowe</h2>
                     {selectedOption === "delivery" && (
                       <div className="space-y-3">
                         <AddressAutocomplete onAddressSelect={onAddressSelect} setCity={setCity} setPostalCode={setPostalCode} setFlatNumber={setFlatNumber} />
 
-                        {!custCoords ? <p className="text-xs text-red-600">Najpierw wyszukaj i wybierz adres z listy powyżej.</p> : null}
+                        {!custCoords ? <p className="text-xs text-red-400">Najpierw wyszukaj i wybierz adres z listy powyżej.</p> : null}
 
                         <div className={clsx("grid grid-cols-1 gap-2", !custCoords && "opacity-50 pointer-events-none")}>
-                          <input type="text" placeholder="Adres" className="w-full px-3 py-2 border rounded" value={street} onChange={(e) => setStreet(e.target.value)} disabled={!custCoords || submitting} />
+                          <input type="text" placeholder="Adres" className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/40 focus:border-yellow-400/50 focus:outline-none" value={street} onChange={(e) => setStreet(e.target.value)} disabled={!custCoords || submitting} />
                           <div className="flex gap-2">
-                            <input type="text" placeholder="Nr mieszkania" className="flex-1 px-3 py-2 border rounded" value={flatNumber} onChange={(e) => setFlatNumber(e.target.value)} disabled={!custCoords || submitting} />
-                            <input type="text" placeholder="Kod pocztowy" className="flex-1 px-3 py-2 border rounded" value={postalCode} onChange={(e) => setPostalCode(e.target.value)} disabled={!custCoords || submitting} />
+                            <input type="text" placeholder="Nr mieszkania" className="flex-1 px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/40 focus:border-yellow-400/50 focus:outline-none" value={flatNumber} onChange={(e) => setFlatNumber(e.target.value)} disabled={!custCoords || submitting} />
+                            <input type="text" placeholder="Kod pocztowy" className="flex-1 px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/40 focus:border-yellow-400/50 focus:outline-none" value={postalCode} onChange={(e) => setPostalCode(e.target.value)} disabled={!custCoords || submitting} />
                           </div>
-                          <input type="text" placeholder="Miasto" className="w-full px-3 py-2 border rounded" value={city} onChange={(e) => setCity(e.target.value)} disabled={!custCoords || submitting} />
+                          <input type="text" placeholder="Miasto" className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/40 focus:border-yellow-400/50 focus:outline-none" value={city} onChange={(e) => setCity(e.target.value)} disabled={!custCoords || submitting} />
                         </div>
 
                         {deliveryInfo && (
-                          <p className="text-xs text-gray-600">
+                          <p className="text-xs text-white/60">
                             Koszt dostawy: {deliveryInfo.cost.toFixed(2)} zł • ETA {deliveryInfo.eta}
                           </p>
                         )}
                       </div>
                     )}
                     <div className="grid grid-cols-1 gap-2">
-                      <input type="text" placeholder="Imię" className="w-full px-3 py-2 border rounded" value={name} onChange={(e) => setName(e.target.value)} disabled={submitting} />
-                      <input type="tel" placeholder="Telefon" className="w-full px-3 py-2 border rounded" value={phone} onChange={(e) => setPhone(e.target.value)} disabled={submitting} />
+                      <input type="text" placeholder="Imię" className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/40 focus:border-yellow-400/50 focus:outline-none" value={name} onChange={(e) => setName(e.target.value)} disabled={submitting} />
+                      <input type="tel" placeholder="Telefon" className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/40 focus:border-yellow-400/50 focus:outline-none" value={phone} onChange={(e) => setPhone(e.target.value)} disabled={submitting} />
                       {(selectedOption === "local" || selectedOption === "takeaway") && (
-                        <input type="text" placeholder="Adres (opcjonalnie)" className="w-full px-3 py-2 border rounded" value={optionalAddress} onChange={(e) => setOptionalAddress(e.target.value)} disabled={submitting} />
+                        <input type="text" placeholder="Adres (opcjonalnie)" className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/40 focus:border-yellow-400/50 focus:outline-none" value={optionalAddress} onChange={(e) => setOptionalAddress(e.target.value)} disabled={submitting} />
                       )}
-                      <input type="email" placeholder="Email (wymagany do potwierdzenia)" className="w-full px-3 py-2 border rounded" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} disabled={submitting} />
-                      {contactEmail !== "" && !validEmail && <p className="text-xs text-red-600">Podaj poprawny adres e-mail.</p>}
+                      <input type="email" placeholder="Email (wymagany do potwierdzenia)" className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/40 focus:border-yellow-400/50 focus:outline-none" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} disabled={submitting} />
+                      {contactEmail !== "" && !validEmail && <p className="text-xs text-red-400">Podaj poprawny adres e-mail.</p>}
                     </div>
-                    <div className="flex justify-between mt-2">
-                      <button onClick={() => goToStep(1)} className="px-4 py-2 bg-gray-200 rounded disabled:opacity-50 disabled:cursor-not-allowed" disabled={submitting}>← Wstecz</button>
-                      <button
-                        onClick={nextStep}
-                        disabled={!name || !phone || !validEmail || (selectedOption === "delivery" && (!custCoords || !deliveryInfo)) || submitting}
-                        className="px-4 py-2 bg-yellow-400 rounded font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        Dalej →
-                      </button>
-                    </div>
-                  </div>
-                )}
 
-                {/* STEP 3 */}
-                {checkoutStep === 3 && (
-                  <div className="space-y-6">
-                    <h2 className="text-2xl font-bold text-center">Podsumowanie zamówienia</h2>
-
-                    <div className="flex flex-col lg:flex-row gap-6">
-                      {/* EDITOWALNE PRODUKTY + NOTATKA DO ZAMÓWIENIA */}
-                      <div className="flex-1 space-y-3">
-                        <div className="max-h-[350px] overflow-y-auto space-y-3">
+                    {/* MOBILE SUMMARY z płatnością i Turnstile */}
+                    <div className="w-full lg:hidden">
+                      <div className="border border-white/10 rounded-xl p-4 bg-white/5 space-y-3">
+                        <h3 className="text-base font-semibold text-white">Podsumowanie zamówienia</h3>
+                        
+                        {/* Rozpisane produkty z dodatkami */}
+                        <div className="space-y-2 max-h-[200px] overflow-y-auto">
                           {items.map((item, idx) => {
-                            const meta = findMetaByName(item.name);
-                            const defaultMeat = inferDefaultMeat(meta, item.name);
+                            const addonsCost = (item.addons || []).reduce((sum: number, addon: string) => sum + getAddonPrice(addon), 0);
+                            const extraMeatCost = isBurger(findMetaByName(item.name), item.name) ? (item.extraMeatCount || 0) * 15 : 0;
+                            const depositCost = isDrinkWithDeposit(findMetaByName(item.name), item.name) ? DEPOSIT_AMOUNT * (item.quantity || 1) : 0;
+                            const itemTotal = (toPrice(item.price) + addonsCost + extraMeatCost) * (item.quantity || 1) + depositCost;
+                            
                             return (
-                              <div key={idx}>
-                                <ProductItem
-                                  prod={item}
-                                  meta={meta}
-                                  defaultMeat={defaultMeat}
-                                  getAddonPrice={getAddonPrice}
-                                  allAddons={addonsFromDb}
-                                  helpers={productHelpers}
-                                />
-                                <textarea className="w-full text-xs border rounded px-2 py-1 mt-1" placeholder="Notatka do produktu" value={notes[idx] || ""} onChange={(e) => setNotes({ ...notes, [idx]: e.target.value })} />
+                              <div key={idx} className="bg-zinc-800/50 rounded-lg p-3 border border-white/5">
+                                <div className="flex justify-between items-start">
+                                  <div className="flex-1">
+                                    <span className="text-white font-medium text-sm">{item.name}</span>
+                                    <span className="text-white/50 text-xs ml-1">x{item.quantity || 1}</span>
+                                  </div>
+                                  <span className="text-yellow-400 font-semibold text-sm">{itemTotal.toFixed(2)} zł</span>
+                                </div>
+                                {/* Mięso */}
+                                {item.meatType && (
+                                  <div className="text-xs text-white/50 mt-1">
+                                    Mięso: {item.meatType === "wołowina" ? "🐂 Wołowina" : "🐔 Kurczak"}
+                                  </div>
+                                )}
+                                {/* Dodatki */}
+                                {item.addons && item.addons.length > 0 && (
+                                  <div className="text-xs text-white/50 mt-1">
+                                    + {item.addons.join(", ")}
+                                  </div>
+                                )}
+                                {/* Extra mięso */}
+                                {(item.extraMeatCount || 0) > 0 && (
+                                  <div className="text-xs text-white/50 mt-1">
+                                    + {item.extraMeatCount}x dodatkowe mięso
+                                  </div>
+                                )}
+                                {/* Notatka do produktu */}
+                                {notes[idx] && (
+                                  <div className="text-xs text-yellow-400/70 mt-1 italic">
+                                    📝 {notes[idx]}
+                                  </div>
+                                )}
                               </div>
                             );
                           })}
-                          {items.length === 0 && <p className="text-center text-gray-500">Brak produktów w koszyku.</p>}
                         </div>
-                        
-                        {/* NOTATKA DO ZAMÓWIENIA - POD PRODUKTAMI */}
-                        <div className="mt-4 pt-4 border-t">
-                          <h3 className="font-semibold text-sm mb-1">Notatka do zamówienia (opcjonalnie)</h3>
-                          <textarea
-                            className="w-full text-sm border rounded px-3 py-2"
-                            placeholder="Np. nie dzwonić domofonem, proszę o sztućce, itp."
-                            value={orderNote}
-                            onChange={(e) => setOrderNote(e.target.value)}
-                            maxLength={500}
-                            disabled={submitting}
-                          />
-                          <div className="text-[11px] text-gray-500 mt-1">
-                            Maks. 500 znaków.
+
+                        <div className="border-t border-white/10 pt-3 space-y-2">
+                          <div className="flex justify-between text-sm"><span className="text-white/60">Produkty:</span><span className="text-white font-medium">{baseTotal.toFixed(2)} zł</span></div>
+                          {(selectedOption === "takeaway" || selectedOption === "delivery") && <div className="flex justify-between text-sm"><span className="text-white/60">Opakowanie:</span><span className="text-white font-medium">{packagingCost.toFixed(2)} zł</span></div>}
+                          {deliveryInfo && <div className="flex justify-between text-sm"><span className="text-white/60">Dostawa:</span><span className="text-white font-medium">{deliveryInfo.cost.toFixed(2)} zł</span></div>}
+                          {discount > 0 && <div className="flex justify-between text-sm"><span className="text-white/60">Rabat:</span><span className="text-white font-medium">-{discount.toFixed(2)} zł</span></div>}
+                        </div>
+
+                        {selectedOption === "delivery" && outOfRange && (
+                          <p className="text-xs text-red-400">Adres poza zasięgiem dostawy.</p>
+                        )}
+                        {selectedOption === "delivery" && !outOfRange && !deliveryMinOk && (
+                          <p className="text-xs text-red-400">Minimalna wartość zamówienia dla tej strefy: {deliveryMinRequired.toFixed(2)} zł.</p>
+                        )}
+
+                        <PromoSectionExternal
+                          promo={promo}
+                          promoError={promoError}
+                          autoPromo={autoPromo}
+                          onApply={applyPromo}
+                          onClear={clearPromo}
+                        />
+
+                        <div className="flex justify-between items-center font-bold text-lg border-t border-white/10 pt-3 mt-2">
+                          <span className="text-white">Razem:</span>
+                          <span className="text-white text-xl">{totalWithDelivery.toFixed(2)} zł</span>
+                        </div>
+                        {deliveryInfo && <p className="text-xs text-white/40">Szacowany czas dostawy: {deliveryInfo.eta}</p>}
+
+                        <div id="paymentBox" className="pt-3 border-t border-white/10">
+                          <h4 className="font-semibold mb-2 text-white text-sm">Metoda płatności</h4>
+                          <div className="flex gap-2">
+                            {(["Gotówka", "Terminal", "Online"] as const).map((m) => (
+                              <button key={m} onClick={() => { setPaymentMethod(m); setShowConfirmation(false); }}
+                                disabled={submitting}
+                                className={clsx("flex-1 px-2 py-2.5 rounded-xl font-medium text-xs transition disabled:opacity-60 disabled:cursor-not-allowed border", paymentMethod === m ? "bg-white text-black border-white" : "bg-zinc-800 text-white border-white/10 hover:bg-zinc-700")}>
+                                {m}
+                              </button>
+                            ))}
                           </div>
-                        </div>
-                      </div>
 
+                          {LegalConsentEl}
 
-
-                      {/* MOBILE SUMMARY */}
-                      <div className="w-full lg:hidden flex-shrink-0">
-                        <div className="border rounded p-4 bg-gray-50 space-y-3">
-                          <h3 className="text-lg font-semibold">Podsumowanie</h3>
-                          <div className="flex justify-between text-sm"><span>Produkty:</span><span>{baseTotal.toFixed(2)} zł</span></div>
-                          {(selectedOption === "takeaway" || selectedOption === "delivery") && <div className="flex justify-between text-sm"><span>Opakowanie:</span><span>{packagingCost.toFixed(2)} zł</span></div>}
-                          {deliveryInfo && <div className="flex justify-between text-sm"><span>Dostawa:</span><span>{deliveryInfo.cost.toFixed(2)} zł</span></div>}
-
-                          {selectedOption === "delivery" && outOfRange && (
-                            <p className="text-xs text-red-600">Adres poza zasięgiem dostawy.</p>
-                          )}
-                          {selectedOption === "delivery" && !outOfRange && !deliveryMinOk && (
-                            <p className="text-xs text-red-600">Minimalna wartość zamówienia dla tej strefy: {deliveryMinRequired.toFixed(2)} zł.</p>
-                          )}
-
-                          <PromoSectionExternal
-  promo={promo}
-  promoError={promoError}
-  autoPromo={autoPromo}
-  onApply={applyPromo}
-  onClear={clearPromo}
-/>
-
-                          {discount > 0 && <div className="flex justify-between text-sm text-green-700"><span>Rabat:</span><span>-{discount.toFixed(2)} zł</span></div>}
-
-                          <div className="flex justify-between font-semibold border-t pt-2"><span>Razem:</span><span>{totalWithDelivery.toFixed(2)} zł</span></div>
-                          {deliveryInfo && <p className="text-xs text-gray-600 mt-1">Szacowany czas dostawy: {deliveryInfo.eta}</p>}
-
-                          <div id="paymentBox" className="mt-2">
-                            <h4 className="font-semibold mb-1">Metoda płatności</h4>
-                            <div className="flex flex-wrap gap-2">
-                              {(["Gotówka", "Terminal", "Online"] as const).map((m) => (
-                                <button key={m} onClick={() => { setPaymentMethod(m); setShowConfirmation(false); }}
-                                  disabled={submitting}
-                                  className={clsx("px-3 py-2 rounded font-semibold text-sm transition disabled:opacity-60 disabled:cursor-not-allowed", paymentMethod === m ? "bg-green-600 text-white" : "bg-gray-200 text-black hover:bg-gray-300")}>
-                                  {m}
-                                </button>
-                              ))}
+                          {TURNSTILE_SITE_KEY ? (
+                            <div className="mt-3">
+                              <h4 className="font-semibold mb-1 text-white text-sm">Weryfikacja</h4>
+                              {turnstileError ? (
+                                <p className="text-sm text-red-400">Nie udało się załadować weryfikacji. Sprawdź blokery.</p>
+                              ) : (
+                                <>
+                                  <div ref={tsMobileRef} />
+                                  <p className="text-[11px] text-white/40 mt-1">Chronimy formularz przed botami.</p>
+                                </>
+                              )}
                             </div>
-
-                            {LegalConsentEl}
-
-                            {TURNSTILE_SITE_KEY ? (
-                              <div className="mt-2">
-                                <h4 className="font-semibold mb-1">Weryfikacja</h4>
-                                {turnstileError ? (
-                                  <p className="text-sm text-red-600">Nie udało się załadować weryfikacji. Sprawdź blokery.</p>
-                                ) : (
-                                  <>
-                                    <div ref={tsMobileRef} />
-                                    <p className="text-[11px] text-gray-500 mt-1">Chronimy formularz przed botami.</p>
-                                  </>
-                                )}
-                              </div>
-                            ) : null}
-
-                            {!showConfirmation ? (
-                              !shouldHideOrderActions && (
-                                <button
-                                  onClick={() => setShowConfirmation(true)}
-                                  disabled={confirmDisabled}
-                                  aria-busy={submitting}
-                                  className="w-full mt-3 py-2 bg-yellow-400 text-black rounded font-semibold disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation inline-flex items-center justify-center gap-2"
-                                >
-                                  {submitting ? <Spinner /> : null}
-                                  {submitting ? "Przetwarzanie…" : "Potwierdź płatność"}
-                                </button>
-                              )
-                            ) : (
-                              !shouldHideOrderActions && (
-                                <div className="flex flex-col gap-2 mt-2">
-                                  <button
-                                    onClick={paymentMethod === "Online" ? handleOnlinePayment : handleSubmitOrder}
-                                    disabled={confirmDisabled}
-                                    aria-busy={submitting}
-                                    className="w-full py-2 bg-black text-white rounded font-semibold hover:opacity-95 touch-manipulation inline-flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
-                                  >
-                                    {submitting ? <Spinner /> : "✅"}
-                                    {submitting ? "Składanie zamówienia…" : `Zamawiam i płacę (${paymentMethod})`}
-                                  </button>
-                                  <button onClick={() => setShowConfirmation(false)} className="text-xs underline disabled:opacity-50" disabled={submitting}>Zmień metodę</button>
-                                </div>
-                              )
-                            )}
-                          </div>
+                          ) : null}
                         </div>
                       </div>
                     </div>
 
-                    {/* Nawigacja kroku 3 */}
-                    <div className="mt-2 flex justify-between">
-                      <button onClick={() => goToStep(2)} className="px-4 py-2 bg-gray-200 rounded disabled:opacity-50 disabled:cursor-not-allowed" disabled={submitting}>← Wstecz</button>
-                      <button
-                        onClick={() => {
-                          if (!paymentMethod) setErrorMessage("Wybierz metodę płatności.");
-                          else if (!legalAccepted) setErrorMessage("Zaznacz akceptację regulaminu i polityki prywatności.");
-                          document.getElementById("paymentBox")?.scrollIntoView({ behavior: "smooth", block: "start" });
-                          setShowConfirmation(true);
-                        }}
-                        className="px-4 py-2 bg-yellow-400 rounded font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                    {/* Sticky bottom navigation for mobile */}
+                    <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-zinc-900/95 backdrop-blur-sm border-t border-white/10 p-4 z-50 safe-area-pb">
+                      <div className="flex gap-3">
+                        <button 
+                          onClick={() => goToStep(2)} 
+                          className="px-4 py-3 bg-zinc-800 text-white rounded-xl border border-white/10 hover:bg-zinc-700 transition disabled:opacity-50 disabled:cursor-not-allowed font-medium" 
+                          disabled={submitting}
+                        >
+                          ←
+                        </button>
+                        {!showConfirmation ? (
+                          <button
+                            onClick={() => {
+                              if (!paymentMethod) {
+                                setErrorMessage("Wybierz metodę płatności.");
+                                document.getElementById("paymentBox")?.scrollIntoView({ behavior: "smooth", block: "center" });
+                                return;
+                              }
+                              if (!legalAccepted) {
+                                setErrorMessage("Zaakceptuj regulamin i politykę prywatności.");
+                                return;
+                              }
+                              setShowConfirmation(true);
+                            }}
+                            disabled={!name || !phone || !validEmail || (selectedOption === "delivery" && (!custCoords || !deliveryInfo)) || submitting || (!!TURNSTILE_SITE_KEY && !turnstileToken)}
+                            aria-busy={submitting}
+                            className="flex-1 py-3 bg-white text-black rounded-xl font-bold disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation inline-flex items-center justify-center gap-2 hover:bg-white/90 transition-all text-sm"
+                          >
+                            {submitting ? <Spinner /> : null}
+                            {submitting ? "Przetwarzanie…" : `Zamawiam • ${totalWithDelivery.toFixed(2)} zł`}
+                          </button>
+                        ) : (
+                          <button
+                            onClick={paymentMethod === "Online" ? handleOnlinePayment : handleSubmitOrder}
+                            disabled={confirmDisabled || !name || !phone || !validEmail || (selectedOption === "delivery" && (!custCoords || !deliveryInfo))}
+                            aria-busy={submitting}
+                            className="flex-1 py-3 bg-green-500 text-white rounded-xl font-bold hover:bg-green-400 touch-manipulation inline-flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed transition text-sm"
+                          >
+                            {submitting ? <Spinner /> : "✓"}
+                            {submitting ? "Składanie…" : `Potwierdź • ${paymentMethod}`}
+                          </button>
+                        )}
+                      </div>
+                      {showConfirmation && (
+                        <button onClick={() => setShowConfirmation(false)} className="w-full text-xs text-white/50 hover:text-white transition mt-2" disabled={submitting}>
+                          ← Zmień metodę płatności
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Nawigacja kroku 3 - Desktop */}
+                    <div className="hidden lg:flex justify-between mt-2">
+                      <button onClick={() => goToStep(2)} className="px-4 py-2 bg-white/10 text-white rounded-xl border border-white/10 hover:bg-white/20 transition disabled:opacity-50 disabled:cursor-not-allowed" disabled={submitting}>← Wstecz</button>
+                    </div>
+
+                    {/* Spacer for mobile to account for fixed bottom nav */}
+                    <div className="lg:hidden h-24"></div>
+                  </div>
+                )}
+
+                {/* STEP 1 - Twoje zamówienie (produkty + notatki) */}
+                {checkoutStep === 1 && (
+                  <div className="space-y-6">
+                    <h2 className="text-2xl font-bold text-center text-white">Twoje zamówienie</h2>
+
+                    {/* EDITOWALNE PRODUKTY */}
+                    <div className="max-h-[400px] overflow-y-auto space-y-3">
+                      {items.map((item, idx) => {
+                        const meta = findMetaByName(item.name);
+                        const defaultMeat = inferDefaultMeat(meta, item.name);
+                        return (
+                          <div key={idx}>
+                            <ProductItem
+                              prod={item}
+                              meta={meta}
+                              defaultMeat={defaultMeat}
+                              getAddonPrice={getAddonPrice}
+                              allAddons={addonsFromDb}
+                              helpers={productHelpers}
+                            />
+                            <textarea className="w-full text-xs bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 mt-1 placeholder-white/40 focus:border-yellow-400/50 focus:outline-none" placeholder="Notatka do produktu" value={notes[idx] || ""} onChange={(e) => setNotes({ ...notes, [idx]: e.target.value })} />
+                          </div>
+                        );
+                      })}
+                      {items.length === 0 && <p className="text-center text-white/40">Brak produktów w koszyku.</p>}
+                    </div>
+                    
+                    {/* NOTATKA DO ZAMÓWIENIA */}
+                    <div className="pt-4 border-t border-white/10">
+                      <h3 className="font-semibold text-sm mb-1 text-white">Notatka do zamówienia (opcjonalnie)</h3>
+                      <textarea
+                        className="w-full text-sm bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/40 focus:border-yellow-400/50 focus:outline-none"
+                        placeholder="Np. nie dzwonić domofonem, proszę o sztućce, itp."
+                        value={orderNote}
+                        onChange={(e) => setOrderNote(e.target.value)}
+                        maxLength={500}
                         disabled={submitting}
+                      />
+                      <div className="text-[11px] text-white/40 mt-1">
+                        Maks. 500 znaków.
+                      </div>
+                    </div>
+
+                    {/* Podsumowanie ceny - prosty widok - hidden on mobile */}
+                    <div className="border-t border-white/10 pt-4 hidden lg:block">
+                      <div className="flex justify-between font-semibold text-white text-lg">
+                        <span>Suma produktów:</span>
+                        <span>{baseTotal.toFixed(2)} zł</span>
+                      </div>
+                    </div>
+
+                    {/* Nawigacja kroku 1 - Desktop */}
+                    <div className="hidden lg:flex mt-2 justify-end">
+                      <button
+                        onClick={nextStep}
+                        disabled={items.length === 0 || submitting}
+                        className="px-5 py-2 bg-gradient-to-r from-yellow-400 via-yellow-500 to-amber-500 text-black font-bold rounded-xl disabled:opacity-50 disabled:cursor-not-allowed hover:from-yellow-300 hover:via-yellow-400 hover:to-amber-400 transition-all"
                       >
                         Dalej →
                       </button>
                     </div>
+
+                    {/* Sticky bottom navigation for mobile - Krok 1 */}
+                    <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-zinc-900 border-t border-white/10 p-4 z-50">
+                      <div className="flex justify-between items-center mb-2">
+                        <span className="text-white/70 text-sm">Suma:</span>
+                        <span className="text-yellow-400 font-bold text-lg">{baseTotal.toFixed(2)} zł</span>
+                      </div>
+                      <button
+                        onClick={nextStep}
+                        disabled={items.length === 0 || submitting}
+                        className="w-full py-3 bg-gradient-to-r from-yellow-400 via-yellow-500 to-amber-500 text-black font-bold rounded-xl disabled:opacity-50 disabled:cursor-not-allowed hover:from-yellow-300 hover:via-yellow-400 hover:to-amber-400 transition-all"
+                      >
+                        Dalej →
+                      </button>
+                    </div>
+
+                    {/* Spacer for mobile */}
+                    <div className="lg:hidden h-28"></div>
                   </div>
                 )}
               </>
@@ -1585,18 +1727,18 @@ export default function CheckoutModal() {
 
           {/* DESKTOP SUMMARY */}
           {!orderSent && (
-            <aside className="hidden lg:block w-[320px] flex-shrink-0">
-              <div className="sticky top-16 bg-white border rounded-md shadow p-5 space-y-4">
-                <h2 className="text-xl font-bold">Podsumowanie</h2>
-                <div className="flex justify-between"><span>Produkty:</span><span>{baseTotal.toFixed(2)} zł</span></div>
-                {(selectedOption === "takeaway" || selectedOption === "delivery") && <div className="flex justify-between"><span>Opakowanie:</span><span>{packagingCost.toFixed(2)} zł</span></div>}
-                {deliveryInfo && <div className="flex justify-between"><span>Dostawa:</span><span>{deliveryInfo.cost.toFixed(2)} zł</span></div>}
+            <aside className="hidden lg:block w-[300px] flex-shrink-0">
+              <div className="sticky top-4 bg-zinc-900 border border-white/10 rounded-2xl shadow-xl p-5 space-y-3">
+                <h2 className="text-lg font-semibold text-white">Podsumowanie</h2>
+                <div className="flex justify-between text-sm text-white/70"><span>Produkty:</span><span className="text-white">{baseTotal.toFixed(2)} zł</span></div>
+                {(selectedOption === "takeaway" || selectedOption === "delivery") && <div className="flex justify-between text-sm text-white/70"><span>Opakowanie:</span><span className="text-white">{packagingCost.toFixed(2)} zł</span></div>}
+                {deliveryInfo && <div className="flex justify-between text-sm text-white/70"><span>Dostawa:</span><span className="text-white">{deliveryInfo.cost.toFixed(2)} zł</span></div>}
 
                 {selectedOption === "delivery" && outOfRange && (
-                  <p className="text-xs text-red-600">Adres poza zasięgiem dostawy.</p>
+                  <p className="text-xs text-red-400">Adres poza zasięgiem dostawy.</p>
                 )}
                 {selectedOption === "delivery" && !outOfRange && !deliveryMinOk && (
-                  <p className="text-xs text-red-600">Minimalna wartość zamówienia dla tej strefy: {deliveryMinRequired.toFixed(2)} zł.</p>
+                  <p className="text-xs text-red-400">Minimalna wartość zamówienia dla tej strefy: {deliveryMinRequired.toFixed(2)} zł.</p>
                 )}
 
            <PromoSectionExternal
@@ -1608,18 +1750,18 @@ export default function CheckoutModal() {
 />
 
 
-                {discount > 0 && <div className="flex justify-between text-green-700"><span>Rabat:</span><span>-{discount.toFixed(2)} zł</span></div>}
+                {discount > 0 && <div className="flex justify-between text-sm text-green-400"><span>Rabat:</span><span>-{discount.toFixed(2)} zł</span></div>}
 
-                <div className="flex justify-between font-semibold border-t pt-2"><span>RAZEM:</span><span>{totalWithDelivery.toFixed(2)} zł</span></div>
-                {deliveryInfo && <p className="text-xs text-gray-600">ETA: {deliveryInfo.eta}</p>}
+                <div className="flex justify-between font-semibold text-white border-t border-white/10 pt-3 mt-2"><span>RAZEM:</span><span>{totalWithDelivery.toFixed(2)} zł</span></div>
+                {deliveryInfo && <p className="text-xs text-white/40">ETA: {deliveryInfo.eta}</p>}
 
-                <div id="paymentBox" className="mt-2">
-                  <h4 className="font-semibold mb-1">Płatność</h4>
-                  <div className="flex flex-wrap gap-2">
+                <div className="mt-3 pt-3 border-t border-white/10">
+                  <h4 className="font-medium mb-2 text-white text-sm">Płatność</h4>
+                  <div className="flex gap-2">
                     {(["Gotówka", "Terminal", "Online"] as const).map((m) => (
                       <button key={m} onClick={() => { setPaymentMethod(m); setShowConfirmation(false); }}
                         disabled={submitting}
-                        className={clsx("px-3 py-2 rounded font-semibold text-sm transition disabled:opacity-60 disabled:cursor-not-allowed", paymentMethod === m ? "bg-green-600 text-white" : "bg-gray-200 text-black hover:bg-gray-300")}>
+                        className={clsx("flex-1 px-2 py-2 rounded-lg font-medium text-xs transition disabled:opacity-60 disabled:cursor-not-allowed border", paymentMethod === m ? "bg-white text-black border-white" : "bg-transparent text-white/70 hover:text-white border-white/20 hover:border-white/40")}>
                         {m}
                       </button>
                     ))}
@@ -1629,13 +1771,13 @@ export default function CheckoutModal() {
 
                   {TURNSTILE_SITE_KEY ? (
                     <div className="mt-2">
-                      <h4 className="font-semibold mb-1">Weryfikacja</h4>
+                      <h4 className="font-semibold mb-1 text-white">Weryfikacja</h4>
                       {turnstileError ? (
-                        <p className="text-sm text-red-600">Nie udało się załadować weryfikacji. Sprawdź blokery.</p>
+                        <p className="text-sm text-red-400">Nie udało się załadować weryfikacji. Sprawdź blokery.</p>
                       ) : (
                         <>
                           <div ref={tsDesktopRef} />
-                          <p className="text-[11px] text-gray-500 mt-1">Chronimy formularz przed botami.</p>
+                          <p className="text-[11px] text-white/40 mt-1">Chronimy formularz przed botami.</p>
                         </>
                       )}
                     </div>
@@ -1647,7 +1789,7 @@ export default function CheckoutModal() {
                         onClick={() => setShowConfirmation(true)}
                         disabled={confirmDisabled}
                         aria-busy={submitting}
-                        className="w-full mt-3 py-2 bg-yellow-400 text-black rounded font-semibold disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2"
+                        className="w-full mt-3 py-2.5 bg-white text-black rounded-xl font-semibold text-sm disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2 hover:bg-white/90 transition"
                       >
                         {submitting ? <Spinner /> : null}
                         {submitting ? "Przetwarzanie…" : "Potwierdź płatność"}
@@ -1655,17 +1797,17 @@ export default function CheckoutModal() {
                     )
                   ) : (
                     !shouldHideOrderActions && (
-                      <div className="flex flex-col gap-2 mt-2">
+                      <div className="flex flex-col gap-2 mt-3">
                         <button
                           onClick={paymentMethod === "Online" ? handleOnlinePayment : handleSubmitOrder}
                           disabled={confirmDisabled}
                           aria-busy={submitting}
-                          className="w-full py-2 bg-black text-white rounded font-semibold hover:opacity-95 inline-flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                          className="w-full py-2.5 bg-green-500 text-white rounded-xl font-semibold text-sm hover:bg-green-400 inline-flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed transition"
                         >
-                          {submitting ? <Spinner /> : "✅"}
-                          {submitting ? "Składanie zamówienia…" : `Zamawiam i płacę (${paymentMethod})`}
+                          {submitting ? <Spinner /> : "✓"}
+                          {submitting ? "Składanie zamówienia…" : `Zamawiam (${paymentMethod})`}
                         </button>
-                        <button onClick={() => setShowConfirmation(false)} className="text-xs underline disabled:opacity-50" disabled={submitting}>Zmień</button>
+                        <button onClick={() => setShowConfirmation(false)} className="text-xs text-white/50 hover:text-white transition" disabled={submitting}>Zmień metodę</button>
                       </div>
                     )
                   )}
@@ -1678,10 +1820,10 @@ export default function CheckoutModal() {
 
       {/* Overlay blokujący interakcje podczas submitu */}
       {submitting && (
-        <div className="fixed inset-0 z-[60] grid place-items-center bg-black/40">
-          <div className="rounded-xl bg-white px-4 py-3 shadow inline-flex items-center gap-3">
+        <div className="fixed inset-0 z-[60] grid place-items-center bg-black/60 backdrop-blur-sm">
+          <div className="rounded-2xl bg-zinc-900 border border-white/10 px-6 py-4 shadow-2xl inline-flex items-center gap-3">
             <Spinner />
-            <div className="text-sm font-medium">Przetwarzanie zamówienia…</div>
+            <div className="text-sm font-medium text-white">Przetwarzanie zamówienia…</div>
           </div>
         </div>
       )}

@@ -3,151 +3,172 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import Image from "next/image";
+import { MapPin, Clock, Phone, Sparkles, Flame, Heart } from "lucide-react";
 import ReservationModal from "@/components/ReservationModal";
-
-const BG_DESKTOP = "/graffitiburger2.webp";  // wspólne tło desktop
-const BG_MOBILE = "/backgroundsisi.jpg";     // wspólne tło mobile
 
 export default function OnasSection() {
   const [isResOpen, setResOpen] = useState(false);
 
-  const ReserveButton = ({
-    className = "",
-    label = "Zarezerwuj stolik",
-  }: { className?: string; label?: string }) => (
-    <button
-      type="button"
-      onClick={() => setResOpen(true)}
-      className={`inline-flex items-center justify-center rounded-full px-6 py-3 text-sm md:text-base font-semibold text-black bg-white hover:bg-neutral-200 transition ${className}`}
-      aria-label="Otwórz okno rezerwacji stolika"
-      aria-haspopup="dialog"
-      aria-expanded={isResOpen}
-      aria-controls="reservation-modal"
-    >
-      {label}
-    </button>
-  );
-
-  const FeatureCard = ({
-    icon, title, desc, alt,
-  }: { icon: string; title: string; desc: string; alt: string }) => (
-    <div className="rounded-2xl bg-neutral-900 border border-neutral-800 p-6 md:p-7 text-white">
-      <div className="flex flex-col items-center text-center gap-3">
-        <div className="rounded-xl bg-neutral-800 p-4 ring-1 ring-neutral-700/60">
-          <Image src={icon} alt={alt} width={56} height={56} />
-        </div>
-        <h4 className="text-base md:text-lg font-semibold">{title}</h4>
-        <p className="text-sm md:text-base text-neutral-300 leading-relaxed">{desc}</p>
-      </div>
-    </div>
-  );
-
   return (
     <>
-      {/* === START REPLACE: outer section wrapper + overlay === */}
       <section
         id="onas"
-        className="onas-sec relative w-full text-white overflow-hidden"
+        className="relative w-full bg-black overflow-hidden"
         aria-labelledby="onas-heading"
       >
-        {/* overlay IDENTYCZNY jak Burger/MENU */}
-        <div className="overlay" aria-hidden="true" />
+        {/* Gradient tła - zaczyna od czarnego */}
+        <div className="absolute inset-0 bg-black" />
+        
+        {/* Dekoracyjne elementy */}
+        <div className="absolute top-40 left-10 w-72 h-72 bg-yellow-400/5 rounded-full blur-3xl" />
+        <div className="absolute bottom-20 right-10 w-96 h-96 bg-yellow-400/5 rounded-full blur-3xl" />
 
-        <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-10 py-14 md:py-20">
-          <div className="flex flex-col items-center text-center">
-            <span className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-black/40 px-3 py-1 text-[11px] font-medium text-neutral-200 tracking-wide">
-              <span className="h-1.5 w-1.5 rounded-full bg-yellow-400" />
-              Lokal w centrum Ciechanowa
+        <div className="relative z-10 max-w-6xl mx-auto px-5 sm:px-8 lg:px-10 py-12 md:py-28">
+          
+          {/* Nagłówek */}
+          <div className="text-center mb-10 md:mb-16">
+            <span className="inline-flex items-center gap-2 rounded-full bg-yellow-400/10 border border-yellow-400/20 px-3 py-1.5 text-xs sm:text-sm font-medium text-yellow-400 mb-4 md:mb-6">
+              <MapPin size={14} className="sm:w-4 sm:h-4" />
+              Centrum Ciechanowa
             </span>
 
-            <h2 id="onas-heading" className="mt-4 text-4xl md:text-6xl font-extrabold tracking-tight">
-              O nas
+            <h2 id="onas-heading" className="text-3xl sm:text-4xl md:text-6xl lg:text-7xl font-black text-white tracking-tight">
+              O <span className="text-yellow-400">NAS</span>
             </h2>
 
-            <p className="mt-4 max-w-2xl text-sm md:text-base text-neutral-200 leading-relaxed">
-              <strong className="text-white">SISI Burger &amp; Pancake</strong> — chrupiące burgery i puszyste pancake z lokalnych składników.
+            <p className="mt-4 md:mt-6 max-w-2xl mx-auto text-base md:text-xl text-white/60 leading-relaxed px-2">
+              Jesteśmy miejscem, gdzie tradycyjne receptury spotykają się z nowoczesnym smakiem
             </p>
+          </div>
 
-            <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
-              <ReserveButton />
-              <Link
-                href="#menu"
-                className="inline-flex items-center justify-center rounded-full px-6 py-3 text-sm md:text-base font-semibold text-white border border-white hover:bg-white/10 transition"
-              >
-                Zobacz menu
-              </Link>
+          {/* Główna treść - dwie kolumny */}
+          <div className="grid md:grid-cols-2 gap-8 md:gap-16 items-center mb-12 md:mb-20">
+            
+            {/* Lewa kolumna - tekst */}
+            <div className="space-y-4 md:space-y-6 text-center md:text-left">
+              <h3 className="text-xl sm:text-2xl md:text-3xl font-bold text-white leading-tight">
+                <span className="text-yellow-400">SISI</span> Burger & Pancake
+              </h3>
+              
+              <p className="text-sm md:text-base text-white/50 leading-relaxed">
+                Od pierwszego dnia stawiamy na jakość i świeżość. Nasze burgery powstają z najlepszej wołowiny, 
+                którą codziennie siekamy na miejscu. Bułki pieczone według własnej receptury, warzywa od lokalnych 
+                dostawców, a sosy przygotowywane z pasją.
+              </p>
+              
+              <p className="text-sm md:text-base text-white/50 leading-relaxed">
+                Pancake? To nasza druga specjalność! Puszyste, złociste i podawane z najlepszymi dodatkami — 
+                od klasycznego syropu klonowego, przez świeże owoce, aż po nutellę i bitą śmietanę.
+              </p>
+
+              <div className="flex flex-wrap justify-center md:justify-start gap-3 pt-2 md:pt-4">
+                <button
+                  type="button"
+                  onClick={() => setResOpen(true)}
+                  className="inline-flex items-center gap-2 rounded-full px-5 py-2.5 md:px-6 md:py-3 text-sm font-bold text-black bg-yellow-400 hover:bg-yellow-300 transition-all duration-300 hover:scale-105"
+                >
+                  Zarezerwuj stolik
+                </button>
+                <Link
+                  href="#menu"
+                  className="inline-flex items-center gap-2 rounded-full px-5 py-2.5 md:px-6 md:py-3 text-sm font-bold text-white border border-white/20 hover:border-yellow-400/50 hover:text-yellow-400 transition-all duration-300"
+                >
+                  Zobacz menu
+                </Link>
+              </div>
             </div>
 
-            <div className="mt-6 grid grid-cols-3 gap-3 max-w-xl w-full justify-items-center">
-              <div className="rounded-xl border border-white/25 bg-neutral-900/80 px-4 py-3 text-center">
-                <div className="text-lg md:text-2xl font-extrabold">100%</div>
-                <div className="text-[11px] md:text-xs text-neutral-200">Świeże składniki</div>
+            {/* Prawa kolumna - statystyki */}
+            <div className="grid grid-cols-2 gap-3 md:gap-4">
+              <div className="bg-gradient-to-br from-zinc-800/80 to-zinc-900/80 rounded-2xl md:rounded-3xl p-4 md:p-6 border border-white/5 hover:border-yellow-400/30 transition-colors duration-300">
+                <div className="text-2xl sm:text-3xl md:text-5xl font-black text-yellow-400">5+</div>
+                <div className="text-xs md:text-sm text-white/50 mt-1 md:mt-2">lat doświadczenia</div>
               </div>
-              <div className="rounded-xl border border-white/25 bg-neutral-900/80 px-4 py-3 text-center">
-                <div className="text-lg md:text-2xl font-extrabold">#1</div>
-                <div className="text-[11px] md:text-xs text-neutral-200">Smak w okolicy</div>
+              <div className="bg-gradient-to-br from-zinc-800/80 to-zinc-900/80 rounded-2xl md:rounded-3xl p-4 md:p-6 border border-white/5 hover:border-yellow-400/30 transition-colors duration-300">
+                <div className="text-2xl sm:text-3xl md:text-5xl font-black text-white">100%</div>
+                <div className="text-xs md:text-sm text-white/50 mt-1 md:mt-2">świeżych składników</div>
               </div>
-              <div className="rounded-xl border border-white/25 bg-neutral-900/80 px-4 py-3 text-center">
-                <div className="text-lg md:text-2xl font-extrabold">24/7</div>
-                <div className="text-[11px] md:text-xs text-neutral-200">Rezerwacje online</div>
+              <div className="bg-gradient-to-br from-zinc-800/80 to-zinc-900/80 rounded-2xl md:rounded-3xl p-4 md:p-6 border border-white/5 hover:border-yellow-400/30 transition-colors duration-300">
+                <div className="text-2xl sm:text-3xl md:text-5xl font-black text-white">1000+</div>
+                <div className="text-xs md:text-sm text-white/50 mt-1 md:mt-2">zadowolonych klientów</div>
+              </div>
+              <div className="bg-gradient-to-br from-yellow-400 to-amber-500 rounded-2xl md:rounded-3xl p-4 md:p-6">
+                <div className="text-2xl sm:text-3xl md:text-5xl font-black text-black">#1</div>
+                <div className="text-xs md:text-sm text-black/60 mt-1 md:mt-2">smak w Ciechanowie</div>
               </div>
             </div>
           </div>
 
-          <div className="mt-12 md:mt-16 max-w-5xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-5 md:gap-7 place-items-center">
-            <FeatureCard icon="/icons/meat.png" alt="Ikona mięsa" title="Najlepsze mięso" desc="Wołowina siekana na miejscu, bez konserwantów." />
-            <FeatureCard icon="/icons/vegetable.png" alt="Ikona warzyw" title="Świeże składniki" desc="Codziennie od lokalnych dostawców." />
-            <FeatureCard icon="/icons/reservation.png" alt="Ikona rezerwacji" title="Rezerwacja online" desc="Kilka kliknięć i stolik gotowy." />
+          {/* Cechy - trzy karty */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 md:gap-6 mb-12 md:mb-20">
+            <div className="group bg-gradient-to-br from-zinc-800/60 to-zinc-900/60 rounded-2xl md:rounded-3xl p-5 md:p-8 border border-white/5 hover:border-yellow-400/30 transition-all duration-500 hover:-translate-y-2">
+              <div className="w-12 h-12 md:w-14 md:h-14 rounded-xl md:rounded-2xl bg-yellow-400/10 flex items-center justify-center mb-4 md:mb-5 group-hover:bg-yellow-400/20 transition-colors">
+                <Flame className="text-yellow-400" size={24} />
+              </div>
+              <h4 className="text-lg md:text-xl font-bold text-white mb-2 md:mb-3">Grillowane na ogniu</h4>
+              <p className="text-white/40 text-xs md:text-sm leading-relaxed">
+                Każdy burger grillujemy na otwartym ogniu, co nadaje mu wyjątkowy, głęboki smak.
+              </p>
+            </div>
+
+            <div className="group bg-gradient-to-br from-zinc-800/60 to-zinc-900/60 rounded-2xl md:rounded-3xl p-5 md:p-8 border border-white/5 hover:border-yellow-400/30 transition-all duration-500 hover:-translate-y-2">
+              <div className="w-12 h-12 md:w-14 md:h-14 rounded-xl md:rounded-2xl bg-yellow-400/10 flex items-center justify-center mb-4 md:mb-5 group-hover:bg-yellow-400/20 transition-colors">
+                <Sparkles className="text-yellow-400" size={24} />
+              </div>
+              <h4 className="text-lg md:text-xl font-bold text-white mb-2 md:mb-3">Świeżość codziennie</h4>
+              <p className="text-white/40 text-xs md:text-sm leading-relaxed">
+                Składniki dostarczane każdego ranka. Bułki pieczone na miejscu. Zero kompromisów.
+              </p>
+            </div>
+
+            <div className="group bg-gradient-to-br from-zinc-800/60 to-zinc-900/60 rounded-2xl md:rounded-3xl p-5 md:p-8 border border-white/5 hover:border-yellow-400/30 transition-all duration-500 hover:-translate-y-2">
+              <div className="w-12 h-12 md:w-14 md:h-14 rounded-xl md:rounded-2xl bg-yellow-400/10 flex items-center justify-center mb-4 md:mb-5 group-hover:bg-yellow-400/20 transition-colors">
+                <Heart className="text-yellow-400" size={24} />
+              </div>
+              <h4 className="text-lg md:text-xl font-bold text-white mb-2 md:mb-3">Robione z pasją</h4>
+              <p className="text-white/40 text-xs md:text-sm leading-relaxed">
+                Każde danie przygotowujemy z miłością. Bo wiemy, że smak zaczyna się od serca.
+              </p>
+            </div>
           </div>
 
-          <div className="mt-12 md:mt-16 flex justify-center">
-            <Image
-              src="/onas-main.jpg"
-              alt="SISI — wnętrze lokalu"
-              width={1200}
-              height={700}
-              className="w-full max-w-5xl h-auto rounded-2xl object-cover"
-            />
+          {/* Informacje kontaktowe */}
+          <div className="bg-gradient-to-br from-zinc-800/40 to-zinc-900/40 rounded-2xl md:rounded-3xl p-5 md:p-10 border border-white/5">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 md:gap-8 text-center md:text-left">
+              <div className="flex flex-col md:flex-row items-center gap-3 md:gap-4">
+                <div className="w-10 h-10 md:w-12 md:h-12 rounded-lg md:rounded-xl bg-yellow-400 flex items-center justify-center shrink-0">
+                  <MapPin className="text-black" size={20} />
+                </div>
+                <div>
+                  <div className="text-xs md:text-sm text-white/40 mb-0.5 md:mb-1">Adres</div>
+                  <div className="text-sm md:text-base text-white font-semibold">ul. Płońska 35, Ciechanów</div>
+                </div>
+              </div>
+
+              <div className="flex flex-col md:flex-row items-center gap-3 md:gap-4">
+                <div className="w-10 h-10 md:w-12 md:h-12 rounded-lg md:rounded-xl bg-yellow-400 flex items-center justify-center shrink-0">
+                  <Clock className="text-black" size={20} />
+                </div>
+                <div>
+                  <div className="text-xs md:text-sm text-white/40 mb-0.5 md:mb-1">Godziny otwarcia</div>
+                  <div className="text-sm md:text-base text-white font-semibold">Pon-Nd: 12:00 - 21:00</div>
+                </div>
+              </div>
+
+              <div className="flex flex-col md:flex-row items-center gap-3 md:gap-4">
+                <div className="w-10 h-10 md:w-12 md:h-12 rounded-lg md:rounded-xl bg-yellow-400 flex items-center justify-center shrink-0">
+                  <Phone className="text-black" size={20} />
+                </div>
+                <div>
+                  <div className="text-xs md:text-sm text-white/40 mb-0.5 md:mb-1">Telefon</div>
+                  <div className="text-sm md:text-base text-white font-semibold">+48 123 456 789</div>
+                </div>
+              </div>
+            </div>
           </div>
 
-          <div className="mt-10 text-center md:hidden">
-            <ReserveButton className="w-full" />
-          </div>
         </div>
-
-        {/* wspólne tło mobile/desktop + identyczny efekt jak Burger/MENU */}
-        <style jsx>{`
-          .onas-sec {
-            background-image: url("${BG_MOBILE}");
-            background-position: center top;
-            background-repeat: no-repeat;
-            background-size: cover;
-            background-attachment: scroll; /* mobile */
-          }
-
-          @media (min-width: 768px) {
-            .onas-sec {
-              background-image: url("${BG_DESKTOP}");
-              background-attachment: fixed; /* desktop */
-              background-position: center center;
-            }
-          }
-
-          .overlay {
-            position: absolute;
-            inset: 0;
-            background: radial-gradient(
-                1200px 700px at 25% 55%,
-                rgba(0, 0, 0, 0.35),
-                rgba(0, 0, 0, 0.82)
-              ),
-              rgba(0, 0, 0, 0.55);
-            pointer-events: none;
-          }
-        `}</style>
       </section>
-      {/* === END REPLACE: outer section wrapper + overlay === */}
 
       {/* Modal poza sekcją + wymuszony czarny tekst */}
       {isResOpen && (
