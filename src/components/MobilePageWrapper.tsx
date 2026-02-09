@@ -16,7 +16,7 @@ import OnasSection from "./OnasSection";
 import ContactSection from "./ContactSection";
 import BurgerMiesiaca from "./BurgerMiesiaca";
 import { LEGAL } from "@/config/legal";
-import { Flame, FileText, ChevronRight, Shield, Cookie, ScrollText } from "lucide-react";
+import { Flame, FileText, ChevronRight, Cookie, ScrollText } from "lucide-react";
 import useCartStore from "@/store/cartStore";
 import AddressAutocomplete from "@/components/menu/AddressAutocomplete";
 
