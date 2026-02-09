@@ -826,9 +826,9 @@ export default function MobilePageWrapper() {
 
       {/* Pełnoekranowe menu nawigacji */}
       {isMenuOpen && (
-        <div className="fixed inset-0 z-50 bg-zinc-950/98 backdrop-blur-xl flex flex-col">
+        <div className="fixed inset-0 z-50 bg-zinc-950/98 backdrop-blur-xl flex flex-col overflow-y-auto">
           {/* Header menu */}
-          <div className="flex items-center justify-between px-4 h-16 border-b border-white/5">
+          <div className="flex items-center justify-between px-4 h-16 border-b border-white/5 flex-shrink-0">
             <Image
               src="/logo.png"
               alt="SISI"
