@@ -48,10 +48,10 @@ export default function CancelButton({
     <button
       onClick={handleCancel}
       disabled={loading}
-      className={`px-4 py-2 rounded-full font-semibold text-sm ${
+      className={`h-10 px-4 rounded-lg font-semibold text-sm transition-colors ${
         loading
-          ? "bg-gray-300 text-gray-600"
-          : "bg-red-600 hover:bg-red-500 text-white"
+          ? "bg-slate-700 text-slate-500"
+          : "bg-rose-600/20 border border-rose-500/30 text-rose-400 hover:bg-rose-600/30"
       }`}
     >
       {loading ? "Anulowanie..." : "Anuluj"}

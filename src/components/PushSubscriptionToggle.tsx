@@ -271,7 +271,7 @@ export default function PushSubscriptionToggle({ className, showTestButton = tru
       <div className="flex items-center gap-2">
         {!subscribed ? (
           <button
-            className="h-10 rounded-md bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-50"
+            className="h-10 rounded-lg bg-amber-600 px-4 text-sm font-semibold text-white shadow-lg shadow-amber-900/30 hover:bg-amber-500 transition-colors disabled:opacity-50"
             onClick={enable}
             disabled={busy || supported === false || (ios && !standalone)}
             title={ios && !standalone ? "iOS/iPadOS: dodaj stronę do ekranu początkowego (PWA) i uruchom z ikony." : undefined}
@@ -280,7 +280,7 @@ export default function PushSubscriptionToggle({ className, showTestButton = tru
           </button>
         ) : (
           <button
-            className="h-10 rounded-md bg-slate-800 px-4 text-sm font-semibold text-white hover:bg-slate-700 disabled:opacity-50"
+            className="h-10 rounded-lg bg-slate-700 px-4 text-sm font-semibold text-slate-300 hover:bg-slate-600 transition-colors disabled:opacity-50"
             onClick={disable}
             disabled={busy}
           >
@@ -290,7 +290,7 @@ export default function PushSubscriptionToggle({ className, showTestButton = tru
 
         {showTestButton && (
           <button
-            className="h-10 rounded-md border px-4 text-sm disabled:opacity-50"
+            className="h-10 rounded-lg border border-slate-700 bg-slate-800 px-4 text-sm text-slate-300 hover:bg-slate-700 transition-colors disabled:opacity-50"
             onClick={test}
             disabled={busy || !subscribed}
             title={!subscribed ? "Włącz powiadomienia, aby wysłać test." : undefined}
@@ -299,7 +299,7 @@ export default function PushSubscriptionToggle({ className, showTestButton = tru
           </button>
         )}
 
-        <span className="text-xs text-slate-600">{label}</span>
+        <span className="text-xs text-slate-500">{label}</span>
       </div>
 
       {ios && !standalone && (
@@ -309,19 +309,19 @@ export default function PushSubscriptionToggle({ className, showTestButton = tru
       )}
 
       {permission === "denied" && (
-        <p className="mt-1 text-xs text-amber-700">
+        <p className="mt-1 text-xs text-amber-500">
           Powiadomienia są zablokowane dla tej witryny. Odblokuj je w ustawieniach witryny (kłódka/dzwonek) albo w ustawieniach systemu.
         </p>
       )}
 
       {/* mini-diagnostyka */}
       {supported !== false && (
-        <p className="mt-1 text-[11px] text-slate-500">
+        <p className="mt-1 text-[11px] text-slate-600">
           diag: secure={String(diag.secure)} • sw={String(diag.sw)} • controller={String(diag.controller)}
         </p>
       )}
 
-      {error && <p className="mt-1 text-xs text-rose-600">{error}</p>}
+      {error && <p className="mt-1 text-xs text-rose-400">{error}</p>}
     </div>
   );
 }

@@ -44,6 +44,7 @@ export default function ReservationModal({ isOpen, onClose, id, onOpenMenu }: Pr
   const [guestCount, setGuestCount] = useState(1);
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
+  const [customerEmail, setCustomerEmail] = useState("");
   const [notes, setNotes] = useState("");
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -86,6 +87,7 @@ export default function ReservationModal({ isOpen, onClose, id, onOpenMenu }: Pr
       setGuestCount(1);
       setCustomerName("");
       setCustomerPhone("");
+      setCustomerEmail("");
       setNotes("");
       setErrorMsg(null);
     })();
@@ -136,7 +138,7 @@ export default function ReservationModal({ isOpen, onClose, id, onOpenMenu }: Pr
     selected: "!bg-yellow-400 !text-black font-bold",
   } as const;
 
-  const isValid = Boolean(selectedDate && selectedTime && customerName.trim() && customerPhone.trim());
+  const isValid = Boolean(selectedDate && selectedTime && customerName.trim() && customerPhone.trim() && customerEmail.trim() && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail));
 
   async function handleSubmit(e?: React.FormEvent) {
     e?.preventDefault();
@@ -153,6 +155,7 @@ export default function ReservationModal({ isOpen, onClose, id, onOpenMenu }: Pr
           guests: guestCount,
           name: customerName,
           phone: customerPhone,
+          email: customerEmail,
           note: notes,
         }),
       });
@@ -330,6 +333,13 @@ export default function ReservationModal({ isOpen, onClose, id, onOpenMenu }: Pr
                   placeholder="Numer telefonu"
                   value={customerPhone}
                   onChange={(e) => setCustomerPhone(e.target.value)}
+                  className="w-full bg-white/5 border border-white/10 rounded-xl py-4 px-4 text-white placeholder:text-white/40 focus:outline-none focus:border-yellow-400/50 focus:bg-white/10 transition-all text-base"
+                />
+                <input
+                  type="email"
+                  placeholder="Adres e-mail"
+                  value={customerEmail}
+                  onChange={(e) => setCustomerEmail(e.target.value)}
                   className="w-full bg-white/5 border border-white/10 rounded-xl py-4 px-4 text-white placeholder:text-white/40 focus:outline-none focus:border-yellow-400/50 focus:bg-white/10 transition-all text-base"
                 />
               </div>

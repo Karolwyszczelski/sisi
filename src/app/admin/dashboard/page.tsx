@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import Image from "next/image";
 import "react-calendar/dist/Calendar.css";
 import { RadialIcon } from "./RadialIcon";
+import ThemeToggle from "@/components/admin/ThemeToggle";
+import { useTheme } from "@/components/admin/ThemeContext";
 
 const Calendar = dynamic(() => import("react-calendar"), { ssr: false });
 const Chart = dynamic(() => import("./Chart"), { ssr: false });
@@ -190,9 +192,15 @@ export default function DashboardPage() {
     },
   ];
 
+  const { isDark } = useTheme();
+
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
-      <h1 className="mb-8 text-3xl font-bold text-gray-800">Dashboard</h1>
+    <div className={`min-h-screen p-6 ${isDark ? "bg-slate-900" : "bg-gray-50"}`}>
+      {/* Nagłówek z przyciskiem motywu */}
+      <div className="flex items-center justify-between mb-8">
+        <h1 className={`text-3xl font-bold ${isDark ? "text-white" : "text-gray-800"}`}>Dashboard</h1>
+        <ThemeToggle />
+      </div>
 
       {/* GÓRNE KARTY */}
       <div className="mb-8 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">

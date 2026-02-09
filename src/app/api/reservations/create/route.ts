@@ -46,10 +46,17 @@ export async function POST(req: Request) {
     const guests: number = Number(body.guests || 1);
     const name: string = (body.name || "").trim();
     const phone: string = (body.phone || "").trim();
+    const email: string = (body.email || "").trim();
     const notes: string = String(body.note || "");
 
-    if (!day || !time || !name || !phone) {
+    if (!day || !time || !name || !phone || !email) {
       return NextResponse.json({ error: "Brak wymaganych danych." }, { status: 400 });
+    }
+
+    // Walidacja email
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return NextResponse.json({ error: "Nieprawidłowy adres e-mail." }, { status: 400 });
     }
 
     // limit miejsc w slocie
@@ -70,8 +77,10 @@ export async function POST(req: Request) {
       reservation_date: day,
       reservation_time: time,
       number_of_guests: guests,
+      party_size: guests,
       customer_name: name,
       customer_phone: phone,
+      customer_email: email,
       notes,
       status: "pending",
     }]);

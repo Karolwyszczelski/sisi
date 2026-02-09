@@ -596,9 +596,16 @@ export async function POST(req: Request) {
   let productCategoryMap: ProductCategoryMap = new Map();
 
   try {
-    // 0) Kill-switch + packaging_cost + addon prices + product categories
+    // 0) Kill-switch + packaging_cost + addon prices + product categories + order_settings
+    // Przechowaj ustawienia zamówień do walidacji selected_option
+    let orderSettings = {
+      orders_enabled: true,
+      local_enabled: true,
+      takeaway_enabled: true,
+      delivery_enabled: true,
+    };
     {
-      const [cfgRes, addonsRes, productsRes] = await Promise.all([
+      const [cfgRes, addonsRes, productsRes, orderSettingsRes] = await Promise.all([
         supabaseAdmin
           .from("restaurant_info")
           .select("ordering_open,packaging_cost")
@@ -611,11 +618,16 @@ export async function POST(req: Request) {
         supabaseAdmin
           .from("products")
           .select("name, category"),
+        supabaseAdmin
+          .from("order_settings")
+          .select("*")
+          .single(),
       ]);
 
       const { data: cfg, error: cfgErr } = cfgRes;
       const { data: addons, error: addonsErr } = addonsRes;
       const { data: products, error: productsErr } = productsRes;
+      const { data: settings } = orderSettingsRes;
 
       if (cfgErr || !cfg) {
         return NextResponse.json({ error: "Konfiguracja sklepu niedostępna." }, { status: 503 });
@@ -626,6 +638,25 @@ export async function POST(req: Request) {
           { status: 503 }
         );
       }
+
+      // Sprawdź ustawienia zamówień z tabeli order_settings
+      if (settings) {
+        orderSettings = {
+          orders_enabled: settings.orders_enabled ?? true,
+          local_enabled: settings.local_enabled ?? true,
+          takeaway_enabled: settings.takeaway_enabled ?? true,
+          delivery_enabled: settings.delivery_enabled ?? true,
+        };
+      }
+
+      // Blokuj wszystkie zamówienia jeśli wyłączone
+      if (!orderSettings.orders_enabled) {
+        return NextResponse.json(
+          { error: "Przyjmowanie zamówień jest tymczasowo wyłączone. Zapraszamy później!" },
+          { status: 503 }
+        );
+      }
+
       // Pobierz packaging_cost z bazy (jeśli istnieje)
       if (typeof cfg.packaging_cost === "number") {
         packagingCostSetting = cfg.packaging_cost;
@@ -677,10 +708,15 @@ export async function POST(req: Request) {
 
       if (error || !dc) throw new Error("invalid_code");
 
-      const now = new Date().toISOString();
+      const nowMs = Date.now();
       if (!dc.active) throw new Error("inactive");
-      if (dc.starts_at && dc.starts_at > now) throw new Error("not_started");
-      if (dc.expires_at && dc.expires_at < now) throw new Error("expired");
+      
+      // Porównanie dat jako timestamps
+      const startsMs = dc.starts_at ? new Date(dc.starts_at).getTime() : 0;
+      const expiresMs = dc.expires_at ? new Date(dc.expires_at).getTime() : Infinity;
+      
+      if (dc.starts_at && startsMs > nowMs) throw new Error("not_started");
+      if (dc.expires_at && expiresMs < nowMs) throw new Error("expired");
 
       return {
         id: String(dc.id),
@@ -763,7 +799,7 @@ export async function POST(req: Request) {
 
       if (error || !data || !data.length) return null;
 
-      const nowIso = new Date().toISOString();
+      const nowMs = Date.now();
       let best: { dc: DiscountCode; amount: number } | null = null;
 
       for (const row of data as any[]) {
@@ -785,8 +821,13 @@ export async function POST(req: Request) {
         };
 
         if (!dc.value || dc.value <= 0) continue;
-        if (dc.starts_at && dc.starts_at > nowIso) continue;
-        if (dc.expires_at && dc.expires_at < nowIso) continue;
+        
+        // Porównanie dat jako timestamps (ms)
+        const startsMs = dc.starts_at ? new Date(dc.starts_at).getTime() : 0;
+        const expiresMs = dc.expires_at ? new Date(dc.expires_at).getTime() : Infinity;
+        
+        if (dc.starts_at && startsMs > nowMs) continue;
+        if (dc.expires_at && expiresMs < nowMs) continue;
         if (dc.min_order != null && baseTotal < Number(dc.min_order)) continue;
 
         const { all, byUser, byEmail } = await getUsageCounts(
@@ -888,6 +929,27 @@ if (TURNSTILE_SECRET_KEY) {
 }
 
     const n = normalizeBody(raw, req);
+
+    // Sprawdź czy wybrany typ zamówienia jest włączony
+    const selectedOpt = n.selected_option || "local";
+    if (selectedOpt === "local" && !orderSettings.local_enabled) {
+      return NextResponse.json(
+        { error: "Zamówienia na miejscu są tymczasowo niedostępne." },
+        { status: 503 }
+      );
+    }
+    if (selectedOpt === "takeaway" && !orderSettings.takeaway_enabled) {
+      return NextResponse.json(
+        { error: "Zamówienia na wynos są tymczasowo niedostępne." },
+        { status: 503 }
+      );
+    }
+    if (selectedOpt === "delivery" && !orderSettings.delivery_enabled) {
+      return NextResponse.json(
+        { error: "Dostawa jest tymczasowo niedostępna." },
+        { status: 503 }
+      );
+    }
 
     // wymagamy telefonu (E.164), e-maila oraz pozycji
     const phoneE164 = normalizePhone(n.phone);

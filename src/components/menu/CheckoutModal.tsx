@@ -527,6 +527,19 @@ export default function CheckoutModal() {
   const [packagingCostSetting, setPackagingCostSetting] = useState<number>(2); // domyślnie 2zł, pobierany z bazy
   const [deliveryInfo, setDeliveryInfo] = useState<{ cost: number; eta: string } | null>(null);
 
+  // Ustawienia zamówień (włącz/wyłącz typy zamówień)
+  const [orderSettings, setOrderSettings] = useState<{
+    orders_enabled: boolean;
+    local_enabled: boolean;
+    takeaway_enabled: boolean;
+    delivery_enabled: boolean;
+  }>({
+    orders_enabled: true,
+    local_enabled: true,
+    takeaway_enabled: true,
+    delivery_enabled: true,
+  });
+
   const [legalAccepted, setLegalAccepted] = useState(false);
 
   const [promo, setPromo] = useState<PromoType>(null);
@@ -644,6 +657,21 @@ export default function CheckoutModal() {
           }
         }
       });
+
+    // Pobierz ustawienia zamówień (czy typy zamówień są włączone)
+    fetch("/api/settings/orders")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data && !data.error) {
+          setOrderSettings({
+            orders_enabled: data.orders_enabled ?? true,
+            local_enabled: data.local_enabled ?? true,
+            takeaway_enabled: data.takeaway_enabled ?? true,
+            delivery_enabled: data.delivery_enabled ?? true,
+          });
+        }
+      })
+      .catch(() => {});
   }, []);
 
   /* Mapa cen dodatków z bazy */
@@ -1328,22 +1356,41 @@ export default function CheckoutModal() {
                 {checkoutStep === 2 && (
                   <div className="space-y-6">
                     <h2 className="text-2xl font-bold text-center text-white">Sposób odbioru</h2>
+                    
+                    {/* Komunikat gdy zamówienia są wyłączone */}
+                    {!orderSettings.orders_enabled && (
+                      <div className="bg-red-500/20 border border-red-500/30 text-red-400 px-4 py-3 rounded-xl text-center">
+                        Przyjmowanie zamówień jest tymczasowo wyłączone. Zapraszamy później!
+                      </div>
+                    )}
+
                     <div className="grid grid-cols-3 gap-4">
                       {(["local", "takeaway", "delivery"] as const).map((opt) => {
                         const Icon = opt === "local" ? MapPin : opt === "takeaway" ? ShoppingBag : Truck;
                         const label = opt === "local" ? "Na miejscu" : opt === "takeaway" ? "Na wynos" : "Dostawa";
+                        
+                        // Sprawdź czy opcja jest włączona
+                        const isEnabled = orderSettings.orders_enabled && (
+                          (opt === "local" && orderSettings.local_enabled) ||
+                          (opt === "takeaway" && orderSettings.takeaway_enabled) ||
+                          (opt === "delivery" && orderSettings.delivery_enabled)
+                        );
+                        
                         return (
                           <button
                             key={opt}
-                            onClick={() => setSelectedOption(opt)}
-                            disabled={submitting}
+                            onClick={() => isEnabled && setSelectedOption(opt)}
+                            disabled={submitting || !isEnabled}
                             className={clsx(
-                              "flex flex-col items-center p-4 rounded-xl border transition disabled:opacity-60 disabled:cursor-not-allowed",
-                              selectedOption === opt ? "bg-yellow-400 text-black border-yellow-500" : "bg-white/5 text-white hover:bg-white/10 border-white/10"
+                              "flex flex-col items-center p-4 rounded-xl border transition",
+                              !isEnabled && "opacity-40 cursor-not-allowed",
+                              isEnabled && "disabled:opacity-60 disabled:cursor-not-allowed",
+                              selectedOption === opt && isEnabled ? "bg-yellow-400 text-black border-yellow-500" : isEnabled ? "bg-white/5 text-white hover:bg-white/10 border-white/10" : "bg-white/5 text-white/50 border-white/5"
                             )}
                           >
                             <Icon size={24} />
                             <span className="mt-1 text-sm font-medium">{label}</span>
+                            {!isEnabled && <span className="text-[10px] text-red-400 mt-0.5">Niedostępne</span>}
                           </button>
                         );
                       })}

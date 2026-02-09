@@ -6,7 +6,7 @@ import Image from "next/image";
 import Script from "next/script";
 import ClientWrapper from "@/components/ClientWrapper";
 import ClientProvider from "@/components/ClientProvider";
-import Footer from "@/components/Footer";
+import ConditionalFooter from "@/components/ConditionalFooter";
 import CookieBanner from "@/components/legal/CookieBanner";
 import PromoTickerMount from "@/components/PromoTickerMount";
 
@@ -117,9 +117,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <PromoTickerMount />
           <ClientWrapper>{children}</ClientWrapper>
         </ClientProvider>
-        {/* Footer ukryty na mobile - tam mamy MobilePageWrapper z własnym layoutem */}
+        {/* Footer ukryty na mobile i w panelu admina */}
         <div className="hidden md:block">
-          <Footer />
+          <ConditionalFooter />
         </div>
         <CookieBanner />
       </body>

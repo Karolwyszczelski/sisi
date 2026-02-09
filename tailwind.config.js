@@ -24,6 +24,9 @@ module.exports = {
           light:   '#FFEA7F',   // opcjonalnie jaśniejszy odcień
           dark:    '#CCAC00',   // i ciemniejszy
       },
+      animation: {
+        'spin-slow': 'spin 3s linear infinite',
+      },
     },
   },
   plugins: [],

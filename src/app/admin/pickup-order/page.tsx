@@ -4,7 +4,10 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 import EditOrderButton from "@/components/EditOrderButton";
 import CancelButton from "@/components/CancelButton";
-import PushSubscriptionToggle from "@/components/PushSubscriptionToggle";
+import PushNotificationControl from "@/components/admin/PushNotificationControl";
+import ThemeToggle from "@/components/admin/ThemeToggle";
+import { useTheme } from "@/components/admin/ThemeContext";
+import { Power, Truck, ShoppingBag, MapPin, RefreshCw, ChevronDown, ChevronUp, Settings, Filter, Clock, CalendarDays, Users, Phone, CheckCircle, XCircle, AlertCircle } from "lucide-react";
 
 type Any = Record<string, any>;
 type PaymentMethod = "Gotówka" | "Terminal" | "Online";
@@ -40,10 +43,10 @@ const getOptionLabel = (opt?: Order["selected_option"]) =>
   opt === "delivery" ? "DOSTAWA" : opt === "takeaway" ? "NA WYNOS" : opt === "local" ? "NA MIEJSCU" : "BRAK";
 
 const statusTone = (s: Order["status"]) =>
-  s === "accepted" ? "ring-blue-200 bg-blue-50"
-  : s === "cancelled" ? "ring-rose-200 bg-rose-50"
-  : s === "completed" ? "ring-slate-200 bg-slate-50"
-  : "ring-amber-200 bg-amber-50";
+  s === "accepted" ? "border-blue-500/30 bg-slate-800/80"
+  : s === "cancelled" ? "border-rose-500/30 bg-slate-800/80"
+  : s === "completed" ? "border-slate-600/30 bg-slate-800/60"
+  : "border-amber-500/30 bg-slate-800/80";
 
 const toNumber = (x: any, d = 0) => {
   if (typeof x === "number" && !isNaN(x)) return x;
@@ -52,7 +55,43 @@ const toNumber = (x: any, d = 0) => {
 };
 
 const isValidDateString = (s: any) =>
-  typeof s === "string" && s.trim().length > 0 && !Number.isNaN(Date.parse(s));
+  typeof s === "string" && s.trim().length > 0 && !Number.isNaN(Date.parse(s)) && new Date(s).toString() !== "Invalid Date";
+
+// Bezpieczne formatowanie czasu dostawy klienta
+const formatClientDeliveryTime = (clientDelivery: string | undefined): string => {
+  if (!clientDelivery) return "-";
+  
+  // Próbuj sparsować JSON jeśli to obiekt (np. {"client_delivery_time":"asap","delivery_time":null})
+  let value = clientDelivery;
+  try {
+    const parsed = JSON.parse(clientDelivery);
+    if (parsed && typeof parsed === "object") {
+      value = parsed.client_delivery_time || parsed.clientDelivery || "-";
+    }
+  } catch {
+    // Nie jest JSONem, użyj oryginalnej wartości
+  }
+  
+  if (!value || value === "-") return "-";
+  if (value === "asap" || value.toLowerCase() === "asap") return "Jak najszybciej";
+  
+  // Sprawdź czy to już jest czas w formacie HH:MM
+  if (/^\d{1,2}:\d{2}$/.test(value)) {
+    return value;
+  }
+  
+  // Próbuj sparsować jako datę
+  const date = new Date(value);
+  if (isNaN(date.getTime()) || date.toString() === "Invalid Date") {
+    return "-";
+  }
+  
+  return date.toLocaleTimeString("pl-PL", { 
+    timeZone: APP_TZ, 
+    hour: "2-digit", 
+    minute: "2-digit" 
+  });
+};
 
 
 /* -------------------------------- produkty -------------------------------- */
@@ -355,15 +394,20 @@ const normalizeProduct = (raw: Any) => {
 
 /* ----------------------------------- UI ----------------------------------- */
 
-const Badge: React.FC<{ tone: "amber" | "blue" | "rose" | "slate" | "green" | "yellow"; children: React.ReactNode }> = ({ tone, children }) => {
+const Badge: React.FC<{ tone: "amber" | "blue" | "rose" | "slate" | "green" | "yellow"; children: React.ReactNode; isDark?: boolean }> = ({ tone, children, isDark = true }) => {
   const cls =
-    tone === "amber" ? "bg-amber-100 text-amber-700 ring-amber-200"
-    : tone === "blue" ? "bg-blue-100 text-blue-700 ring-blue-200"
-    : tone === "rose" ? "bg-rose-100 text-rose-700 ring-rose-200"
-    : tone === "green" ? "bg-emerald-100 text-emerald-700 ring-emerald-200"
-    : tone === "yellow" ? "bg-yellow-100 text-yellow-800 ring-yellow-200"
-    : "bg-slate-100 text-slate-700 ring-slate-200";
-  return <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-semibold ring-1 ${cls}`}>{children}</span>;
+    tone === "amber" 
+      ? isDark ? "bg-amber-500/20 text-amber-400 border-amber-500/30" : "bg-amber-100 text-amber-700 border-amber-300"
+    : tone === "blue" 
+      ? isDark ? "bg-blue-500/20 text-blue-400 border-blue-500/30" : "bg-blue-100 text-blue-700 border-blue-300"
+    : tone === "rose" 
+      ? isDark ? "bg-rose-500/20 text-rose-400 border-rose-500/30" : "bg-rose-100 text-rose-700 border-rose-300"
+    : tone === "green" 
+      ? isDark ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" : "bg-emerald-100 text-emerald-700 border-emerald-300"
+    : tone === "yellow" 
+      ? isDark ? "bg-yellow-500/20 text-yellow-400 border-yellow-500/30" : "bg-yellow-100 text-yellow-700 border-yellow-300"
+    : isDark ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" : "bg-emerald-100 text-emerald-700 border-emerald-300";
+  return <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-semibold border ${cls}`}>{children}</span>;
 };
 
 const InlineCountdown: React.FC<{ targetTime: string; onComplete?: () => void }> = ({ targetTime, onComplete }) => {
@@ -379,7 +423,8 @@ const InlineCountdown: React.FC<{ targetTime: string; onComplete?: () => void }>
   const sec = Math.floor(ms / 1000);
   const mm = String(Math.floor(sec / 60)).padStart(2, "0");
   const ss = String(sec % 60).padStart(2, "0");
-  return <span className="rounded-md bg-slate-900 px-2 py-0.5 font-mono text-xs text-white">{mm}:{ss}</span>;
+  const isLow = sec < 120;
+  return <span className={`rounded-lg px-3 py-1 font-mono text-sm font-semibold ${isLow ? 'bg-rose-500/20 text-rose-400' : 'bg-slate-700 text-white'}`}>{mm}:{ss}</span>;
 };
 
 const AcceptButton: React.FC<{
@@ -401,21 +446,21 @@ const AcceptButton: React.FC<{
   return (
     <div className="relative" ref={ref}>
       <button
-        className="h-10 rounded-md bg-emerald-600 px-4 text-sm font-semibold text-white shadow hover:bg-emerald-500"
+        className="h-10 rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white shadow-lg shadow-emerald-900/30 hover:bg-emerald-500 transition-colors"
         onClick={() => setOpen((o) => !o)}
       >
         Akceptuj ({minutes >= 60 ? `${minutes / 60} h` : `${minutes} min`})
       </button>
       {open && (
-        <div className="absolute left-0 top-11 z-10 w-44 overflow-hidden rounded-md border bg-white shadow-lg">
+        <div className="absolute left-0 top-11 z-10 w-44 overflow-hidden rounded-lg border border-slate-700 bg-slate-800 shadow-xl">
           {options.map((m) => (
             <button
               key={m}
               onClick={async () => { setMinutes(m); setOpen(false); await onAccept(m); }}
-              className="flex w-full items-center justify-between px-3 py-2 text-sm hover:bg-slate-50"
+              className="flex w-full items-center justify-between px-3 py-2.5 text-sm text-slate-300 hover:bg-slate-700 transition-colors"
             >
               <span>{m >= 60 ? `${m / 60} h` : `${m} min`}</span>
-              {minutes === m && <span className="text-emerald-600">✓</span>}
+              {minutes === m && <span className="text-emerald-400">✓</span>}
             </button>
           ))}
         </div>
@@ -426,6 +471,7 @@ const AcceptButton: React.FC<{
 
 export default function PickupOrdersPage() {
   const supabase = createClientComponentClient();
+  const { isDark } = useTheme();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
@@ -439,6 +485,149 @@ export default function PickupOrdersPage() {
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
+
+  // Ustawienia dostępności zamówień
+  const [orderSettings, setOrderSettings] = useState({
+    orders_enabled: true,
+    local_enabled: true,
+    takeaway_enabled: true,
+    delivery_enabled: true,
+  });
+  const [settingsLoading, setSettingsLoading] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+
+  // Rezerwacje oczekujące
+  interface PendingReservation {
+    id: string;
+    customer_name: string;
+    customer_phone: string;
+    reservation_date: string;
+    reservation_time: string;
+    party_size: number;
+    number_of_guests?: number;
+    notes?: string;
+    status: string;
+  }
+  const [pendingReservations, setPendingReservations] = useState<PendingReservation[]>([]);
+  const [showReservations, setShowReservations] = useState(true);
+  const [reservationsLoading, setReservationsLoading] = useState(false);
+
+  // Pobierz oczekujące rezerwacje
+  const fetchPendingReservations = useCallback(async () => {
+    setReservationsLoading(true);
+    try {
+      const today = new Date();
+      const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+      
+      const { data, error } = await supabase
+        .from("reservations")
+        .select("*")
+        .eq("status", "pending")
+        .gte("reservation_date", todayStr)
+        .order("reservation_date", { ascending: true })
+        .order("reservation_time", { ascending: true });
+
+      if (!error && data) {
+        setPendingReservations(data as PendingReservation[]);
+      }
+    } catch (e) {
+      console.error("Błąd pobierania rezerwacji:", e);
+    } finally {
+      setReservationsLoading(false);
+    }
+  }, [supabase]);
+
+  // Akceptuj/odrzuć rezerwację - używa API z wysyłką e-maila
+  const handleReservationStatus = async (id: string, newStatus: "confirmed" | "cancelled") => {
+    try {
+      const res = await fetch("/api/reservations/status", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, status: newStatus }),
+      });
+
+      if (res.ok) {
+        setPendingReservations((prev) => prev.filter((r) => r.id !== id));
+      }
+    } catch (error) {
+      console.error("Błąd zmiany statusu rezerwacji:", error);
+    }
+  };
+
+  useEffect(() => {
+    fetchPendingReservations();
+  }, [fetchPendingReservations]);
+
+  // Realtime dla rezerwacji
+  useEffect(() => {
+    const channel = supabase
+      .channel("reservations-pickup")
+      .on("postgres_changes", { event: "*", schema: "public", table: "reservations" }, () => {
+        fetchPendingReservations();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [supabase, fetchPendingReservations]);
+
+  // Pobierz ustawienia zamówień
+  useEffect(() => {
+    const fetchSettings = async () => {
+      try {
+        const res = await fetch("/api/settings/orders");
+        if (res.ok) {
+          const data = await res.json();
+          setOrderSettings(data);
+        }
+      } catch {}
+    };
+    fetchSettings();
+  }, []);
+
+  // Aktualizuj pojedyncze ustawienie
+  const toggleSetting = async (key: keyof typeof orderSettings) => {
+    setSettingsLoading(true);
+    try {
+      const newValue = !orderSettings[key];
+      const res = await fetch("/api/settings/orders", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [key]: newValue }),
+      });
+      if (res.ok) {
+        setOrderSettings((prev) => ({ ...prev, [key]: newValue }));
+      }
+    } catch {} finally {
+      setSettingsLoading(false);
+    }
+  };
+
+  // Helper do klas w zależności od motywu
+  const t = useMemo(() => ({
+    bg: isDark ? "bg-slate-900" : "bg-gray-50",
+    bgCard: isDark ? "bg-slate-800/60" : "bg-white",
+    bgSection: isDark ? "bg-slate-900/50" : "bg-gray-100",
+    bgInput: isDark ? "bg-slate-900" : "bg-white",
+    bgHeader: isDark ? "bg-slate-800/95" : "bg-white/95",
+    border: isDark ? "border-slate-700/50" : "border-gray-200",
+    borderInput: isDark ? "border-slate-700" : "border-gray-300",
+    text: isDark ? "text-white" : "text-gray-900",
+    textMuted: isDark ? "text-slate-400" : "text-gray-600",
+    textSubtle: isDark ? "text-slate-500" : "text-gray-500",
+    textPrice: isDark ? "text-amber-400" : "text-amber-600",
+    cardNew: isDark ? "border-amber-500/30 bg-slate-800/80" : "border-amber-400 bg-amber-50",
+    cardAccepted: isDark ? "border-blue-500/30 bg-slate-800/80" : "border-blue-400 bg-blue-50",
+    cardCancelled: isDark ? "border-rose-500/30 bg-slate-800/80" : "border-rose-400 bg-rose-50",
+    cardCompleted: isDark ? "border-emerald-500/30 bg-slate-800/60" : "border-emerald-400 bg-emerald-50",
+  }), [isDark]);
+
+  const getStatusTone = (s: Order["status"]) =>
+    s === "accepted" ? t.cardAccepted
+    : s === "cancelled" ? t.cardCancelled
+    : s === "completed" ? t.cardCompleted
+    : t.cardNew;
 
   // audio
   const newOrderAudio = useRef<HTMLAudioElement | null>(null);
@@ -667,12 +856,12 @@ useEffect(() => {
 
   const paymentBadge = (o: Order) => {
     if (o.payment_method === "Online") {
-      if (o.payment_status === "paid")   return <Badge tone="green">OPŁACONE ONLINE</Badge>;
-      if (o.payment_status === "failed") return <Badge tone="rose">ONLINE – BŁĄD</Badge>;
-      return <Badge tone="yellow">ONLINE – OCZEKUJE</Badge>;
+      if (o.payment_status === "paid")   return <Badge tone="green" isDark={isDark}>OPŁACONE ONLINE</Badge>;
+      if (o.payment_status === "failed") return <Badge tone="rose" isDark={isDark}>ONLINE – BŁĄD</Badge>;
+      return <Badge tone="yellow" isDark={isDark}>ONLINE – OCZEKUJE</Badge>;
     }
-    if (o.payment_method === "Terminal") return <Badge tone="blue">TERMINAL</Badge>;
-    return <Badge tone="amber">GOTÓWKA</Badge>;
+    if (o.payment_method === "Terminal") return <Badge tone="blue" isDark={isDark}>TERMINAL</Badge>;
+    return <Badge tone="amber" isDark={isDark}>GOTÓWKA</Badge>;
   };
 
   const setPaymentMethod = async (o: Order, method: PaymentMethod) => {
@@ -713,24 +902,24 @@ useEffect(() => {
         ? `Dodatki: ${p.addonsDetailed.map((a) => `${a.name} ×${a.qty}`).join(", ")}`
         : "";
     return (
-      <div className="rounded-md border bg-white p-3 shadow-sm">
+      <div className={`rounded-lg border p-4 ${isDark ? "border-slate-700/50 bg-slate-900/60" : "border-gray-200 bg-gray-50"}`}>
         <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="truncate text-sm font-semibold">{p.name}</div>
-            <div className="mt-0.5 text-[12px] text-slate-600">Ilość: <b>{p.quantity}</b></div>
-            {attrsLine && <div className="mt-0.5 text-[12px] text-slate-600">{attrsLine}</div>}
-            {addonsLine && <div className="mt-0.5 text-[12px] text-slate-600">{addonsLine}</div>}
+          <div className="min-w-0 flex-1">
+            <div className={`text-sm font-semibold ${t.text}`}>{p.name}</div>
+            <div className={`mt-1 text-xs ${t.textMuted}`}>Ilość: <span className={`font-medium ${isDark ? "text-slate-300" : "text-gray-700"}`}>{p.quantity}</span></div>
+            {attrsLine && <div className={`mt-1 text-xs ${t.textMuted}`}>{attrsLine}</div>}
+            {addonsLine && <div className={`mt-1 text-xs ${t.textMuted}`}>{addonsLine}</div>}
             {p.ingredients.length > 0 && (
-              <div className="mt-0.5 text-[12px] text-slate-600">Skład: {p.ingredients.join(", ")}</div>
+              <div className={`mt-1 text-xs ${t.textSubtle}`}>Skład: {p.ingredients.join(", ")}</div>
             )}
-            {p.note && <div className="mt-0.5 text-[12px] italic text-slate-700">Notatka: {p.note}</div>}
+            {p.note && <div className="mt-2 text-xs italic text-amber-500">Notatka: {p.note}</div>}
             {onDetails && (
-              <button onClick={() => onDetails(p)} className="mt-2 text-xs font-medium text-blue-700 underline">
+              <button onClick={() => onDetails(p)} className="mt-2 text-xs font-medium text-blue-500 hover:text-blue-400 transition-colors">
                 Szczegóły
               </button>
             )}
           </div>
-          <div className="whitespace-nowrap text-sm font-semibold text-amber-700">{p.price.toFixed(2)} zł</div>
+          <div className={`whitespace-nowrap text-sm font-semibold ${t.textPrice}`}>{p.price.toFixed(2)} zł</div>
         </div>
       </div>
     );
@@ -740,42 +929,44 @@ useEffect(() => {
     const p = normalizeProduct(product);
     const title = p.quantity > 1 ? `${p.name} x${p.quantity}` : p.name;
     return (
-      <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-4 sm:items-center">
-        <div className="w-full max-w-lg rounded-md border bg-white p-5 shadow-2xl">
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-lg font-bold">{title}</h2>
-            <button onClick={onClose} className="rounded-md border px-3 py-1 text-sm hover:bg-slate-50">Zamknij</button>
+      <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/80 backdrop-blur-sm p-4 sm:items-center" onClick={onClose}>
+        <div className={`w-full max-w-lg rounded-xl border p-6 shadow-2xl ${isDark ? "border-slate-700 bg-slate-800" : "border-gray-200 bg-white"}`} onClick={(e) => e.stopPropagation()}>
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className={`text-lg font-semibold ${t.text}`}>{title}</h2>
+            <button onClick={onClose} className={`h-8 w-8 flex items-center justify-center rounded-lg transition-colors ${isDark ? "hover:bg-slate-700" : "hover:bg-gray-100"}`}>
+              <span className={`text-xl ${t.textMuted}`}>&times;</span>
+            </button>
           </div>
-          <div className="space-y-2 text-sm">
-            <div><b>Cena:</b> {p.price.toFixed(2)} zł</div>
+          <div className="space-y-3 text-sm">
+            <div className="flex justify-between"><span className={t.textMuted}>Cena:</span><span className={`font-semibold ${t.textPrice}`}>{p.price.toFixed(2)} zł</span></div>
             {p.attributes?.length > 0 && (
               <div>
-                <b>Warianty:</b>
-                <ul className="ml-5 list-disc">
+                <span className={t.textMuted}>Warianty:</span>
+                <ul className={`ml-5 mt-1 list-disc ${isDark ? "text-slate-300" : "text-gray-700"}`}>
                   {p.attributes.map((a: Attribute, i: number) => (
-                    <li key={i}>{a.key}: {a.value}</li>
+                    <li key={i}>{a.key}: <span className={t.text}>{a.value}</span></li>
                   ))}
                 </ul>
               </div>
             )}
-            {p.description && <div><b>Opis:</b> {p.description}</div>}
+            {p.description && <div><span className={t.textMuted}>Opis:</span> <span className={isDark ? "text-slate-300" : "text-gray-700"}>{p.description}</span></div>}
             {p.ingredients.length > 0 && (
               <div>
-                <b>Składniki:</b>
-                <ul className="ml-5 list-disc">{p.ingredients.map((x: string, i: number) => <li key={i}>{x}</li>)}</ul>
+                <span className={t.textMuted}>Składniki:</span>
+                <ul className={`ml-5 mt-1 list-disc ${isDark ? "text-slate-300" : "text-gray-700"}`}>{p.ingredients.map((x: string, i: number) => <li key={i}>{x}</li>)}</ul>
               </div>
             )}
             {p.addonsDetailed.length > 0 && (
               <div>
-                <b>Dodatki:</b>
-                <ul className="ml-5 list-disc">
+                <span className={t.textMuted}>Dodatki:</span>
+                <ul className={`ml-5 mt-1 list-disc ${isDark ? "text-slate-300" : "text-gray-700"}`}>
                   {p.addonsDetailed.map((a, i) => (
-                    <li key={i}>{a.name} ×{a.qty}</li>
+                    <li key={i}>{a.name} <span className={t.textSubtle}>×{a.qty}</span></li>
                   ))}
                 </ul>
               </div>
             )}
-            {p.note && <div className="italic text-slate-700">Notatka: {p.note}</div>}
+            {p.note && <div className="mt-2 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-500 italic">Notatka: {p.note}</div>}
           </div>
         </div>
       </div>
@@ -783,77 +974,78 @@ useEffect(() => {
   };
 
   const ProductList = ({ list, title }: { list: Order[]; title: string }) => (
-    <section className="space-y-3">
-      <h2 className="text-xl font-semibold">{title}</h2>
-      {loading && list === newList && <p className="text-center text-slate-500">Ładowanie…</p>}
+    <section className="space-y-4">
+      <h2 className={`text-xl font-semibold ${t.text}`}>{title}</h2>
+      {loading && list === newList && <p className={`text-center ${t.textSubtle}`}>Ładowanie…</p>}
       {list.length === 0 ? (
-        <p className="text-center text-slate-500">Brak pozycji.</p>
+        <p className={`text-center ${t.textSubtle}`}>Brak pozycji.</p>
       ) : (
         <div className="grid grid-cols-1 gap-4">
           {list.map((o) => {
             const prods = parseProducts(o.items);
             return (
-              <article key={o.id} className={`rounded-md border p-4 shadow-sm ring-1 ${statusTone(o.status)}`}>
-                <header className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="space-y-1">
+              <article key={o.id} className={`rounded-xl border-2 p-5 ${getStatusTone(o.status)}`}>
+                <header className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="space-y-2">
                     <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="text-lg font-bold tracking-tight">{getOptionLabel(o.selected_option)}</h3>
-                      <Badge tone={o.status === "accepted" ? "blue" : o.status === "cancelled" ? "rose" : o.status === "completed" ? "slate" : "amber"}>
+                      <h3 className={`text-lg font-bold tracking-tight ${t.text}`}>{getOptionLabel(o.selected_option)}</h3>
+                      <Badge tone={o.status === "accepted" ? "blue" : o.status === "cancelled" ? "rose" : o.status === "completed" ? "green" : "amber"} isDark={isDark}>
                         {o.status.toUpperCase()}
                       </Badge>
                       {paymentBadge(o)}
                       {toNumber(o.discount_amount) > 0 && (
-                        <Badge tone="green">RABAT{o.promo_code ? `: ${o.promo_code}` : ""}</Badge>
+                        <Badge tone="green" isDark={isDark}>RABAT{o.promo_code ? `: ${o.promo_code}` : ""}</Badge>
                       )}
                     </div>
-                    <div className="text-sm text-slate-700">
-                      <b>Klient:</b> {o.name || "—"}
-                      <span className="ml-3">
-                        <b>Czas (klient):</b>{" "}
-{o.clientDelivery === "asap"
-  ? "Jak najszybciej"
-  : o.clientDelivery
-    ? new Date(o.clientDelivery).toLocaleTimeString("pl-PL", { timeZone: APP_TZ, hour: "2-digit", minute: "2-digit" })
-    : "-"}
-                      </span>
+                    <div className={`text-sm ${t.textMuted}`}>
+                      <span className={t.textSubtle}>Klient:</span> <span className={isDark ? "text-slate-300" : "text-gray-700"}>{o.name || "—"}</span>
+                      <span className={isDark ? "mx-3 text-slate-700" : "mx-3 text-gray-300"}>|</span>
+                      <span className={t.textSubtle}>Czas:</span>{" "}
+                      <span className={isDark ? "text-slate-300" : "text-gray-700"}>{formatClientDeliveryTime(o.clientDelivery)}</span>
                     </div>
                   </div>
                   <div className="flex items-center gap-3 text-sm">
 {o.status === "accepted" && isValidDateString(o.delivery_time) && (
   <InlineCountdown targetTime={o.delivery_time!} onComplete={() => completeOrder(o.id)} />
-)}<span className="text-slate-600">
+)}<span className={t.textSubtle}>
   {new Date(o.created_at).toLocaleString("pl-PL", { timeZone: APP_TZ })}
 </span>
                   </div>
                 </header>
 
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                  <div className="space-y-1 text-sm">
-                    <div><b>Kwota:</b> {o.total_price.toFixed(2)} zł</div>
-                    {toNumber(o.discount_amount) > 0 && (
-                      <div>
-                       <b>Rabat:</b> -{toNumber(o.discount_amount).toFixed(2)} zł
-                       {o.promo_code ? <span className="ml-1 text-xs text-emerald-700">(kod: {o.promo_code})</span> : null}
-                      </div>
-                    )}
-                    {o.selected_option === "delivery" && typeof o.delivery_cost === "number" && <div><b>Dostawa:</b> {o.delivery_cost.toFixed(2)} zł</div>}
-                    {o.selected_option === "delivery" && o.address && <div><b>Adres:</b> {o.address}</div>}
-                    {o.phone && <div><b>Telefon:</b> {o.phone}</div>}
+                <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+                  <div className="space-y-2 text-sm">
+                    <div className={`rounded-lg p-4 space-y-2 ${t.bgSection}`}>
+                      <div className="flex justify-between"><span className={t.textSubtle}>Kwota:</span><span className={`font-semibold ${t.text}`}>{o.total_price.toFixed(2)} zł</span></div>
+                      {toNumber(o.discount_amount) > 0 && (
+                        <div className="flex justify-between">
+                          <span className={t.textSubtle}>Rabat:</span>
+                          <span className="font-medium text-emerald-500">-{toNumber(o.discount_amount).toFixed(2)} zł
+                            {o.promo_code ? <span className="ml-1 text-xs text-emerald-500/70">({o.promo_code})</span> : null}
+                          </span>
+                        </div>
+                      )}
+                      {o.selected_option === "delivery" && typeof o.delivery_cost === "number" && (
+                        <div className="flex justify-between"><span className={t.textSubtle}>Dostawa:</span><span className={t.textMuted}>{o.delivery_cost.toFixed(2)} zł</span></div>
+                      )}
+                      {o.selected_option === "delivery" && o.address && (
+                        <div className={`pt-2 border-t ${t.border}`}><span className={t.textSubtle}>Adres:</span><div className={`mt-1 ${t.textMuted}`}>{o.address}</div></div>
+                      )}
+                      {o.phone && <div className="flex justify-between"><span className={t.textSubtle}>Telefon:</span><span className={`font-mono ${t.textMuted}`}>{o.phone}</span></div>}
+                    </div>
                     {o.order_note && o.order_note.trim() && (
-                      <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-[12px] text-amber-900">
-                        <b>Notatka do zamówienia:</b>{" "}
-                        <span className="whitespace-pre-wrap break-words">
-                          {o.order_note.trim()}
-                        </span>
+                      <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-500">
+                        <span className="font-semibold">Notatka:</span>{" "}
+                        <span className="whitespace-pre-wrap break-words">{o.order_note.trim()}</span>
                       </div>
                     )}
-                    <div className="mt-1">
-                      <b>Płatność:</b>{" "}
-                      <span className="inline-flex items-center gap-2">
+                    <div className={`rounded-lg p-4 ${t.bgSection}`}>
+                      <div className={`text-xs mb-2 ${t.textSubtle}`}>Płatność</div>
+                      <div className="flex flex-wrap items-center gap-2">
                         <select
                           value={o.payment_method || "Gotówka"}
                           onChange={(e) => setPaymentMethod(o, e.target.value as PaymentMethod)}
-                          className="h-8 rounded border px-2 text-xs"
+                          className={`h-9 rounded-lg border px-3 text-sm focus:outline-none ${isDark ? "border-slate-700 bg-slate-800 text-slate-300 focus:border-slate-600" : "border-gray-300 bg-white text-gray-700"}`}
                           disabled={editingOrderId === o.id}
                         >
                           <option>Gotówka</option>
@@ -863,12 +1055,10 @@ useEffect(() => {
 
                         {o.payment_method === "Online" && (
                           <>
-                            <span className="ml-1">{paymentBadge(o)}</span>
-                             {o.order_note && o.order_note.trim() && <Badge tone="yellow">NOTATKA</Badge>}
                             {o.payment_status === "pending" && (
                               <button
                                 onClick={() => refreshPaymentStatus(o.id)}
-                                className="h-8 rounded bg-sky-600 px-2 text-xs font-semibold text-white hover:bg-sky-500"
+                                className="h-9 rounded-lg bg-blue-600 px-3 text-xs font-semibold text-white hover:bg-blue-500 transition-colors"
                                 disabled={editingOrderId === o.id}
                               >
                                 Odśwież status
@@ -876,27 +1066,25 @@ useEffect(() => {
                             )}
                           </>
                         )}
-
-                        {o.payment_method !== "Online" && <span className="ml-1">{paymentBadge(o)}</span>}
-                      </span>
+                      </div>
                     </div>
                   </div>
 
-                  <div className="sm:col-span-2">
-                    <div className="mb-1 text-sm font-semibold">Produkty</div>
+                  <div className="lg:col-span-2">
+                    <div className={`mb-3 text-sm font-semibold ${t.textMuted}`}>Produkty</div>
                     {prods.length === 0 ? (
-                      <div className="rounded-md border bg-white p-3 text-sm text-slate-500">brak</div>
+                      <div className={`rounded-lg border p-4 text-sm ${isDark ? "border-slate-700/50 bg-slate-900/40 text-slate-600" : "border-gray-200 bg-gray-50 text-gray-500"}`}>brak</div>
                     ) : (
-                      <ul className="space-y-2">
+                      <div className="space-y-2">
                         {prods.map((p: any, i: number) => (
-                          <li key={i}><ProductItem raw={p} onDetails={(np) => setSelectedProduct(np)} /></li>
+                          <ProductItem key={i} raw={p} onDetails={(np) => setSelectedProduct(np)} />
                         ))}
-                      </ul>
+                      </div>
                     )}
                   </div>
                 </div>
 
-                <footer className="mt-4 flex flex-wrap items-center gap-2">
+                <footer className="mt-5 flex flex-wrap items-center gap-2">
                   {(o.status === "new" || o.status === "pending" || o.status === "placed") && (
                     <>
                       <AcceptButton order={o} onAccept={(m) => acceptAndSetTime(o, m)} />
@@ -915,15 +1103,17 @@ useEffect(() => {
                   {o.status === "accepted" && (
                     <>
                       <CancelButton orderId={o.id} onOrderUpdated={() => fetchOrders()} />
-                      {[15, 30, 45, 60].map((m) => (
-                        <button
-                          key={m}
-                          onClick={() => extendTime(o, m)}
-                          className="h-10 rounded-md bg-emerald-600 px-4 text-sm font-semibold text-white hover:bg-emerald-500"
-                        >
-                          +{m >= 60 ? `${m / 60} h` : `${m} min`}
-                        </button>
-                      ))}
+                      <div className="flex flex-wrap gap-2">
+                        {[15, 30, 45, 60].map((m) => (
+                          <button
+                            key={m}
+                            onClick={() => extendTime(o, m)}
+                            className={`h-10 rounded-lg px-4 text-sm font-medium transition-colors ${isDark ? "bg-slate-700 text-slate-300 hover:bg-slate-600" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
+                          >
+                            +{m >= 60 ? `${m / 60} h` : `${m} min`}
+                          </button>
+                        ))}
+                      </div>
                       <EditOrderButton
                         orderId={o.id}
                         currentProducts={parseProducts(o.items).map(normalizeProduct)}
@@ -934,7 +1124,7 @@ useEffect(() => {
                       />
                       <button
                         onClick={() => completeOrder(o.id)}
-                        className="h-10 rounded-md bg-sky-600 px-4 text-sm font-semibold text-white hover:bg-sky-500"
+                        className="h-10 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-500 transition-colors"
                       >
                         Zrealizowany
                       </button>
@@ -944,7 +1134,7 @@ useEffect(() => {
                   {o.status === "cancelled" && (
                     <button
                       onClick={() => restoreOrder(o.id)}
-                      className="h-10 rounded-md bg-sky-600 px-4 text-sm font-semibold text-white hover:bg-sky-500"
+                      className={`h-10 rounded-lg px-4 text-sm font-semibold transition-colors ${isDark ? "bg-slate-700 text-slate-300 hover:bg-slate-600" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
                     >
                       Przywróć
                     </button>
@@ -959,38 +1149,372 @@ useEffect(() => {
   );
 
   return (
-    <div className="mx-auto max-w-6xl p-4 sm:p-6">
-      <div className="sticky top-0 z-20 -mx-4 mb-5 bg-white/85 p-4 backdrop-blur sm:mx-0 sm:rounded-md sm:border">
-        <div className="flex flex-wrap items-center gap-2">
-          <select className="h-10 rounded-md border px-3 text-sm" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value as any)}>
-            <option value="all">Wszystkie statusy</option>
-            <option value="new">Nowe</option>
-            <option value="placed">Złożone</option>
-            <option value="accepted">W trakcie</option>
-            <option value="cancelled">Anulowane</option>
-            <option value="completed">Zrealizowane</option>
-          </select>
-          <select className="h-10 rounded-md border px-3 text-sm" value={filterOption} onChange={(e) => setFilterOption(e.target.value as any)}>
-            <option value="all">Wszystkie opcje</option>
-            <option value="local">Na miejscu</option>
-            <option value="takeaway">Na wynos</option>
-            <option value="delivery">Dostawa</option>
-          </select>
-          <button className="h-10 rounded-md border px-3 text-sm" onClick={() => setSortOrder((o) => (o === "desc" ? "asc" : "desc"))}>
-            {sortOrder === "desc" ? "Najnowsze" : "Najstarsze"}
-          </button>
-          <div className="ml-auto flex items-center gap-2">
-  <PushSubscriptionToggle />
-  <button
-    className="h-10 rounded-md bg-emerald-600 px-4 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
-    onClick={() => fetchOrders()}
-    disabled={loading}
-  >
-    Odśwież
-  </button>
-</div>
+    <div className={`min-h-screen ${t.bg} p-2 sm:p-4 lg:p-6`}>
+      <div className="mx-auto max-w-6xl">
+        {/* Górny pasek sterowania */}
+        <div className={`mb-4 sm:mb-6`}>
+          <div className={`rounded-2xl border ${t.border} ${isDark ? "bg-slate-800/80" : "bg-white"} shadow-xl ${isDark ? "shadow-black/20" : "shadow-gray-200/50"}`}>
+            
+            {/* Główny wiersz */}
+            <div className="p-3 sm:p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                
+                {/* Lewa strona - Tytuł i liczniki */}
+                <div className="flex items-center gap-3">
+                  <div className={`relative w-12 h-12 rounded-2xl flex items-center justify-center ${
+                    orderSettings.orders_enabled 
+                      ? isDark ? "bg-gradient-to-br from-emerald-500/30 to-emerald-600/10" : "bg-gradient-to-br from-emerald-100 to-emerald-50"
+                      : isDark ? "bg-gradient-to-br from-rose-500/30 to-rose-600/10" : "bg-gradient-to-br from-rose-100 to-rose-50"
+                  }`}>
+                    <ShoppingBag className={`w-6 h-6 ${
+                      orderSettings.orders_enabled 
+                        ? isDark ? "text-emerald-400" : "text-emerald-600"
+                        : isDark ? "text-rose-400" : "text-rose-600"
+                    }`} />
+                    {newList.length > 0 && (
+                      <span className="absolute -top-1 -right-1 w-5 h-5 bg-amber-500 text-white text-xs font-bold rounded-full flex items-center justify-center animate-pulse">
+                        {newList.length}
+                      </span>
+                    )}
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h1 className={`text-xl font-bold ${t.text}`}>Zamówienia</h1>
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
+                        orderSettings.orders_enabled 
+                          ? isDark ? "bg-emerald-500/20 text-emerald-400" : "bg-emerald-100 text-emerald-700"
+                          : isDark ? "bg-rose-500/20 text-rose-400" : "bg-rose-100 text-rose-700"
+                      }`}>
+                        {orderSettings.orders_enabled ? "ONLINE" : "OFFLINE"}
+                      </span>
+                    </div>
+                    <div className={`flex items-center gap-3 text-xs ${t.textMuted} mt-0.5`}>
+                      <span className="flex items-center gap-1">
+                        <span className="w-2 h-2 rounded-full bg-amber-500" />
+                        {newList.length} nowych
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <span className="w-2 h-2 rounded-full bg-blue-500" />
+                        {currList.length} w trakcie
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Prawa strona - Akcje */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <ThemeToggle />
+                  <PushNotificationControl compact isDark={isDark} />
+                  
+                  <button
+                    onClick={() => setShowSettings(!showSettings)}
+                    className={`h-10 w-10 rounded-xl flex items-center justify-center transition-all ${
+                      showSettings
+                        ? isDark ? "bg-slate-700 text-white" : "bg-gray-200 text-gray-900"
+                        : !orderSettings.orders_enabled 
+                          ? "bg-rose-500/20 text-rose-400" 
+                          : isDark 
+                            ? "bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-slate-300" 
+                            : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                    }`}
+                    title="Ustawienia zamówień"
+                  >
+                    <Settings className={`w-5 h-5 ${showSettings ? "animate-spin-slow" : ""}`} />
+                  </button>
+                  
+                  <button
+                    className={`h-10 px-4 rounded-xl flex items-center gap-2 text-sm font-semibold transition-all ${
+                      loading 
+                        ? "bg-emerald-700 text-emerald-200" 
+                        : "bg-emerald-600 text-white hover:bg-emerald-500 shadow-lg shadow-emerald-600/20"
+                    }`}
+                    onClick={() => fetchOrders()}
+                    disabled={loading}
+                  >
+                    <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+                    <span className="hidden sm:inline">{loading ? "Ładowanie..." : "Odśwież"}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Filtry - drugi wiersz */}
+              <div className={`flex flex-wrap items-center gap-2 mt-3 pt-3 border-t ${t.border}`}>
+                <Filter className={`w-4 h-4 ${t.textMuted} hidden sm:block`} />
+                
+                <select 
+                  className={`h-9 px-3 rounded-xl text-sm border ${t.borderInput} ${t.bgInput} ${isDark ? "text-slate-300" : "text-gray-700"} focus:outline-none cursor-pointer`}
+                  value={filterStatus} 
+                  onChange={(e) => setFilterStatus(e.target.value as any)}
+                >
+                  <option value="all">Wszystkie statusy</option>
+                  <option value="new">🆕 Nowe</option>
+                  <option value="placed">📝 Złożone</option>
+                  <option value="accepted">⏳ W trakcie</option>
+                  <option value="cancelled">❌ Anulowane</option>
+                  <option value="completed">✅ Zrealizowane</option>
+                </select>
+                
+                <select 
+                  className={`h-9 px-3 rounded-xl text-sm border ${t.borderInput} ${t.bgInput} ${isDark ? "text-slate-300" : "text-gray-700"} focus:outline-none cursor-pointer`}
+                  value={filterOption} 
+                  onChange={(e) => setFilterOption(e.target.value as any)}
+                >
+                  <option value="all">Wszystkie typy</option>
+                  <option value="local">🪑 Na miejscu</option>
+                  <option value="takeaway">🥡 Na wynos</option>
+                  <option value="delivery">🚗 Dostawa</option>
+                </select>
+                
+                <button 
+                  className={`h-9 px-3 rounded-xl text-sm font-medium transition-colors flex items-center gap-1.5 border ${t.borderInput} ${isDark ? "bg-slate-800 text-slate-300 hover:bg-slate-700" : "bg-gray-50 text-gray-700 hover:bg-gray-100"}`}
+                  onClick={() => setSortOrder((o) => (o === "desc" ? "asc" : "desc"))}
+                >
+                  <Clock className="w-4 h-4" />
+                  {sortOrder === "desc" ? "Najnowsze" : "Najstarsze"}
+                </button>
+              </div>
+            </div>
+
+            {/* Panel kontroli zamówień (rozwijany) */}
+            {showSettings && (
+              <div className={`border-t ${t.border} p-4 ${isDark ? "bg-slate-800/50" : "bg-gray-50/80"}`}>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  {/* Główny wyłącznik */}
+                  <div className={`p-4 rounded-xl ${isDark ? "bg-slate-900/50" : "bg-white"} border ${t.border}`}>
+                    <div className="flex items-center justify-between mb-3">
+                      <span className={`text-sm font-medium ${t.text}`}>Przyjmowanie zamówień</span>
+                      <button
+                        onClick={() => toggleSetting("orders_enabled")}
+                        disabled={settingsLoading}
+                        className={`relative w-14 h-8 rounded-full transition-all disabled:opacity-50 ${
+                          orderSettings.orders_enabled
+                            ? "bg-emerald-500"
+                            : isDark ? "bg-slate-700" : "bg-gray-300"
+                        }`}
+                      >
+                        <span className={`absolute top-1 w-6 h-6 rounded-full bg-white shadow-md transition-all ${
+                          orderSettings.orders_enabled ? "left-7" : "left-1"
+                        }`} />
+                      </button>
+                    </div>
+                    <p className={`text-xs ${t.textMuted}`}>
+                      {orderSettings.orders_enabled 
+                        ? "Klienci mogą składać zamówienia" 
+                        : "Zamówienia są wstrzymane"}
+                    </p>
+                  </div>
+
+                  {/* Typy zamówień */}
+                  <div className={`p-4 rounded-xl ${isDark ? "bg-slate-900/50" : "bg-white"} border ${t.border}`}>
+                    <span className={`text-sm font-medium ${t.text} block mb-3`}>Dostępne opcje</span>
+                    <div className="space-y-3">
+                      {/* Na miejscu */}
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                            orderSettings.local_enabled && orderSettings.orders_enabled
+                              ? isDark ? "bg-blue-500/20 text-blue-400" : "bg-blue-100 text-blue-600"
+                              : isDark ? "bg-slate-800 text-slate-500" : "bg-gray-100 text-gray-400"
+                          }`}>
+                            <MapPin className="w-4 h-4" />
+                          </div>
+                          <span className={`text-sm ${t.text}`}>Na miejscu</span>
+                        </div>
+                        <button
+                          onClick={() => toggleSetting("local_enabled")}
+                          disabled={settingsLoading || !orderSettings.orders_enabled}
+                          className={`relative w-12 h-7 rounded-full transition-all disabled:opacity-40 ${
+                            orderSettings.local_enabled && orderSettings.orders_enabled
+                              ? "bg-blue-500"
+                              : isDark ? "bg-slate-700" : "bg-gray-300"
+                          }`}
+                        >
+                          <span className={`absolute top-1 w-5 h-5 rounded-full bg-white shadow-md transition-all ${
+                            orderSettings.local_enabled && orderSettings.orders_enabled ? "left-6" : "left-1"
+                          }`} />
+                        </button>
+                      </div>
+
+                      {/* Na wynos */}
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                            orderSettings.takeaway_enabled && orderSettings.orders_enabled
+                              ? isDark ? "bg-amber-500/20 text-amber-400" : "bg-amber-100 text-amber-600"
+                              : isDark ? "bg-slate-800 text-slate-500" : "bg-gray-100 text-gray-400"
+                          }`}>
+                            <ShoppingBag className="w-4 h-4" />
+                          </div>
+                          <span className={`text-sm ${t.text}`}>Na wynos</span>
+                        </div>
+                        <button
+                          onClick={() => toggleSetting("takeaway_enabled")}
+                          disabled={settingsLoading || !orderSettings.orders_enabled}
+                          className={`relative w-12 h-7 rounded-full transition-all disabled:opacity-40 ${
+                            orderSettings.takeaway_enabled && orderSettings.orders_enabled
+                              ? "bg-amber-500"
+                              : isDark ? "bg-slate-700" : "bg-gray-300"
+                          }`}
+                        >
+                          <span className={`absolute top-1 w-5 h-5 rounded-full bg-white shadow-md transition-all ${
+                            orderSettings.takeaway_enabled && orderSettings.orders_enabled ? "left-6" : "left-1"
+                          }`} />
+                        </button>
+                      </div>
+
+                      {/* Dostawa */}
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                            orderSettings.delivery_enabled && orderSettings.orders_enabled
+                              ? isDark ? "bg-purple-500/20 text-purple-400" : "bg-purple-100 text-purple-600"
+                              : isDark ? "bg-slate-800 text-slate-500" : "bg-gray-100 text-gray-400"
+                          }`}>
+                            <Truck className="w-4 h-4" />
+                          </div>
+                          <span className={`text-sm ${t.text}`}>Dostawa</span>
+                        </div>
+                        <button
+                          onClick={() => toggleSetting("delivery_enabled")}
+                          disabled={settingsLoading || !orderSettings.orders_enabled}
+                          className={`relative w-12 h-7 rounded-full transition-all disabled:opacity-40 ${
+                            orderSettings.delivery_enabled && orderSettings.orders_enabled
+                              ? "bg-purple-500"
+                              : isDark ? "bg-slate-700" : "bg-gray-300"
+                          }`}
+                        >
+                          <span className={`absolute top-1 w-5 h-5 rounded-full bg-white shadow-md transition-all ${
+                            orderSettings.delivery_enabled && orderSettings.orders_enabled ? "left-6" : "left-1"
+                          }`} />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Alert gdy wyłączone */}
+                {!orderSettings.orders_enabled && (
+                  <div className="mt-4 p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-rose-500/20 flex items-center justify-center shrink-0">
+                      <Power className="w-5 h-5 text-rose-400" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-rose-400">System zamówień jest wyłączony</p>
+                      <p className="text-xs text-rose-400/70">Klienci widzą komunikat o tymczasowym wstrzymaniu zamówień</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+
+        {/* Panel oczekujących rezerwacji */}
+        {pendingReservations.length > 0 && (
+          <div className={`mb-4 sm:mb-6 rounded-2xl border ${t.border} ${isDark ? "bg-amber-500/5" : "bg-amber-50/50"} overflow-hidden`}>
+            <button
+              onClick={() => setShowReservations(!showReservations)}
+              className={`w-full flex items-center justify-between p-4 transition ${isDark ? "hover:bg-amber-500/10" : "hover:bg-amber-100/50"}`}
+            >
+              <div className="flex items-center gap-3">
+                <div className={`p-2 rounded-xl ${isDark ? "bg-amber-500/20" : "bg-amber-100"}`}>
+                  <CalendarDays className={`w-5 h-5 ${isDark ? "text-amber-400" : "text-amber-600"}`} />
+                </div>
+                <div className="text-left">
+                  <div className="flex items-center gap-2">
+                    <span className={`font-semibold ${t.text}`}>Oczekujące rezerwacje</span>
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${isDark ? "bg-amber-500/20 text-amber-400" : "bg-amber-200 text-amber-700"}`}>
+                      {pendingReservations.length}
+                    </span>
+                  </div>
+                  <p className={`text-xs ${t.textMuted}`}>
+                    {pendingReservations.length === 1 
+                      ? "1 rezerwacja czeka na akceptację" 
+                      : `${pendingReservations.length} rezerwacji czeka na akceptację`}
+                  </p>
+                </div>
+              </div>
+              {showReservations ? (
+                <ChevronUp className={`w-5 h-5 ${t.textMuted}`} />
+              ) : (
+                <ChevronDown className={`w-5 h-5 ${t.textMuted}`} />
+              )}
+            </button>
+
+            {showReservations && (
+              <div className={`border-t ${t.border} p-4 space-y-3`}>
+                {pendingReservations.map((r) => {
+                  const dateObj = new Date(`${r.reservation_date}T${r.reservation_time}`);
+                  const isToday = r.reservation_date === new Date().toISOString().slice(0, 10);
+                  const dateLabel = isToday 
+                    ? "Dzisiaj" 
+                    : dateObj.toLocaleDateString("pl-PL", { weekday: "short", day: "numeric", month: "short" });
+                  const timeLabel = r.reservation_time?.slice(0, 5) || "–";
+                  const guestCount = r.party_size || r.number_of_guests || 1;
+
+                  return (
+                    <div
+                      key={r.id}
+                      className={`flex flex-col sm:flex-row sm:items-center gap-3 p-4 rounded-xl border ${
+                        isDark 
+                          ? "border-amber-500/20 bg-slate-800/60" 
+                          : "border-amber-200 bg-white"
+                      }`}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className={`font-semibold ${t.text}`}>{r.customer_name}</span>
+                          <span className={`px-2 py-0.5 rounded-md text-xs font-medium flex items-center gap-1 ${
+                            isDark ? "bg-amber-500/20 text-amber-400" : "bg-amber-100 text-amber-700"
+                          }`}>
+                            <AlertCircle className="w-3 h-3" />
+                            Oczekuje
+                          </span>
+                        </div>
+                        <div className={`flex flex-wrap items-center gap-x-4 gap-y-1 mt-1.5 text-sm ${t.textMuted}`}>
+                          <span className="flex items-center gap-1.5">
+                            <CalendarDays className="w-4 h-4" />
+                            {dateLabel}, {timeLabel}
+                          </span>
+                          <span className="flex items-center gap-1.5">
+                            <Users className="w-4 h-4" />
+                            {guestCount} os.
+                          </span>
+                          <a href={`tel:${r.customer_phone}`} className="flex items-center gap-1.5 hover:underline">
+                            <Phone className="w-4 h-4" />
+                            {r.customer_phone}
+                          </a>
+                        </div>
+                        {r.notes && (
+                          <p className={`mt-2 text-xs italic ${isDark ? "text-amber-400/80" : "text-amber-600"}`}>
+                            {r.notes}
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleReservationStatus(r.id, "confirmed")}
+                          className="flex items-center gap-1.5 px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg font-medium text-sm transition"
+                        >
+                          <CheckCircle className="w-4 h-4" />
+                          Potwierdź
+                        </button>
+                        <button
+                          onClick={() => handleReservationStatus(r.id, "cancelled")}
+                          className="flex items-center gap-1.5 px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg font-medium text-sm transition"
+                        >
+                          <XCircle className="w-4 h-4" />
+                          Odrzuć
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
 
       <ProductList list={newList} title="Nowe zamówienia" />
       <div className="mt-8" />
@@ -1000,19 +1524,29 @@ useEffect(() => {
 
       {selectedProduct && <ProductDetailsModal product={selectedProduct} onClose={() => setSelectedProduct(null)} />}
 
-      <div className="mb-24 mt-6 flex flex-col items-center justify-center gap-3 sm:flex-row">
-        <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1} className="h-10 rounded-md border px-4 text-sm disabled:opacity-50">
-          Poprzednia
-        </button>
-        <span className="text-sm text-slate-600">Strona {page} z {Math.max(1, Math.ceil(total / perPage))}</span>
-        <button
-          onClick={() => setPage((p) => (p < Math.ceil(total / perPage) ? p + 1 : p))}
-          disabled={page >= Math.ceil(total / perPage)}
-          className="h-10 rounded-md border px-4 text-sm disabled:opacity-50"
-        >
-          Następna
-        </button>
+      {/* Paginacja */}
+      <div className={`mb-24 mt-8 flex items-center justify-center`}>
+        <div className={`inline-flex items-center gap-1 p-1 rounded-xl ${isDark ? "bg-slate-800" : "bg-white shadow-sm border border-gray-200"}`}>
+          <button 
+            onClick={() => setPage((p) => Math.max(1, p - 1))} 
+            disabled={page === 1} 
+            className={`h-9 px-4 rounded-lg text-sm font-medium transition-colors disabled:opacity-40 ${isDark ? "text-slate-300 hover:bg-slate-700 disabled:hover:bg-transparent" : "text-gray-700 hover:bg-gray-100 disabled:hover:bg-transparent"}`}
+          >
+            ← Poprzednia
+          </button>
+          <div className={`px-4 py-2 text-sm font-medium ${t.text}`}>
+            {page} / {Math.max(1, Math.ceil(total / perPage))}
+          </div>
+          <button
+            onClick={() => setPage((p) => (p < Math.ceil(total / perPage) ? p + 1 : p))}
+            disabled={page >= Math.ceil(total / perPage)}
+            className={`h-9 px-4 rounded-lg text-sm font-medium transition-colors disabled:opacity-40 ${isDark ? "text-slate-300 hover:bg-slate-700 disabled:hover:bg-transparent" : "text-gray-700 hover:bg-gray-100 disabled:hover:bg-transparent"}`}
+          >
+            Następna →
+          </button>
+        </div>
       </div>
     </div>
+  </div>
   );
 }
