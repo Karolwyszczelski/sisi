@@ -21,7 +21,8 @@ export default function AdminLogin() {
     try {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (!error) {
-        router.push("/admin");
+        router.replace("/admin");
+        router.refresh();
       } else {
         setError("Nieprawidłowy email lub hasło");
       }
