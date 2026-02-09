@@ -114,7 +114,7 @@ export default function Footer() {
               <ShieldCheck className="w-5 h-5 mr-2" aria-hidden="true" />
               <Link href="/cookies" className="hover:text-primary">Polityka cookies</Link>
             </li>
-<li className="flex items-center justify-center md:justify-start">
+<li className="hidden md:flex items-center justify-start">
   <LayoutDashboard className="w-5 h-5 mr-2" aria-hidden="true" />
   <Link href="/admin" className="hover:text-primary">
     Panel administratora
@@ -139,7 +139,8 @@ export default function Footer() {
       </div>
 
       <div className="mt-12 border-t border-gray-700 pt-6 text-center text-sm text-gray-400">
-        © {new Date().getFullYear()} SiSi Ordering. Wszelkie prawa zastrzeżone. Stronę i system wykonał Karol Wyszczelski.
+        <p>© {new Date().getFullYear()} SiSi Ordering. Wszelkie prawa zastrzeżone.</p>
+        <p className="mt-1">Stronę i system wykonał Karol Wyszczelski.</p>
       </div>
     </footer>
   );

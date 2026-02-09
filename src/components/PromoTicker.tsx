@@ -154,28 +154,61 @@ export default function PromoTicker() {
         fgClass
       )}
       style={{
-        // Tailwind nie lubi dynamicznych kolorów, więc lecimy przez CSS custom props
         ["--promo-bg" as any]: ann.bg,
         ["--promo-fg" as any]: ann.fg,
       }}
       role="status"
     >
-      <div className="mx-auto max-w-7xl px-3 sm:px-4 py-2 text-center text-sm font-semibold flex items-center justify-center gap-3">
-        <span>{ann.text}</span>
-        {ann.link_href ? (
+      {/* Desktop */}
+      <div className="hidden sm:flex mx-auto max-w-7xl px-4 py-2.5 items-center justify-center gap-4">
+        <div className="flex items-center gap-2">
+          <span className="animate-pulse">🔥</span>
+          <span className="font-bold tracking-wide">{ann.text}</span>
+        </div>
+        {ann.link_href && (
           <a
             href={ann.link_href}
-            className="underline underline-offset-2 decoration-2"
+            className="inline-flex items-center gap-1.5 px-4 py-1 bg-white/20 hover:bg-white/30 rounded-full text-sm font-bold transition-all hover:scale-105"
           >
-            ZAMÓW
+            ZAMÓW TERAZ
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+            </svg>
           </a>
-        ) : null}
+        )}
         <button
           aria-label="Ukryj komunikat"
           onClick={handleClose}
-          className="ml-2 rounded px-2 py-0.5 bg-white/15 hover:bg-white/25"
+          className="absolute right-4 w-7 h-7 flex items-center justify-center rounded-full bg-black/20 hover:bg-black/30 transition-colors"
         >
-          ×
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+      
+      {/* Mobile */}
+      <div className="sm:hidden flex items-center justify-between px-3 py-2">
+        <div className="flex items-center gap-2 flex-1 min-w-0">
+          <span className="animate-pulse text-sm">🔥</span>
+          <span className="font-bold text-xs truncate">{ann.text}</span>
+        </div>
+        {ann.link_href && (
+          <a
+            href={ann.link_href}
+            className="flex-shrink-0 ml-2 px-3 py-1 bg-white/20 hover:bg-white/30 rounded-full text-xs font-bold transition-all"
+          >
+            ZAMÓW
+          </a>
+        )}
+        <button
+          aria-label="Ukryj komunikat"
+          onClick={handleClose}
+          className="flex-shrink-0 ml-2 w-6 h-6 flex items-center justify-center rounded-full bg-black/20 hover:bg-black/30 transition-colors"
+        >
+          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
+          </svg>
         </button>
       </div>
     </div>

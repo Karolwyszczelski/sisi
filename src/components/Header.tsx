@@ -105,7 +105,18 @@ export default function Header() {
             515 433 488
           </a>
         </nav>
-      </aside>
+        </div>
+        
+        {/* Hidden admin link */}
+        <div className="mt-auto px-4 pb-4">
+          <Link 
+            href="/admin" 
+            onClick={() => setOpen(false)}
+            className="block text-center text-[10px] text-black/20 hover:text-black/40 transition py-2"
+          >
+            v2.0
+          </Link>
+        </div>
     </header>
   );
 }
