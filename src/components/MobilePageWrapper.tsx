@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useCallback, useEffect, useRef } from "react";
 import { 
   Menu, X, ChevronLeft, Home, UtensilsCrossed, Info, Phone, User, Mail, Lock, Eye, EyeOff, ShoppingCart, Trash2, Minus, Plus,
   History, Heart, MapPin, Settings, Gift, ChevronDown, ChevronUp, Package, Clock, Check, Truck, XCircle, Star, Edit3, LogOut, Repeat, CreditCard, Building
@@ -96,6 +96,47 @@ export default function MobilePageWrapper() {
   const [ordersLoading, setOrdersLoading] = useState(false);
   const [expandedOrderId, setExpandedOrderId] = useState<number | null>(null);
 
+  // Swipe-to-close state for bottom sheets
+  const [cartDragY, setCartDragY] = useState(0);
+  const [profileDragY, setProfileDragY] = useState(0);
+  const cartTouchStartY = useRef<number | null>(null);
+  const profileTouchStartY = useRef<number | null>(null);
+  const SWIPE_THRESHOLD = 100;
+
+  // Swipe handlers for cart
+  const handleCartTouchStart = useCallback((e: React.TouchEvent) => {
+    cartTouchStartY.current = e.touches[0].clientY;
+  }, []);
+
+  const handleCartTouchMove = useCallback((e: React.TouchEvent) => {
+    if (cartTouchStartY.current === null) return;
+    const deltaY = e.touches[0].clientY - cartTouchStartY.current;
+    if (deltaY > 0) {
+      setCartDragY(deltaY);
+    }
+  }, []);
+
+  const handleCartTouchEnd = useCallback(() => {
+    if (cartDragY > SWIPE_THRESHOLD) {
+      setIsCartOpen(false);
+    }
+    setCartDragY(0);
+    cartTouchStartY.current = null;
+  }, [cartDragY]);
+
+  // Swipe handlers for profile
+  const handleProfileTouchStart = useCallback((e: React.TouchEvent) => {
+    profileTouchStartY.current = e.touches[0].clientY;
+  }, []);
+
+  const handleProfileTouchMove = useCallback((e: React.TouchEvent) => {
+    if (profileTouchStartY.current === null) return;
+    const deltaY = e.touches[0].clientY - profileTouchStartY.current;
+    if (deltaY > 0) {
+      setProfileDragY(deltaY);
+    }
+  }, []);
+
   // Cart calculations
   const itemCount = items.reduce((sum, item) => sum + (item.quantity || 1), 0);
   const totalPrice = items.reduce((sum, item) => sum + item.price * (item.quantity || 1), 0);
@@ -171,6 +212,15 @@ export default function MobilePageWrapper() {
     setNewPass("");
     setNewPass2("");
   }, []);
+
+  // Swipe handler for profile (placed after closeProfileModal)
+  const handleProfileTouchEnd = useCallback(() => {
+    if (profileDragY > SWIPE_THRESHOLD) {
+      closeProfileModal();
+    }
+    setProfileDragY(0);
+    profileTouchStartY.current = null;
+  }, [profileDragY, closeProfileModal]);
 
   // Load orders when profile opens
   useEffect(() => {
@@ -921,11 +971,20 @@ export default function MobilePageWrapper() {
           onClick={closeCartModal}
         >
           <div 
-            className="bg-zinc-900 border-t border-white/10 rounded-t-3xl w-full max-w-lg animate-slide-up"
+            className={`bg-zinc-900 border-t border-white/10 rounded-t-3xl w-full max-w-lg ${cartDragY === 0 ? 'animate-slide-up' : ''}`}
+            style={{
+              transform: `translateY(${cartDragY}px)`,
+              transition: cartDragY === 0 ? 'transform 0.3s ease-out' : 'none',
+            }}
             onClick={(e) => e.stopPropagation()}
+            onTouchStart={handleCartTouchStart}
+            onTouchMove={handleCartTouchMove}
+            onTouchEnd={handleCartTouchEnd}
           >
-            {/* Handle */}
-            <div className="w-12 h-1 bg-white/20 rounded-full mx-auto mt-3 mb-4" />
+            {/* Handle - visual drag indicator */}
+            <div className="py-3 cursor-grab active:cursor-grabbing">
+              <div className="w-12 h-1 bg-white/30 rounded-full mx-auto" />
+            </div>
             
             {/* Header */}
             <div className="px-6 pb-4 border-b border-white/5">
@@ -1011,13 +1070,22 @@ export default function MobilePageWrapper() {
           onClick={closeProfileModal}
         >
           <div 
-            className={`bg-zinc-900 border-t border-white/10 rounded-t-3xl w-full max-w-lg animate-slide-up transition-all duration-300 ${
+            className={`bg-zinc-900 border-t border-white/10 rounded-t-3xl w-full max-w-lg transition-all duration-300 ${
               profileStep === "initial" ? "pb-8" : "pb-6"
-            }`}
+            } ${profileDragY === 0 ? 'animate-slide-up' : ''}`}
+            style={{
+              transform: `translateY(${profileDragY}px)`,
+              transition: profileDragY === 0 ? 'transform 0.3s ease-out' : 'none',
+            }}
             onClick={(e) => e.stopPropagation()}
+            onTouchStart={handleProfileTouchStart}
+            onTouchMove={handleProfileTouchMove}
+            onTouchEnd={handleProfileTouchEnd}
           >
-            {/* Handle */}
-            <div className="w-12 h-1 bg-white/20 rounded-full mx-auto mt-3 mb-4" />
+            {/* Handle - visual drag indicator */}
+            <div className="py-3 cursor-grab active:cursor-grabbing">
+              <div className="w-12 h-1 bg-white/30 rounded-full mx-auto" />
+            </div>
             
             {/* Initial step - tylko przyciski */}
             {profileStep === "initial" && (
