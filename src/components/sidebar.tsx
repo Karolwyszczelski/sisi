@@ -81,6 +81,7 @@ export default function Sidebar() {
   const { isDark } = useTheme();
   const [role, setRole] = useState<Role>(null);
   const [userEmail, setUserEmail] = useState<string>("");
+  const [loading, setLoading] = useState(true);
   
   // Desktop: collapsed state
   const [collapsed, setCollapsed] = useState<boolean>(true);
@@ -141,19 +142,45 @@ export default function Sidebar() {
     };
   }, [mobileOpen]);
 
-  // Fetch user role
+  // Fetch user role and listen for auth state changes
   useEffect(() => {
-    (async () => {
+    const fetchRole = async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
-        if (!session) { setRole(null); return; }
+        if (!session) { 
+          setRole(null); 
+          setLoading(false);
+          return; 
+        }
         setUserEmail(session.user.email || "");
         const { data } = await supabase.from("profiles").select("role").eq("id", session.user.id).single();
         setRole((data?.role as Role) ?? null);
+        setLoading(false);
       } catch {
         setRole(null);
+        setLoading(false);
       }
-    })();
+    };
+
+    fetchRole();
+
+    // Listen for auth state changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'SIGNED_IN' && session) {
+        setUserEmail(session.user.email || "");
+        const { data } = await supabase.from("profiles").select("role").eq("id", session.user.id).single();
+        setRole((data?.role as Role) ?? null);
+        setLoading(false);
+      } else if (event === 'SIGNED_OUT') {
+        setRole(null);
+        setUserEmail("");
+        setLoading(false);
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, [supabase]);
 
   const handleLogout = async () => {
@@ -334,11 +361,54 @@ export default function Sidebar() {
   );
 
   // ===================== LOADING STATE =====================
-  if (role === null) {
+  if (loading) {
     return (
       <>
         {/* Mobile Header */}
         <MobileHeader />
+
+        {/* Mobile Drawer Overlay - even in loading state */}
+        {mobileOpen && (
+          <div
+            className="lg:hidden fixed inset-0 z-50 bg-black/50 backdrop-blur-sm"
+            onClick={() => setMobileOpen(false)}
+          />
+        )}
+
+        {/* Mobile Drawer - loading skeleton */}
+        <aside
+          className={`lg:hidden fixed top-0 left-0 z-50 h-[100dvh] w-72 transform transition-transform duration-300 ease-in-out ${
+            mobileOpen ? "translate-x-0" : "-translate-x-full"
+          } ${isDark ? "bg-slate-900 border-r border-slate-800" : "bg-white border-r border-gray-200"}`}
+        >
+          <div className="flex flex-col h-full p-4">
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center shadow-lg shadow-amber-500/20">
+                  <span className="text-white font-bold text-sm">SS</span>
+                </div>
+                <div>
+                  <div className={`h-4 w-20 rounded ${isDark ? "bg-slate-700" : "bg-gray-200"} animate-pulse`} />
+                  <div className={`h-3 w-16 mt-1 rounded ${isDark ? "bg-slate-700" : "bg-gray-200"} animate-pulse`} />
+                </div>
+              </div>
+              <button
+                onClick={() => setMobileOpen(false)}
+                className={`p-2 rounded-lg transition-colors ${
+                  isDark ? "hover:bg-slate-800 text-slate-400" : "hover:bg-gray-100 text-gray-500"
+                }`}
+                aria-label="Zamknij"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="space-y-4">
+              {[1, 2, 3, 4].map((i) => (
+                <div key={i} className={`h-10 rounded-lg ${isDark ? "bg-slate-800" : "bg-gray-100"} animate-pulse`} />
+              ))}
+            </div>
+          </div>
+        </aside>
         
         {/* Desktop Sidebar - loading */}
         <aside
