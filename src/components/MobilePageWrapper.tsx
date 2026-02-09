@@ -72,6 +72,7 @@ export default function MobilePageWrapper() {
   const [showMenuWelcome, setShowMenuWelcome] = useState(false);
   const [menuVisited, setMenuVisited] = useState(false);
   const [profileTab, setProfileTab] = useState<ProfileTab>("orders");
+  const [showIntro, setShowIntro] = useState(false);
   
   // Auth form state
   const [email, setEmail] = useState("");
@@ -187,6 +188,19 @@ export default function MobilePageWrapper() {
         });
     }
   }, [isProfileOpen, profileStep, session?.user?.id, supabase]);
+
+  // Mobile Intro animation
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const INTRO_KEY = "sisi_mobile_intro_shown";
+    const alreadyShown = sessionStorage.getItem(INTRO_KEY);
+    if (alreadyShown) return;
+    
+    setShowIntro(true);
+    sessionStorage.setItem(INTRO_KEY, "true");
+    const t = setTimeout(() => setShowIntro(false), 2000);
+    return () => clearTimeout(t);
+  }, []);
 
   // Helper functions
   const normalizePlPhone = (input: string): string | null => {
@@ -633,6 +647,119 @@ export default function MobilePageWrapper() {
 
   return (
     <div className="md:hidden fixed inset-0 bg-zinc-950 overflow-hidden">
+      {/* Mobile Intro Animation */}
+      {showIntro && (
+        <div className="mobile-intro fixed inset-0 z-[100] flex items-center justify-center bg-black overflow-hidden">
+          {/* Burger spadający */}
+          <div className="burger-drop absolute w-36 h-36 z-30 will-change-transform">
+            <Image
+              src="/burgerpng.png"
+              alt=""
+              width={144}
+              height={144}
+              className="w-full h-full object-contain drop-shadow-[0_0_50px_rgba(251,191,36,0.9)]"
+              priority
+            />
+          </div>
+
+          {/* Ślad świetlny */}
+          <div className="trail-vertical absolute inset-0 flex justify-center pointer-events-none">
+            <div className="trail-glow-vertical" />
+          </div>
+
+          {/* Tekst */}
+          <div className="relative z-20 flex flex-col items-center text-center px-6">
+            <p className="intro-text text-3xl font-black leading-tight tracking-tight text-white">
+              Witaj w <span className="text-yellow-400">SISI</span>! 🍔
+            </p>
+            <p className="intro-subtext text-white/50 mt-2 text-base">Najlepsze burgery w mieście</p>
+          </div>
+
+          <style jsx>{`
+            .mobile-intro {
+              animation: fadeOutSection 0.4s ease-in 1.6s forwards;
+            }
+            @keyframes fadeOutSection {
+              0% { opacity: 1; }
+              100% { opacity: 0; pointer-events: none; }
+            }
+            .burger-drop {
+              top: -150px;
+              left: 50%;
+              transform: translateX(-50%) rotate(-20deg);
+              animation: dropDown 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+            }
+            @keyframes dropDown {
+              0% {
+                top: -150px;
+                transform: translateX(-50%) rotate(-20deg) scale(0.8);
+                opacity: 0;
+              }
+              15% { opacity: 1; }
+              60% {
+                top: 50%;
+                transform: translateX(-50%) translateY(-50%) rotate(10deg) scale(1.1);
+              }
+              80% {
+                transform: translateX(-50%) translateY(-50%) rotate(-5deg) scale(1);
+              }
+              100% {
+                top: 50%;
+                transform: translateX(-50%) translateY(-50%) rotate(0deg) scale(1);
+                opacity: 0;
+              }
+            }
+            .trail-glow-vertical {
+              position: absolute;
+              top: 0;
+              width: 100px;
+              height: 0;
+              background: linear-gradient(180deg, rgba(251, 191, 36, 0.8) 0%, rgba(251, 191, 36, 0.4) 50%, transparent 100%);
+              border-radius: 100px;
+              filter: blur(35px);
+              animation: trailGrow 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards, trailFade 0.3s ease-out 0.5s forwards;
+            }
+            @keyframes trailGrow {
+              0% { height: 0; opacity: 0; }
+              20% { opacity: 0.8; }
+              100% { height: 55vh; opacity: 0.6; }
+            }
+            @keyframes trailFade {
+              0% { opacity: 0.6; }
+              100% { opacity: 0; }
+            }
+            .intro-text {
+              opacity: 0;
+              animation: revealText 0.5s ease-out 0.4s forwards, fadeOutText 0.3s ease-in 1.3s forwards;
+            }
+            .intro-subtext {
+              opacity: 0;
+              animation: revealSubtext 0.4s ease-out 0.55s forwards, fadeOutText 0.3s ease-in 1.3s forwards;
+            }
+            @keyframes revealText {
+              0% {
+                opacity: 0;
+                transform: translateY(25px) scale(0.9);
+                filter: blur(8px);
+              }
+              100% {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+                filter: blur(0);
+              }
+            }
+            @keyframes revealSubtext {
+              0% { opacity: 0; transform: translateY(15px); }
+              100% { opacity: 1; transform: translateY(0); }
+            }
+            @keyframes fadeOutText {
+              0% { opacity: 1; }
+              100% { opacity: 0; }
+            }
+          `}</style>
+        </div>
+      )}
+
       {/* Mobile Header - ukryty na hero */}
       {currentScreen !== "hero" && (
         <header className="fixed top-0 left-0 right-0 z-40 bg-zinc-950/95 backdrop-blur-xl border-b border-white/5">
@@ -750,6 +877,13 @@ export default function MobilePageWrapper() {
           {/* Footer */}
           <div className="px-8 pb-8 text-center">
             <p className="text-white/30 text-sm">SISI Burger & Pancakes</p>
+            {/* Hidden admin link */}
+            <a 
+              href="/admin" 
+              className="inline-block mt-2 text-[10px] text-white/10 hover:text-white/30 transition"
+            >
+              v2.0
+            </a>
           </div>
         </div>
       )}
