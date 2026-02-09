@@ -218,7 +218,7 @@ export default function Hero({ onNavigateToMenu, onNavigateToBurger, onOpenReser
             <div className="w-20 h-1 bg-yellow-400 mx-auto mb-8" />
 
             <p className="text-lg md:text-xl text-white/70 max-w-2xl mx-auto leading-relaxed mb-10">
-              Świeże składniki, soczyste mięso i autorskie receptury. 
+              Świeże składniki od lokalnych dostawców, mięso robione codziennie rano i smażone na grillu. 
               Zamów online lub odwiedź nas!
             </p>
 
@@ -265,7 +265,7 @@ export default function Hero({ onNavigateToMenu, onNavigateToBurger, onOpenReser
           <div className="w-16 h-1 bg-yellow-400 mx-auto mb-6" />
 
           <p className="text-base text-white/70 max-w-sm mx-auto leading-relaxed mb-8">
-            Świeże składniki, soczyste mięso i autorskie receptury. Zamów online lub odwiedź nas!
+            Składniki od lokalnych dostawców, mięso robione codziennie rano. Zamów online lub odwiedź nas!
           </p>
 
           <div className="flex flex-col gap-3 max-w-xs mx-auto">
