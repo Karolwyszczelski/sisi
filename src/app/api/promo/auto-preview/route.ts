@@ -103,7 +103,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ hasAuto: false });
   }
 
-  const nowIso = new Date().toISOString();
+  const nowMs = Date.now();
 
   const { data, error } = await supabaseAdmin
     .from("discount_codes")
@@ -138,8 +138,13 @@ export async function POST(req: Request) {
     };
 
     if (!dc.value || dc.value <= 0) continue;
-    if (dc.starts_at && dc.starts_at > nowIso) continue;
-    if (dc.expires_at && dc.expires_at < nowIso) continue;
+    
+    // Porównanie dat jako timestamps
+    const startsMs = dc.starts_at ? new Date(dc.starts_at).getTime() : 0;
+    const expiresMs = dc.expires_at ? new Date(dc.expires_at).getTime() : Infinity;
+    
+    if (dc.starts_at && startsMs > nowMs) continue;
+    if (dc.expires_at && expiresMs < nowMs) continue;
     if (dc.min_order != null && total < Number(dc.min_order)) continue;
 
     const { all, byUser, byEmail } = await getUsageCounts(

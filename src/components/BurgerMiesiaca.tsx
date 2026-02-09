@@ -150,13 +150,13 @@ export default function BurgerMiesiaca() {
 
   return (
     <section className="relative w-full overflow-hidden text-white">
-      {/* Tło sekcji */}
+      {/* Tło sekcji - gradient czarny-żółty-czarny */}
       <div className="absolute inset-0 bg-black" />
-      <div className="absolute inset-0 bg-gradient-to-b from-zinc-900/50 via-black to-black" />
+      <div className="absolute inset-0 bg-gradient-to-b from-black via-transparent to-black" />
       
-      {/* Subtelne świecące akcenty */}
-      <div className="absolute top-1/4 left-0 w-80 h-80 bg-yellow-500/5 rounded-full blur-[100px]" />
-      <div className="absolute bottom-1/4 right-0 w-96 h-96 bg-orange-500/5 rounded-full blur-[120px]" />
+      {/* Żółta poświata na środku */}
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[400px] bg-yellow-500/20 rounded-full blur-[150px]" />
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] h-[300px] bg-amber-400/15 rounded-full blur-[120px]" />
       
       {/* Latające składniki - tylko desktop */}
       <div className="hidden md:block">

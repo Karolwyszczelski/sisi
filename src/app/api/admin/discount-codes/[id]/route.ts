@@ -116,7 +116,7 @@ export async function PATCH(
   return NextResponse.json(data, { status: 200 });
 }
 
-// DELETE = miękkie usunięcie → wyłączamy kod
+// DELETE = trwałe usunięcie kodu rabatowego
 export async function DELETE(
   _req: Request,
   { params }: { params: { id: string } }
@@ -128,7 +128,7 @@ export async function DELETE(
 
   const { error } = await getSupabaseAdmin()
     .from("discount_codes")
-    .update({ active: false })
+    .delete()
     .eq("id", params.id);
 
   if (error) {

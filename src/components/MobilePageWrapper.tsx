@@ -1,7 +1,10 @@
 "use client";
 
-import React, { useState, useCallback } from "react";
-import { Menu, X, ChevronLeft, Home, UtensilsCrossed, Info, Phone, User, Mail, Lock, Eye, EyeOff, ShoppingCart, Trash2, Minus, Plus } from "lucide-react";
+import React, { useState, useCallback, useEffect } from "react";
+import { 
+  Menu, X, ChevronLeft, Home, UtensilsCrossed, Info, Phone, User, Mail, Lock, Eye, EyeOff, ShoppingCart, Trash2, Minus, Plus,
+  History, Heart, MapPin, Settings, Gift, ChevronDown, ChevronUp, Package, Clock, Check, Truck, XCircle, Star, Edit3, LogOut, Repeat, CreditCard, Building
+} from "lucide-react";
 import Image from "next/image";
 import dynamic from "next/dynamic";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
@@ -15,13 +18,15 @@ import BurgerMiesiaca from "./BurgerMiesiaca";
 import { LEGAL } from "@/config/legal";
 import { Flame, FileText, ChevronRight, Shield, Cookie, ScrollText } from "lucide-react";
 import useCartStore from "@/store/cartStore";
+import AddressAutocomplete from "@/components/menu/AddressAutocomplete";
 
 // Dynamiczne importy modali
 const ReservationModal = dynamic(() => import("./ReservationModal"), { ssr: false });
 const CheckoutModal = dynamic(() => import("./CheckoutModalDynamic").then(m => m.default), { ssr: false });
 
 export type MobileScreen = "hero" | "menu" | "onas" | "contact" | "burger" | "dokumenty" | "polityka" | "regulamin" | "cookies";
-type ProfileModalStep = "initial" | "login" | "register" | "logged";
+type ProfileModalStep = "initial" | "login" | "register" | "logged" | "panel";
+type ProfileTab = "orders" | "loyalty" | "settings";
 type CartModalStep = "summary" | "full";
 
 const screenTitles: Record<MobileScreen, string> = {
@@ -66,6 +71,7 @@ export default function MobilePageWrapper() {
   const [cartStep, setCartStep] = useState<CartModalStep>("summary");
   const [showMenuWelcome, setShowMenuWelcome] = useState(false);
   const [menuVisited, setMenuVisited] = useState(false);
+  const [profileTab, setProfileTab] = useState<ProfileTab>("orders");
   
   // Auth form state
   const [email, setEmail] = useState("");
@@ -75,6 +81,19 @@ export default function MobilePageWrapper() {
   const [showPassword, setShowPassword] = useState(false);
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState("");
+
+  // Profile settings state
+  const [localName, setLocalName] = useState("");
+  const [localPhone, setLocalPhone] = useState("");
+  const [oldPass, setOldPass] = useState("");
+  const [newPass, setNewPass] = useState("");
+  const [newPass2, setNewPass2] = useState("");
+  const [savingSettings, setSavingSettings] = useState(false);
+
+  // Orders state
+  const [orders, setOrders] = useState<any[]>([]);
+  const [ordersLoading, setOrdersLoading] = useState(false);
+  const [expandedOrderId, setExpandedOrderId] = useState<number | null>(null);
 
   // Cart calculations
   const itemCount = items.reduce((sum, item) => sum + (item.quantity || 1), 0);
@@ -128,19 +147,125 @@ export default function MobilePageWrapper() {
 
   const openProfileModal = useCallback(() => {
     setProfileStep(session ? "logged" : "initial");
+    setProfileTab("orders");
     setIsProfileOpen(true);
     setAuthError("");
+    // Initialize settings with current user data
+    if (session?.user) {
+      setLocalName((session.user.user_metadata as any)?.full_name || "");
+      setLocalPhone((session.user.user_metadata as any)?.phone || "");
+    }
   }, [session]);
 
   const closeProfileModal = useCallback(() => {
     setIsProfileOpen(false);
     setProfileStep("initial");
+    setProfileTab("orders");
     setEmail("");
     setPassword("");
     setFullName("");
     setPhoneNumber("");
     setAuthError("");
+    setOldPass("");
+    setNewPass("");
+    setNewPass2("");
   }, []);
+
+  // Load orders when profile opens
+  useEffect(() => {
+    if (isProfileOpen && (profileStep === "logged" || profileStep === "panel") && session?.user?.id) {
+      setOrdersLoading(true);
+      supabase
+        .from("orders")
+        .select("id, created_at, status, total_price, selected_option, items, payment_method, payment_status, address")
+        .eq("user", session.user.id)
+        .order("created_at", { ascending: false })
+        .limit(20)
+        .then(({ data, error }) => {
+          if (!error && data) setOrders(data);
+          setOrdersLoading(false);
+        });
+    }
+  }, [isProfileOpen, profileStep, session?.user?.id, supabase]);
+
+  // Helper functions
+  const normalizePlPhone = (input: string): string | null => {
+    const d = String(input).replace(/\D/g, "");
+    if (d.length === 9) return "+48" + d;
+    if (d.startsWith("48") && d.length === 11) return "+" + d;
+    return null;
+  };
+
+  const handleSaveSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingSettings(true);
+    try {
+      const norm = normalizePlPhone(localPhone);
+      if (!norm) {
+        alert("Podaj prawidłowy numer telefonu (+48…).");
+        return;
+      }
+
+      if (newPass || newPass2) {
+        if (newPass !== newPass2) {
+          alert("Nowe hasła nie pasują!");
+          return;
+        }
+        if (!oldPass) {
+          alert("Podaj obecne hasło!");
+          return;
+        }
+        const { error: reauthErr } = await supabase.auth.signInWithPassword({
+          email: session?.user?.email || "",
+          password: oldPass,
+        });
+        if (reauthErr) {
+          alert("Obecne hasło jest nieprawidłowe!");
+          return;
+        }
+        const { error: updErr } = await supabase.auth.updateUser({ password: newPass });
+        if (updErr) {
+          alert("Błąd zmiany hasła: " + updErr.message);
+          return;
+        }
+      }
+
+      const { error: updMeta } = await supabase.auth.updateUser({
+        data: { full_name: localName, phone: norm },
+      });
+      if (updMeta) {
+        alert("Błąd zapisu: " + updMeta.message);
+        return;
+      }
+
+      alert("Zapisano!");
+      setOldPass("");
+      setNewPass("");
+      setNewPass2("");
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
+  const getStatusConfig = (s?: string) => {
+    switch(s) {
+      case "placed": return { label: "Złożone", color: "text-blue-400 bg-blue-400/10", icon: Clock };
+      case "accepted": return { label: "Przyjęte", color: "text-indigo-400 bg-indigo-400/10", icon: Check };
+      case "preparing": return { label: "W przygotowaniu", color: "text-yellow-400 bg-yellow-400/10", icon: Package };
+      case "ready": return { label: "Gotowe", color: "text-green-400 bg-green-400/10", icon: Check };
+      case "delivering": return { label: "W dostawie", color: "text-purple-400 bg-purple-400/10", icon: Truck };
+      case "delivered": 
+      case "completed": return { label: "Zakończone", color: "text-green-400 bg-green-400/10", icon: Check };
+      case "cancelled": return { label: "Anulowane", color: "text-red-400 bg-red-400/10", icon: XCircle };
+      default: return { label: s ?? "—", color: "text-white/50 bg-white/5", icon: Clock };
+    }
+  };
+
+  const parseItems = (items: any) => {
+    try {
+      return typeof items === "string" ? JSON.parse(items) : (items || []);
+    } catch { return []; }
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -947,31 +1072,383 @@ export default function MobilePageWrapper() {
               </div>
             )}
 
-            {/* Logged in step */}
+            {/* Logged in step - Główny widok z przyciskami */}
             {profileStep === "logged" && session && (
-              <div className="px-6">
-                <div className="w-16 h-16 rounded-full bg-yellow-400 flex items-center justify-center mx-auto mb-4">
-                  <User size={32} className="text-black" />
+              <div className="px-6 pb-6">
+                {/* Avatar i powitanie */}
+                <div className="w-20 h-20 rounded-full bg-gradient-to-br from-yellow-400 to-amber-500 flex items-center justify-center mx-auto mb-4">
+                  <User size={40} className="text-black" />
                 </div>
                 <h3 className="text-2xl font-bold text-white mb-1 text-center">
                   Cześć, {(session.user?.user_metadata as any)?.full_name?.split(" ")[0] || ""}!
                 </h3>
-                <p className="text-white/50 mb-6 text-center text-sm">{session.user?.email}</p>
+                <p className="text-white/50 mb-8 text-center text-sm">{session.user?.email}</p>
                 
+                {/* Główne przyciski */}
                 <div className="space-y-3">
                   <button 
-                    onClick={() => navigateTo("menu")}
-                    className="w-full py-4 bg-gradient-to-r from-yellow-400 to-amber-500 text-black font-bold rounded-2xl active:scale-[0.98] transition-transform"
+                    onClick={() => { closeProfileModal(); navigateTo("menu"); }}
+                    className="w-full py-4 bg-gradient-to-r from-yellow-400 to-amber-500 text-black font-bold text-lg rounded-2xl active:scale-[0.98] transition-transform flex items-center justify-center gap-3"
                   >
-                    Zamów jedzenie
+                    <ShoppingCart size={22} />
+                    Nowe zamówienie
+                  </button>
+                  
+                  <button 
+                    onClick={() => { setProfileTab("orders"); setProfileStep("panel"); }}
+                    className="w-full py-4 bg-white/5 border border-white/10 text-white font-semibold rounded-2xl active:bg-white/10 transition-colors flex items-center justify-center gap-3"
+                  >
+                    <History size={22} />
+                    Historia zamówień
+                  </button>
+                  
+                  <button 
+                    onClick={() => { setProfileTab("settings"); setProfileStep("panel"); }}
+                    className="w-full py-4 bg-white/5 border border-white/10 text-white font-semibold rounded-2xl active:bg-white/10 transition-colors flex items-center justify-center gap-3"
+                  >
+                    <Settings size={22} />
+                    Ustawienia konta
+                  </button>
+                  
+                  <button 
+                    onClick={() => { setProfileTab("loyalty"); setProfileStep("panel"); }}
+                    className="w-full py-4 bg-white/5 border border-white/10 text-white/60 font-semibold rounded-2xl active:bg-white/10 transition-colors flex items-center justify-center gap-3"
+                  >
+                    <Gift size={22} />
+                    Program lojalnościowy
+                    <span className="text-[10px] bg-yellow-400/20 text-yellow-400 px-2 py-0.5 rounded-full">Wkrótce</span>
                   </button>
                   
                   <button 
                     onClick={handleLogout}
-                    className="w-full py-4 bg-white/5 text-white/60 font-medium rounded-2xl active:bg-white/10 transition-colors"
+                    className="w-full py-4 bg-red-500/10 border border-red-500/30 text-red-400 font-semibold rounded-2xl active:bg-red-500/20 transition-colors flex items-center justify-center gap-3"
                   >
+                    <LogOut size={22} />
                     Wyloguj się
                   </button>
+                </div>
+              </div>
+            )}
+
+            {/* Panel step - Zakładki z treścią */}
+            {profileStep === "panel" && session && (
+              <div className="flex flex-col h-[85vh]">
+                {/* Header z przyciskiem wstecz */}
+                <div className="px-4 pt-2 pb-3 border-b border-white/10 flex-shrink-0">
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => setProfileStep("logged")}
+                      className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center text-white/70"
+                    >
+                      <ChevronLeft size={24} />
+                    </button>
+                    <div className="flex-1">
+                      <h3 className="text-lg font-bold text-white">
+                        {profileTab === "orders" ? "Historia zamówień" : profileTab === "settings" ? "Ustawienia" : "Program lojalnościowy"}
+                      </h3>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Tabs */}
+                <div className="px-4 py-3 border-b border-white/10 flex-shrink-0">
+                  <div className="flex gap-1">
+                    {[
+                      { id: "orders" as const, label: "Zamówienia", icon: History },
+                      { id: "loyalty" as const, label: "Program", icon: Gift },
+                      { id: "settings" as const, label: "Ustawienia", icon: Settings },
+                    ].map(tab => {
+                      const Icon = tab.icon;
+                      const isActive = profileTab === tab.id;
+                      return (
+                        <button
+                          key={tab.id}
+                          onClick={() => setProfileTab(tab.id)}
+                          className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-medium transition-all ${
+                            isActive 
+                              ? "bg-yellow-400 text-black" 
+                              : "bg-white/5 text-white/60"
+                          }`}
+                        >
+                          <Icon size={16} />
+                          {tab.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Content */}
+                <div className="flex-1 overflow-y-auto px-4 py-4">
+                  {/* Orders Tab */}
+                  {profileTab === "orders" && (
+                    <div className="space-y-3">
+                      {ordersLoading ? (
+                        <div className="text-center py-8">
+                          <div className="w-8 h-8 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+                          <p className="text-white/50">Ładowanie...</p>
+                        </div>
+                      ) : orders.length === 0 ? (
+                        <div className="text-center py-8">
+                          <Package className="w-12 h-12 text-white/20 mx-auto mb-3" />
+                          <p className="text-white/50">Brak zamówień</p>
+                          <p className="text-white/30 text-sm mt-1">Złóż pierwsze zamówienie!</p>
+                        </div>
+                      ) : (
+                        orders.map(o => {
+                          const config = getStatusConfig(o.status);
+                          const StatusIcon = config.icon;
+                          const isExpanded = expandedOrderId === o.id;
+                          const orderItems = parseItems(o.items);
+
+                          return (
+                            <div 
+                              key={o.id} 
+                              className={`rounded-2xl overflow-hidden transition-all duration-200 ${
+                                isExpanded 
+                                  ? "bg-gradient-to-b from-white/10 to-white/5 ring-1 ring-yellow-400/30" 
+                                  : "bg-white/5 border border-white/10 hover:border-white/20"
+                              }`}
+                            >
+                              <button
+                                type="button"
+                                onClick={() => setExpandedOrderId(isExpanded ? null : o.id)}
+                                className="w-full p-4 text-left"
+                              >
+                                {/* Header - Status Icon + Order Info */}
+                                <div className="flex items-start gap-4">
+                                  <div className={`w-14 h-14 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-lg ${config.color}`}>
+                                    <StatusIcon size={26} />
+                                  </div>
+                                  
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center justify-between mb-1">
+                                      <span className="font-bold text-white text-lg">#{o.id}</span>
+                                      <div className={`text-xs px-2.5 py-1 rounded-full font-medium ${config.color}`}>
+                                        {config.label}
+                                      </div>
+                                    </div>
+                                    
+                                    <div className="flex items-center gap-2 text-white/50 text-sm mb-2">
+                                      <Clock size={12} />
+                                      <span>
+                                        {new Date(o.created_at).toLocaleDateString("pl-PL", { 
+                                          day: "numeric", 
+                                          month: "long",
+                                          hour: "2-digit",
+                                          minute: "2-digit"
+                                        })}
+                                      </span>
+                                    </div>
+
+                                    {/* Order Type Badge */}
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-xs px-2 py-0.5 bg-white/10 rounded-full text-white/70">
+                                        {o.selected_option === "delivery" ? "🚗 Dostawa" : o.selected_option === "takeaway" ? "🥡 Na wynos" : "🍽️ Na miejscu"}
+                                      </span>
+                                      {o.payment_status === "paid" && (
+                                        <span className="text-xs px-2 py-0.5 bg-green-500/20 text-green-400 rounded-full flex items-center gap-1">
+                                          <Check size={10} />
+                                          Opłacone
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Footer - Price + Expand */}
+                                <div className="flex items-center justify-between mt-4 pt-3 border-t border-white/10">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-white/50 text-sm">Suma:</span>
+                                    <span className="text-yellow-400 font-bold text-xl">{Number(o.total_price ?? 0).toFixed(2)} zł</span>
+                                  </div>
+                                  <div className={`flex items-center gap-1 text-sm transition-colors ${isExpanded ? "text-yellow-400" : "text-white/40"}`}>
+                                    <span>{isExpanded ? "Zwiń" : "Szczegóły"}</span>
+                                    {isExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+                                  </div>
+                                </div>
+                              </button>
+
+                              {/* Expanded Details */}
+                              {isExpanded && (
+                                <div className="px-4 pb-4 space-y-3 animate-in slide-in-from-top-2 duration-200">
+                                  {/* Payment Info */}
+                                  {o.payment_method && (
+                                    <div className="flex items-center justify-between p-3 bg-white/5 rounded-xl">
+                                      <div className="flex items-center gap-2">
+                                        <CreditCard size={16} className="text-white/50" />
+                                        <span className="text-white/70 text-sm">Metoda płatności</span>
+                                      </div>
+                                      <span className="text-white font-medium text-sm">{o.payment_method}</span>
+                                    </div>
+                                  )}
+
+                                  {/* Items List */}
+                                  {orderItems.length > 0 && (
+                                    <div className="bg-white/5 rounded-xl overflow-hidden">
+                                      <div className="px-3 py-2 bg-white/5 border-b border-white/10">
+                                        <span className="text-white/50 text-xs font-medium uppercase tracking-wider">Zamówione produkty</span>
+                                      </div>
+                                      <div className="p-2 space-y-1">
+                                        {orderItems.slice(0, 5).map((item: any, idx: number) => (
+                                          <div key={idx} className="flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 transition-colors">
+                                            <div className="w-7 h-7 bg-gradient-to-br from-yellow-400 to-amber-500 text-black rounded-lg text-xs flex items-center justify-center font-bold shadow-sm">
+                                              {item.quantity || 1}×
+                                            </div>
+                                            <span className="flex-1 text-white text-sm truncate">{item.name || item.title}</span>
+                                            <span className="text-yellow-400/80 text-sm font-medium">{Number(item.price ?? 0).toFixed(2)} zł</span>
+                                          </div>
+                                        ))}
+                                        {orderItems.length > 5 && (
+                                          <div className="text-center py-2">
+                                            <span className="text-xs text-white/40 bg-white/5 px-3 py-1 rounded-full">
+                                              +{orderItems.length - 5} więcej produktów
+                                            </span>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {/* Reorder Button */}
+                                  <button
+                                    type="button"
+                                    className="w-full py-3 bg-gradient-to-r from-yellow-400 to-amber-500 text-black font-semibold rounded-xl flex items-center justify-center gap-2 hover:from-yellow-300 hover:to-amber-400 transition-all shadow-lg shadow-yellow-400/20"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      // TODO: Implement reorder
+                                    }}
+                                  >
+                                    <Repeat size={18} />
+                                    Zamów ponownie
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  )}
+
+                  {/* Loyalty Tab - Coming Soon */}
+                  {profileTab === "loyalty" && (
+                    <div className="text-center py-8">
+                      <div className="w-20 h-20 bg-gradient-to-br from-yellow-400/20 to-amber-500/20 rounded-full flex items-center justify-center mx-auto mb-4 relative">
+                        <Gift size={40} className="text-yellow-400" />
+                        <div className="absolute -top-1 -right-1 w-6 h-6 bg-yellow-400 rounded-full flex items-center justify-center">
+                          <Clock size={14} className="text-black" />
+                        </div>
+                      </div>
+                      <h3 className="text-xl font-bold text-white mb-2">Program Lojalnościowy</h3>
+                      <p className="text-white/50 mb-4">Wkrótce dostępny!</p>
+                      
+                      <div className="bg-white/5 border border-white/10 rounded-xl p-4 text-left">
+                        <p className="text-sm text-white/60 mb-3">Przygotowujemy:</p>
+                        <ul className="text-sm text-white/40 space-y-2">
+                          <li className="flex items-center gap-2">
+                            <Star size={16} className="text-yellow-400/50" />
+                            Naklejki za zamówienia
+                          </li>
+                          <li className="flex items-center gap-2">
+                            <Gift size={16} className="text-yellow-400/50" />
+                            Darmowe burgery
+                          </li>
+                          <li className="flex items-center gap-2">
+                            <Star size={16} className="text-yellow-400/50" />
+                            Ekskluzywne zniżki
+                          </li>
+                        </ul>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Settings Tab */}
+                  {profileTab === "settings" && (
+                    <form className="space-y-4" onSubmit={handleSaveSettings}>
+                      <div className="space-y-3">
+                        <p className="text-sm font-medium text-white/70 flex items-center gap-2">
+                          <User size={16} />
+                          Dane osobowe
+                        </p>
+                        <div className="relative">
+                          <User size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-white/40" />
+                          <input
+                            type="text"
+                            placeholder="Imię i nazwisko"
+                            value={localName}
+                            onChange={(e) => setLocalName(e.target.value)}
+                            className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-11 pr-4 text-white placeholder:text-white/40 focus:outline-none focus:border-yellow-400/50"
+                          />
+                        </div>
+                        <div className="relative">
+                          <Phone size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-white/40" />
+                          <input
+                            type="tel"
+                            placeholder="Telefon (+48...)"
+                            value={localPhone}
+                            onChange={(e) => setLocalPhone(e.target.value)}
+                            className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-11 pr-4 text-white placeholder:text-white/40 focus:outline-none focus:border-yellow-400/50"
+                          />
+                        </div>
+                        <div className="relative">
+                          <Mail size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-white/40" />
+                          <input
+                            type="email"
+                            value={session.user?.email || ""}
+                            disabled
+                            className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-11 pr-4 text-white/50 cursor-not-allowed"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="border-t border-white/10 pt-4 space-y-3">
+                        <p className="text-sm font-medium text-white/70 flex items-center gap-2">
+                          <Edit3 size={16} />
+                          Zmiana hasła
+                        </p>
+                        <input
+                          type="password"
+                          placeholder="Obecne hasło"
+                          value={oldPass}
+                          onChange={(e) => setOldPass(e.target.value)}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 text-white placeholder:text-white/40 focus:outline-none focus:border-yellow-400/50"
+                        />
+                        <input
+                          type="password"
+                          placeholder="Nowe hasło"
+                          value={newPass}
+                          onChange={(e) => setNewPass(e.target.value)}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 text-white placeholder:text-white/40 focus:outline-none focus:border-yellow-400/50"
+                        />
+                        <input
+                          type="password"
+                          placeholder="Powtórz nowe hasło"
+                          value={newPass2}
+                          onChange={(e) => setNewPass2(e.target.value)}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 text-white placeholder:text-white/40 focus:outline-none focus:border-yellow-400/50"
+                        />
+                      </div>
+
+                      <button
+                        type="submit"
+                        disabled={savingSettings}
+                        className="w-full py-3.5 bg-gradient-to-r from-yellow-400 to-amber-500 text-black font-bold rounded-xl disabled:opacity-50 flex items-center justify-center gap-2"
+                      >
+                        {savingSettings ? (
+                          <>
+                            <div className="w-5 h-5 border-2 border-black/30 border-t-black rounded-full animate-spin" />
+                            Zapisuję...
+                          </>
+                        ) : (
+                          <>
+                            <Check size={20} />
+                            Zapisz zmiany
+                          </>
+                        )}
+                      </button>
+                    </form>
+                  )}
                 </div>
               </div>
             )}

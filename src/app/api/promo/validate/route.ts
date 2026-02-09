@@ -35,7 +35,7 @@ export async function POST(req: Request) {
     );
   }
 
-  const nowIso = new Date().toISOString();
+  const nowMs = Date.now();
 
   // CITEXT => ilike działa bez rozróżnienia wielkości; ignorujemy auto_apply (kody automatyczne)
   const { data: dc, error: dcErr } = await supabase
@@ -69,14 +69,18 @@ export async function POST(req: Request) {
     );
   }
 
-  if (dc.starts_at && dc.starts_at > nowIso) {
+  // Porównanie dat jako timestamps
+  const startsMs = dc.starts_at ? new Date(dc.starts_at).getTime() : 0;
+  const expiresMs = dc.expires_at ? new Date(dc.expires_at).getTime() : Infinity;
+
+  if (dc.starts_at && startsMs > nowMs) {
     return NextResponse.json(
       { valid: false, message: "Kod jeszcze nie obowiązuje." },
       { status: 400 }
     );
   }
 
-  if (dc.expires_at && dc.expires_at < nowIso) {
+  if (dc.expires_at && expiresMs < nowMs) {
     return NextResponse.json(
       { valid: false, message: "Kod wygasł." },
       { status: 400 }

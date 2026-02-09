@@ -283,22 +283,22 @@ export default function EditOrderButton({
     index,
   }) => {
     return (
-      <div className="border p-3 mb-4 rounded-xl shadow-sm">
+      <div className="border border-slate-700 bg-slate-900/60 p-4 mb-4 rounded-xl">
         <div className="flex justify-between flex-wrap">
-          <p className="font-semibold">{product.name}</p>
-          <span>{product.price.toFixed(2)} zł</span>
+          <p className="font-semibold text-white">{product.name}</p>
+          <span className="text-amber-400 font-medium">{product.price.toFixed(2)} zł</span>
         </div>
 
-        <div className="mt-2">
-          <span className="font-semibold text-sm">Mięso:</span>
-          <div className="flex gap-2 mt-1 flex-wrap">
+        <div className="mt-3">
+          <span className="font-semibold text-sm text-slate-400">Mięso:</span>
+          <div className="flex gap-2 mt-2 flex-wrap">
             <button
               type="button"
               onClick={() => handleMeatChange(index, "wołowina")}
-              className={`px-2 py-1 text-xs rounded-full ${
+              className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${
                 product.meatType === "wołowina"
-                  ? "bg-yellow-300 font-bold"
-                  : "bg-gray-200"
+                  ? "bg-amber-600 text-white font-bold"
+                  : "bg-slate-700 text-slate-300 hover:bg-slate-600"
               }`}
             >
               Wołowina
@@ -306,10 +306,10 @@ export default function EditOrderButton({
             <button
               type="button"
               onClick={() => handleMeatChange(index, "kurczak")}
-              className={`px-2 py-1 text-xs rounded-full ${
+              className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${
                 product.meatType === "kurczak"
-                  ? "bg-yellow-300 font-bold"
-                  : "bg-gray-200"
+                  ? "bg-amber-600 text-white font-bold"
+                  : "bg-slate-700 text-slate-300 hover:bg-slate-600"
               }`}
             >
               Kurczak
@@ -317,9 +317,9 @@ export default function EditOrderButton({
           </div>
         </div>
 
-        <div className="mt-2">
-          <span className="font-semibold text-sm">Dodatki:</span>
-          <div className="flex flex-wrap gap-2 mt-1">
+        <div className="mt-3">
+          <span className="font-semibold text-sm text-slate-400">Dodatki:</span>
+          <div className="flex flex-wrap gap-2 mt-2">
             {(() => {
               // Znajdź produkt w menuProducts żeby pobrać jego available_addons
               const menuProduct = menuProducts.find(
@@ -340,10 +340,10 @@ export default function EditOrderButton({
                     key={addon}
                     type="button"
                     onClick={() => toggleAddon(index, addon)}
-                    className={`border text-xs px-2 py-1 rounded-full flex-shrink-0 min-w-[60px] ${
+                    className={`border text-xs px-3 py-1.5 rounded-lg flex-shrink-0 min-w-[60px] transition-colors ${
                       hasAddon
-                        ? "bg-gray-800 text-white"
-                        : "bg-white text-black"
+                        ? "bg-emerald-600 border-emerald-500 text-white"
+                        : "bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700"
                     }`}
                   >
                     {hasAddon ? `✓ ${addon} (+${price}zł)` : `+ ${addon} (+${price}zł)`}
@@ -354,9 +354,9 @@ export default function EditOrderButton({
           </div>
         </div>
 
-        <div className="mt-2 flex flex-col sm:flex-row sm:items-center gap-2">
+        <div className="mt-3 flex flex-col sm:flex-row sm:items-center gap-3">
           <div className="flex items-center gap-2 flex-1">
-            <label className="text-sm min-w-[120px]">Dodatkowe mięso:</label>
+            <label className="text-sm text-slate-400 min-w-[120px]">Dodatkowe mięso:</label>
             <div className="flex items-center">
               <button
                 type="button"
@@ -367,11 +367,11 @@ export default function EditOrderButton({
                   )
                 }
                 disabled={(product.extraMeatCount || 0) <= 0}
-                className="px-2 py-1 bg-gray-200 hover:bg-gray-300 text-black rounded-full"
+                className="w-8 h-8 flex items-center justify-center bg-slate-700 hover:bg-slate-600 text-white rounded-lg disabled:opacity-50 transition-colors"
               >
                 -
               </button>
-              <span className="mx-2">{product.extraMeatCount || 0}</span>
+              <span className="mx-3 text-white font-medium w-4 text-center">{product.extraMeatCount || 0}</span>
               <button
                 type="button"
                 onClick={() =>
@@ -380,16 +380,16 @@ export default function EditOrderButton({
                     String((product.extraMeatCount || 0) + 1)
                   )
                 }
-                className="px-2 py-1 bg-gray-200 hover:bg-gray-300 text-black rounded-full"
+                className="w-8 h-8 flex items-center justify-center bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors"
               >
                 +
               </button>
-              <span className="text-xs text-gray-500 ml-2">x +15 zł</span>
+              <span className="text-xs text-slate-500 ml-2">x +15 zł</span>
             </div>
           </div>
 
           <div className="flex items-center gap-2 flex-1">
-            <label className="text-sm min-w-[120px]">Ilość burgera:</label>
+            <label className="text-sm text-slate-400 min-w-[120px]">Ilość burgera:</label>
             <div className="flex items-center">
               <button
                 type="button"
@@ -400,17 +400,17 @@ export default function EditOrderButton({
                   )
                 }
                 disabled={product.quantity <= 1}
-                className="px-2 py-1 bg-gray-200 hover:bg-gray-300 text-black rounded-full"
+                className="w-8 h-8 flex items-center justify-center bg-slate-700 hover:bg-slate-600 text-white rounded-lg disabled:opacity-50 transition-colors"
               >
                 -
               </button>
-              <span className="mx-2">{product.quantity}</span>
+              <span className="mx-3 text-white font-medium w-4 text-center">{product.quantity}</span>
               <button
                 type="button"
                 onClick={() =>
                   handleQuantityChange(index, String(product.quantity + 1))
                 }
-                className="px-2 py-1 bg-gray-200 hover:bg-gray-300 text-black rounded-full"
+                className="w-8 h-8 flex items-center justify-center bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors"
               >
                 +
               </button>
@@ -421,7 +421,7 @@ export default function EditOrderButton({
         <button
           type="button"
           onClick={() => handleRemoveProduct(index)}
-          className="mt-3 bg-red-500 hover:bg-red-600 text-white px-3 py-1 text-sm rounded-full"
+          className="mt-4 bg-rose-600/20 border border-rose-500/30 hover:bg-rose-600/30 text-rose-400 px-4 py-2 text-sm rounded-lg transition-colors"
         >
           Usuń produkt
         </button>
@@ -434,27 +434,27 @@ export default function EditOrderButton({
       <button
         type="button"
         onClick={() => setShowModal(true)}
-        className="bg-blue-500 hover:bg-blue-600 text-white py-2 px-4 rounded-full"
+        className="h-10 bg-slate-700 hover:bg-slate-600 text-slate-300 py-2 px-4 rounded-lg font-medium transition-colors"
       >
         Edytuj
       </button>
 
       {showModal && (
-        <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 p-4 z-50">
-          <div className="relative bg-white rounded-lg w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col">
+        <div className="fixed inset-0 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 z-50">
+          <div className="relative bg-slate-800 border border-slate-700 rounded-xl w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col">
             {/* header */}
-            <div className="sticky top-0 bg-white z-10 border-b px-5 py-3 flex items-start justify-between gap-2">
+            <div className="sticky top-0 bg-slate-800 z-10 border-b border-slate-700 px-5 py-4 flex items-start justify-between gap-2">
               <div className="flex-1 min-w-0">
-                <h3 className="text-xl font-bold leading-tight truncate">
+                <h3 className="text-xl font-bold leading-tight text-white truncate">
                   Zamówienie: {getOptionLabel(selectedOption)}
                 </h3>
-                <h4 className="text-base font-semibold mt-1">Edytuj zamówienie</h4>
+                <h4 className="text-base font-medium mt-1 text-slate-400">Edytuj zamówienie</h4>
               </div>
               <button
                 type="button"
                 aria-label="Zamknij"
                 onClick={closeModal}
-                className="p-2 rounded-full hover:bg-gray-100 flex-shrink-0"
+                className="p-2 rounded-lg hover:bg-slate-700 flex-shrink-0 transition-colors"
               >
                 <svg
                   width="18"
@@ -465,7 +465,7 @@ export default function EditOrderButton({
                   strokeWidth="2"
                   strokeLinecap="round"
                   strokeLinejoin="round"
-                  className="text-gray-600"
+                  className="text-slate-400"
                 >
                   <line x1="18" y1="6" x2="6" y2="18" />
                   <line x1="6" y1="6" x2="18" y2="18" />
@@ -473,17 +473,17 @@ export default function EditOrderButton({
               </button>
             </div>
 
-            <div className="p-4 overflow-y-auto flex-1 flex flex-col space-y-4">
+            <div className="p-5 overflow-y-auto flex-1 flex flex-col space-y-4">
               <div className="flex flex-wrap gap-2">
                 {(["local", "takeaway", "delivery"] as const).map((option) => (
                   <button
                     key={option}
                     type="button"
                     onClick={() => setSelectedOption(option)}
-                    className={`px-3 py-2 rounded-full text-xs font-medium flex-1 min-w-[90px] ${
+                    className={`px-4 py-2 rounded-lg text-sm font-medium flex-1 min-w-[90px] transition-colors ${
                       selectedOption === option
-                        ? "bg-yellow-400 font-bold"
-                        : "bg-gray-200"
+                        ? "bg-amber-600 text-white font-bold"
+                        : "bg-slate-700 text-slate-300 hover:bg-slate-600"
                     }`}
                   >
                     {option === "local"
@@ -507,16 +507,16 @@ export default function EditOrderButton({
                 <button
                   type="button"
                   onClick={() => setShowAddProduct(true)}
-                  className="w-full bg-indigo-500 hover:bg-indigo-600 text-white py-3 rounded-full font-medium"
+                  className="w-full bg-slate-700 hover:bg-slate-600 text-slate-300 py-3 rounded-lg font-medium transition-colors"
                 >
-                  Dodaj produkt
+                  + Dodaj produkt
                 </button>
               </div>
 
               {showAddProduct && (
-                <div className="border p-3 rounded-lg">
-                  <h4 className="font-bold mb-2">Wybierz produkt</h4>
-                  <ul className="space-y-2 max-h-52 overflow-auto">
+                <div className="border border-slate-700 bg-slate-900/60 p-4 rounded-lg">
+                  <h4 className="font-bold mb-3 text-white">Wybierz produkt</h4>
+                  <ul className="space-y-1 max-h-52 overflow-auto">
                     {MENU_PRODUCTS.map((prod) => (
                       <li key={prod.name}>
                         <button
@@ -525,9 +525,9 @@ export default function EditOrderButton({
                             handleAddNewProduct(prod.name, prod.price);
                             setShowAddProduct(false);
                           }}
-                          className="block w-full text-left px-3 py-2 border-b hover:bg-gray-100 rounded-full"
+                          className="block w-full text-left px-4 py-2.5 text-slate-300 hover:bg-slate-700 rounded-lg transition-colors"
                         >
-                          {prod.name} - {prod.price} zł
+                          {prod.name} - <span className="text-amber-400">{prod.price} zł</span>
                         </button>
                       </li>
                     ))}
@@ -535,43 +535,43 @@ export default function EditOrderButton({
                   <button
                     type="button"
                     onClick={() => setShowAddProduct(false)}
-                    className="mt-2 text-red-500 text-sm rounded-full"
+                    className="mt-3 text-rose-400 text-sm hover:text-rose-300 transition-colors"
                   >
                     Anuluj
                   </button>
                 </div>
               )}
 
-              <div className="mt-2 text-sm space-y-1 border-t pt-2">
-                <div className="flex justify-between">
+              <div className="mt-2 text-sm space-y-2 border-t border-slate-700 pt-4">
+                <div className="flex justify-between text-slate-400">
                   <span>Suma produktów:</span>
-                  <span>{calculateBaseTotal().toFixed(2)} zł</span>
+                  <span className="text-slate-300">{calculateBaseTotal().toFixed(2)} zł</span>
                 </div>
                 {(selectedOption === "takeaway" ||
                   selectedOption === "delivery") && (
-                  <div className="flex justify-between">
+                  <div className="flex justify-between text-slate-400">
                     <span>Opakowanie:</span>
-                    <span>{getPackagingCost().toFixed(2)} zł</span>
+                    <span className="text-slate-300">{getPackagingCost().toFixed(2)} zł</span>
                   </div>
                 )}
-                <div className="flex justify-between font-semibold border-t pt-2 mt-2">
-                  <span>Razem do zapłaty:</span>
-                  <span>{calculateTotalWithPackaging().toFixed(2)} zł</span>
+                <div className="flex justify-between font-semibold border-t border-slate-700 pt-3 mt-2">
+                  <span className="text-white">Razem do zapłaty:</span>
+                  <span className="text-amber-400 text-lg">{calculateTotalWithPackaging().toFixed(2)} zł</span>
                 </div>
               </div>
 
-              <div className="flex flex-col sm:flex-row gap-3 mt-3">
+              <div className="flex flex-col sm:flex-row gap-3 mt-4">
                 <button
                   type="button"
                   onClick={handleSave}
-                  className="flex-1 bg-green-500 hover:bg-green-600 text-white py-3 rounded-full font-semibold"
+                  className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-lg font-semibold transition-colors"
                 >
                   Zapisz zmiany
                 </button>
                 <button
                   type="button"
                   onClick={closeModal}
-                  className="flex-1 bg-gray-500 hover:bg-gray-600 text-white py-3 rounded-full font-semibold"
+                  className="flex-1 bg-slate-700 hover:bg-slate-600 text-slate-300 py-3 rounded-lg font-semibold transition-colors"
                 >
                   Anuluj
                 </button>

@@ -1,6 +1,11 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
+import { useTheme } from "@/components/admin/ThemeContext";
+import {
+  Plus, Trash2, Save, Loader2, Tag,
+  ToggleLeft, ToggleRight, Sparkles, AlertCircle, Check
+} from "lucide-react";
 
 type DiscountType = "percent" | "amount";
 
@@ -37,27 +42,39 @@ function isoToInput(value: string | null | undefined): string {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return "";
   const pad = (n: number) => String(n).padStart(2, "0");
-  return (
-    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
-    `T${pad(d.getHours())}:${pad(d.getMinutes())}`
-  );
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 export default function DiscountsSettingsForm() {
+  const { isDark } = useTheme();
   const [rows, setRows] = useState<DiscountRow[]>([]);
   const [globalPromo, setGlobalPromo] = useState<GlobalPromo>({
-    id: null,
-    type: "percent",
-    value: "",
-    minOrder: "",
-    startsAt: "",
-    expiresAt: "",
-    active: false,
+    id: null, type: "percent", value: "", minOrder: "", startsAt: "", expiresAt: "", active: false,
   });
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
-  const load = async () => {
+  // Theme classes
+  const t = {
+    bg: isDark ? "bg-slate-800" : "bg-white",
+    bgCard: isDark ? "bg-slate-700/50" : "bg-gray-50",
+    border: isDark ? "border-slate-600" : "border-gray-200",
+    text: isDark ? "text-white" : "text-gray-900",
+    textMuted: isDark ? "text-slate-400" : "text-gray-500",
+    input: `rounded-lg px-3 py-2.5 text-sm transition focus:ring-2 focus:outline-none ${
+      isDark
+        ? "bg-slate-600 border border-slate-500 text-white placeholder:text-slate-400 focus:border-purple-500 focus:ring-purple-500/20"
+        : "bg-white border border-gray-200 text-gray-900 placeholder:text-gray-400 focus:border-purple-500 focus:ring-purple-500/20"
+    }`,
+    select: `rounded-lg px-3 py-2.5 text-sm transition focus:ring-2 focus:outline-none cursor-pointer ${
+      isDark
+        ? "bg-slate-600 border border-slate-500 text-white focus:border-purple-500 focus:ring-purple-500/20"
+        : "bg-white border border-gray-200 text-gray-900 focus:border-purple-500 focus:ring-purple-500/20"
+    }`,
+  };
+
+  const load = useCallback(async () => {
     setLoading(true);
     setErrorMsg(null);
     try {
@@ -67,20 +84,15 @@ export default function DiscountsSettingsForm() {
         throw new Error(j?.error || `HTTP ${res.status}`);
       }
       const data = await res.json();
-      const list: DiscountRow[] = (Array.isArray(data) ? data : []).map((d: any) => ({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const list: DiscountRow[] = (Array.isArray(data) ? data : []).map((d: Record<string, any>) => ({
         id: d.id ?? null,
         code: d.code ?? "",
         type: d.type === "amount" ? "amount" : "percent",
-        value:
-          typeof d.value === "number"
-            ? d.value
-            : d.value != null
-            ? Number(d.value)
-            : "",
+        value: typeof d.value === "number" ? d.value : d.value != null ? Number(d.value) : "",
         minOrder: d.min_order == null ? "" : Number(d.min_order),
         maxUses: d.max_uses == null ? "" : Number(d.max_uses),
-        perUserMaxUses:
-          d.per_user_max_uses == null ? "" : Number(d.per_user_max_uses),
+        perUserMaxUses: d.per_user_max_uses == null ? "" : Number(d.per_user_max_uses),
         startsAt: isoToInput(d.starts_at),
         expiresAt: isoToInput(d.expires_at),
         active: !!d.active,
@@ -92,615 +104,452 @@ export default function DiscountsSettingsForm() {
       const auto = list.find((r) => r.autoApply);
       if (auto) {
         setGlobalPromo({
-          id: auto.id,
-          type: auto.type,
-          value: auto.value,
-          minOrder: auto.minOrder,
-          startsAt: auto.startsAt,
-          expiresAt: auto.expiresAt,
-          active: auto.active,
+          id: auto.id, type: auto.type, value: auto.value, minOrder: auto.minOrder,
+          startsAt: auto.startsAt, expiresAt: auto.expiresAt, active: auto.active,
         });
       } else {
-        setGlobalPromo({
-          id: null,
-          type: "percent",
-          value: "",
-          minOrder: "",
-          startsAt: "",
-          expiresAt: "",
-          active: false,
-        });
+        setGlobalPromo({ id: null, type: "percent", value: "", minOrder: "", startsAt: "", expiresAt: "", active: false });
       }
 
       setRows(list.filter((r) => !r.autoApply));
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error("[DiscountsSettingsForm] load error:", e);
-      setErrorMsg(e?.message || "Nie udało się pobrać danych rabatów.");
+      setErrorMsg(e instanceof Error ? e.message : "Nie udało się pobrać danych rabatów.");
     } finally {
       setLoading(false);
     }
-  };
-
-  useEffect(() => {
-    load();
   }, []);
+
+  useEffect(() => { load(); }, [load]);
 
   const addCodeRow = () => {
     setRows((prev) => [
       ...prev,
       {
-        id: null,
-        code: "",
-        type: "percent",
-        value: 10,
-        minOrder: "",
-        maxUses: "",
-        perUserMaxUses: "",
-        startsAt: "",
-        expiresAt: "",
-        active: true,
-        isPublic: true,
-        autoApply: false,
-        usedCount: 0,
+        id: null, code: "", type: "percent", value: "", minOrder: "", maxUses: "", perUserMaxUses: "",
+        startsAt: "", expiresAt: "", active: true, isPublic: true, autoApply: false, usedCount: 0,
       },
     ]);
   };
 
   const updateRowAt = (idx: number, patch: Partial<DiscountRow>) => {
-    setRows((prev) =>
-      prev.map((r, i) => (i === idx ? { ...r, ...patch } : r))
-    );
+    setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
   };
 
   const saveCodeRow = async (row: DiscountRow, index: number) => {
     setErrorMsg(null);
-
     const code = row.code.trim();
-    if (!code) {
-      setErrorMsg("Kod nie może być pusty.");
-      return;
-    }
-
+    if (!code) { setErrorMsg("Kod nie może być pusty."); return; }
     const value = row.value === "" ? 0 : Number(row.value);
-    if (!Number.isFinite(value) || value <= 0) {
-      setErrorMsg("Wartość rabatu musi być większa od 0.");
-      return;
-    }
+    if (!Number.isFinite(value) || value <= 0) { setErrorMsg("Wartość rabatu musi być większa od 0."); return; }
 
-    const payload: any = {
-      code,
-      type: row.type,
-      value,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const payload: Record<string, any> = {
+      code, type: row.type, value,
       min_order: row.minOrder === "" ? null : Number(row.minOrder),
       max_uses: row.maxUses === "" ? null : Number(row.maxUses),
-      per_user_max_uses:
-        row.perUserMaxUses === "" ? null : Number(row.perUserMaxUses),
-      starts_at: row.startsAt || null,
-      expires_at: row.expiresAt || null,
-      active: row.active,
-      public: row.isPublic,
-      auto_apply: false,
+      per_user_max_uses: row.perUserMaxUses === "" ? null : Number(row.perUserMaxUses),
+      starts_at: row.startsAt || null, expires_at: row.expiresAt || null,
+      active: row.active, public: row.isPublic, auto_apply: false,
     };
 
     const isNew = !row.id;
-    const url = isNew
-      ? "/api/admin/discount-codes"
-      : `/api/admin/discount-codes/${row.id}`;
+    const url = isNew ? "/api/admin/discount-codes" : `/api/admin/discount-codes/${row.id}`;
     const method = isNew ? "POST" : "PATCH";
 
     try {
       updateRowAt(index, { _saving: true });
-      const res = await fetch(url, {
-        method,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
+      const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const data = await res.json().catch(() => null);
-      if (!res.ok) {
-        throw new Error(data?.error || `HTTP ${res.status}`);
-      }
+      if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
 
-      const updated: DiscountRow = {
-        id: data.id ?? row.id ?? null,
-        code: data.code ?? code,
-        type: data.type === "amount" ? "amount" : "percent",
-        value:
-          typeof data.value === "number"
-            ? data.value
-            : Number(data.value ?? value),
-        minOrder: data.min_order == null ? "" : Number(data.min_order),
-        maxUses: data.max_uses == null ? "" : Number(data.max_uses),
-        perUserMaxUses:
-          data.per_user_max_uses == null
-            ? ""
-            : Number(data.per_user_max_uses),
-        startsAt: isoToInput(data.starts_at),
-        expiresAt: isoToInput(data.expires_at),
-        active: !!data.active,
-        isPublic: !!data.public,
-        autoApply: !!data.auto_apply,
-        usedCount: Number(data.used_count ?? row.usedCount),
-      };
-
-      setRows((prev) => prev.map((r, i) => (i === index ? updated : r)));
-    } catch (e: any) {
-      console.error("[DiscountsSettingsForm] save code error:", e);
-      setErrorMsg(e?.message || "Nie udało się zapisać kodu rabatowego.");
+      await load();
+      setSuccessMsg("Kod zapisany!"); setTimeout(() => setSuccessMsg(null), 2000);
+    } catch (e: unknown) {
+      setErrorMsg(e instanceof Error ? e.message : "Nie udało się zapisać kodu rabatowego.");
     } finally {
       updateRowAt(index, { _saving: false });
     }
   };
 
   const removeCodeRow = async (row: DiscountRow, index: number) => {
-    if (!row.id) {
-      // jeszcze nie w bazie – po prostu usuń z listy
-      setRows((prev) => prev.filter((_, i) => i !== index));
-      return;
-    }
-    if (!confirm("Na pewno chcesz wyłączyć ten kod rabatowy?")) return;
+    if (!row.id) { setRows((prev) => prev.filter((_, i) => i !== index)); return; }
+    if (!confirm("Na pewno chcesz usunąć ten kod rabatowy?")) return;
 
     try {
       updateRowAt(index, { _saving: true });
-      const res = await fetch(`/api/admin/discount-codes/${row.id}`, {
-        method: "DELETE",
-      });
+      const res = await fetch(`/api/admin/discount-codes/${row.id}`, { method: "DELETE" });
       if (!res.ok) {
         const data = await res.json().catch(() => null);
         throw new Error(data?.error || `HTTP ${res.status}`);
       }
-      // odśwież z serwera
       await load();
-    } catch (e: any) {
-      console.error("[DiscountsSettingsForm] delete code error:", e);
-      setErrorMsg(e?.message || "Nie udało się wyłączyć kodu.");
+    } catch (e: unknown) {
+      setErrorMsg(e instanceof Error ? e.message : "Nie udało się usunąć kodu.");
     } finally {
       updateRowAt(index, { _saving: false });
     }
   };
 
-  const saveGlobalPromo = async () => {
-    setErrorMsg(null);
-
-    const value =
-      globalPromo.value === "" ? 0 : Number(globalPromo.value);
-    if (!Number.isFinite(value) || value <= 0) {
-      setErrorMsg("Wartość globalnego rabatu musi być > 0.");
+  const toggleGlobalPromoActive = async () => {
+    const newActive = !globalPromo.active;
+    
+    // Jeśli nie ma id i włączamy, ale brak wartości - ustaw domyślne
+    if (!globalPromo.id && newActive && (globalPromo.value === "" || globalPromo.value === 0)) {
+      setGlobalPromo(prev => ({ ...prev, active: true, value: 10, type: "percent" }));
       return;
     }
 
-    const payload: any = {
-      // kod nie jest wymagany – backend wygeneruje jeśli pusty
-      code: "",
-      type: globalPromo.type,
-      value,
-      min_order:
-        globalPromo.minOrder === "" ? null : Number(globalPromo.minOrder),
-      starts_at: globalPromo.startsAt || null,
-      expires_at: globalPromo.expiresAt || null,
-      active: globalPromo.active,
-      public: true,
-      auto_apply: true,
+    // Aktualizuj stan lokalnie najpierw
+    setGlobalPromo(prev => ({ ...prev, active: newActive }));
+
+    // Jeśli istnieje w bazie, zaktualizuj
+    if (globalPromo.id) {
+      try {
+        const res = await fetch(`/api/admin/discount-codes/${globalPromo.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ active: newActive }),
+        });
+        if (!res.ok) {
+          // Cofnij zmianę
+          setGlobalPromo(prev => ({ ...prev, active: !newActive }));
+        }
+      } catch {
+        setGlobalPromo(prev => ({ ...prev, active: !newActive }));
+      }
+    }
+  };
+
+  const saveGlobalPromo = async () => {
+    setErrorMsg(null);
+    const value = globalPromo.value === "" ? 0 : Number(globalPromo.value);
+    if (!Number.isFinite(value) || value <= 0) { setErrorMsg("Wartość globalnego rabatu musi być > 0."); return; }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const payload: Record<string, any> = {
+      code: "", type: globalPromo.type, value,
+      min_order: globalPromo.minOrder === "" ? null : Number(globalPromo.minOrder),
+      starts_at: globalPromo.startsAt || null, expires_at: globalPromo.expiresAt || null,
+      active: globalPromo.active, public: true, auto_apply: true,
     };
 
     const isNew = !globalPromo.id;
-    const url = isNew
-      ? "/api/admin/discount-codes"
-      : `/api/admin/discount-codes/${globalPromo.id}`;
+    const url = isNew ? "/api/admin/discount-codes" : `/api/admin/discount-codes/${globalPromo.id}`;
     const method = isNew ? "POST" : "PATCH";
 
     try {
       setGlobalPromo((g) => ({ ...g, _saving: true }));
-      const res = await fetch(url, {
-        method,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
+      const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const data = await res.json().catch(() => null);
-      if (!res.ok) {
-        throw new Error(data?.error || `HTTP ${res.status}`);
-      }
+      if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
 
-      setGlobalPromo({
-        id: data.id ?? globalPromo.id ?? null,
-        type: data.type === "amount" ? "amount" : "percent",
-        value:
-          typeof data.value === "number"
-            ? data.value
-            : Number(data.value ?? value),
-        minOrder: data.min_order == null ? "" : Number(data.min_order),
-        startsAt: isoToInput(data.starts_at),
-        expiresAt: isoToInput(data.expires_at),
-        active: !!data.active,
-      });
-    } catch (e: any) {
-      console.error("[DiscountsSettingsForm] save global error:", e);
-      setErrorMsg(e?.message || "Nie udało się zapisać globalnej promocji.");
-    } finally {
+      setGlobalPromo(prev => ({
+        ...prev,
+        id: data.id ?? prev.id ?? null,
+        _saving: false,
+      }));
+      setSuccessMsg("Promocja zapisana!"); setTimeout(() => setSuccessMsg(null), 2000);
+    } catch (e: unknown) {
+      setErrorMsg(e instanceof Error ? e.message : "Nie udało się zapisać globalnej promocji.");
       setGlobalPromo((g) => ({ ...g, _saving: false }));
     }
   };
 
+  if (loading) {
+    return (
+      <div className={`flex items-center justify-center py-16 rounded-xl ${t.bgCard}`}>
+        <Loader2 className="h-8 w-8 animate-spin text-amber-500" />
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-8">
-      <div>
-        <h3 className="text-lg font-semibold">Globalna promocja (bez kodu)</h3>
-        <p className="text-sm text-slate-600">
-          Tu ustawiasz stały rabat nakładany automatycznie na wszystkie
-          zamówienia spełniające warunki (np. -10% przy zamówieniu &gt; 50 zł).
-          Klient nie musi wpisywać kodu.
-        </p>
+    <div className="space-y-6">
+      {/* Alerts */}
+      {errorMsg && (
+        <div className="flex items-center gap-3 p-4 rounded-xl bg-red-500/10 border border-red-500/30">
+          <AlertCircle className="h-5 w-5 text-red-400 flex-shrink-0" />
+          <p className="text-sm text-red-400">{errorMsg}</p>
+          <button onClick={() => setErrorMsg(null)} className="ml-auto text-red-400 hover:text-red-300">×</button>
+        </div>
+      )}
+      {successMsg && (
+        <div className="flex items-center gap-3 p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30">
+          <Check className="h-5 w-5 text-emerald-400 flex-shrink-0" />
+          <p className="text-sm text-emerald-400">{successMsg}</p>
+        </div>
+      )}
 
-        {errorMsg && (
-          <div className="mt-3 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700">
-            {errorMsg}
-          </div>
-        )}
-
-        <div className="mt-4 grid gap-3 rounded-md border bg-slate-50 p-4 md:grid-cols-2">
-          <div className="space-y-2">
-            <label className="block text-sm font-medium text-slate-700">
-              Typ rabatu
-            </label>
-            <select
-              className="w-full rounded border bg-white px-3 py-2 text-sm"
-              value={globalPromo.type}
-              onChange={(e) =>
-                setGlobalPromo((g) => ({
-                  ...g,
-                  type: e.target.value as DiscountType,
-                }))
-              }
+      {/* ======================== GLOBALNA PROMOCJA ======================== */}
+      <div className={`rounded-2xl border ${t.border} ${t.bg} overflow-hidden`}>
+        <div className="p-5">
+          {/* Header */}
+          <div className="flex items-center justify-between mb-5">
+            <div className="flex items-center gap-3">
+              <div className={`p-2.5 rounded-xl ${isDark ? "bg-purple-500/20" : "bg-purple-100"}`}>
+                <Sparkles className={`h-5 w-5 ${isDark ? "text-purple-400" : "text-purple-600"}`} />
+              </div>
+              <div>
+                <h3 className={`font-bold ${t.text}`}>Globalna promocja</h3>
+                <p className={`text-sm ${t.textMuted}`}>Automatyczny rabat bez kodu</p>
+              </div>
+            </div>
+            {/* Toggle */}
+            <button
+              onClick={toggleGlobalPromoActive}
+              className="focus:outline-none"
             >
-              <option value="percent">Procentowo (%)</option>
-              <option value="amount">Kwotowo (zł)</option>
-            </select>
+              {globalPromo.active ? (
+                <ToggleRight className="h-9 w-9 text-purple-500" />
+              ) : (
+                <ToggleLeft className={`h-9 w-9 ${t.textMuted}`} />
+              )}
+            </button>
           </div>
 
-          <div className="space-y-2">
-            <label className="block text-sm font-medium text-slate-700">
-              Wartość
-            </label>
-            <input
-              type="number"
-              step="0.01"
-              className="w-full rounded border px-3 py-2 text-sm"
-              value={globalPromo.value}
-              onChange={(e) =>
-                setGlobalPromo((g) => ({
-                  ...g,
-                  value: e.target.value === "" ? "" : Number(e.target.value),
-                }))
-              }
-              placeholder={globalPromo.type === "percent" ? "np. 10" : "np. 5"}
-            />
-          </div>
+          {/* Form */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-end">
+            {/* Typ rabatu */}
+            <div>
+              <label className={`block text-xs font-medium mb-1.5 ${t.textMuted}`}>Typ rabatu</label>
+              <select
+                value={globalPromo.type}
+                onChange={(e) => setGlobalPromo(prev => ({ ...prev, type: e.target.value as DiscountType }))}
+                className={`w-full ${t.select}`}
+              >
+                <option value="percent">Procentowy (%)</option>
+                <option value="amount">Kwotowy (zł)</option>
+              </select>
+            </div>
 
-          <div className="space-y-2">
-            <label className="block text-sm font-medium text-slate-700">
-              Minimalna wartość zamówienia (zł)
-            </label>
-            <input
-              type="number"
-              step="0.01"
-              className="w-full rounded border px-3 py-2 text-sm"
-              value={globalPromo.minOrder ?? ""}
-              onChange={(e) =>
-                setGlobalPromo((g) => ({
-                  ...g,
-                  minOrder:
-                    e.target.value === "" ? "" : Number(e.target.value),
-                }))
-              }
-              placeholder="brak progu"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <label className="block text-sm font-medium text-slate-700">
-              Zakres dat (opcjonalnie)
-            </label>
-            <div className="grid grid-cols-2 gap-2">
+            {/* Wartość */}
+            <div>
+              <label className={`block text-xs font-medium mb-1.5 ${t.textMuted}`}>
+                Wartość ({globalPromo.type === "percent" ? "%" : "zł"})
+              </label>
               <input
-                type="datetime-local"
-                className="rounded border px-2 py-1 text-sm"
-                value={globalPromo.startsAt}
-                onChange={(e) =>
-                  setGlobalPromo((g) => ({ ...g, startsAt: e.target.value }))
-                }
-              />
-              <input
-                type="datetime-local"
-                className="rounded border px-2 py-1 text-sm"
-                value={globalPromo.expiresAt}
-                onChange={(e) =>
-                  setGlobalPromo((g) => ({ ...g, expiresAt: e.target.value }))
-                }
+                type="number"
+                min={0}
+                step={globalPromo.type === "percent" ? 1 : 0.01}
+                value={globalPromo.value}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setGlobalPromo(prev => ({ ...prev, value: v === "" ? "" : Number(v) }));
+                }}
+                placeholder="np. 10"
+                className={`w-full ${t.input}`}
               />
             </div>
-          </div>
 
-          <div className="flex items-center gap-3 pt-1">
-            <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+            {/* Min zamówienie */}
+            <div>
+              <label className={`block text-xs font-medium mb-1.5 ${t.textMuted}`}>Min. zamówienie (zł)</label>
               <input
-                type="checkbox"
-                className="h-4 w-4 rounded border-slate-300"
-                checked={globalPromo.active}
-                onChange={(e) =>
-                  setGlobalPromo((g) => ({ ...g, active: e.target.checked }))
-                }
+                type="number"
+                min={0}
+                value={globalPromo.minOrder ?? ""}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setGlobalPromo(prev => ({ ...prev, minOrder: v === "" ? "" : Number(v) }));
+                }}
+                placeholder="brak"
+                className={`w-full ${t.input}`}
               />
-              Aktywna promocja
-            </label>
-          </div>
-        </div>
+            </div>
 
-        <div className="mt-3">
-          <button
-            type="button"
-            onClick={saveGlobalPromo}
-            disabled={globalPromo._saving}
-            className="inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
-          >
-            Zapisz globalną promocję
-          </button>
+            {/* Zapisz */}
+            <button
+              onClick={saveGlobalPromo}
+              disabled={globalPromo._saving}
+              className="flex items-center justify-center gap-2 px-5 py-2.5 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white rounded-lg font-semibold transition disabled:opacity-50 h-[42px]"
+            >
+              {globalPromo._saving ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Save className="h-4 w-4" />
+              )}
+              Zapisz promocję
+            </button>
+          </div>
+
+          {/* Info o datach jeśli ustawione */}
+          {(globalPromo.startsAt || globalPromo.expiresAt) && (
+            <div className={`mt-4 pt-4 border-t ${t.border} flex flex-wrap gap-4`}>
+              {globalPromo.startsAt && (
+                <div className={`text-xs ${t.textMuted}`}>
+                  <span className="font-medium">Od:</span> {new Date(globalPromo.startsAt).toLocaleString("pl-PL")}
+                </div>
+              )}
+              {globalPromo.expiresAt && (
+                <div className={`text-xs ${t.textMuted}`}>
+                  <span className="font-medium">Do:</span> {new Date(globalPromo.expiresAt).toLocaleString("pl-PL")}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
-      <div className="space-y-3">
-        <div>
-          <h3 className="text-lg font-semibold">Kody rabatowe</h3>
-          <p className="text-sm text-slate-600">
-            Tu zarządzasz kodami rabatowymi (jednorazowe, wielorazowe, kody
-            publiczne i „tajne”). Progi, daty, limity wykorzystań opierają się
-            na tej samej tabeli co w koszyku.
-          </p>
-        </div>
-
-        {loading ? (
-          <div className="rounded-md border bg-white px-4 py-6 text-center text-sm text-slate-500">
-            Ładowanie kodów…
+      {/* ======================== KODY RABATOWE ======================== */}
+      <div className={`rounded-2xl border ${t.border} ${t.bg} overflow-hidden`}>
+        <div className="p-5">
+          {/* Header */}
+          <div className="flex items-center justify-between mb-5">
+            <div className="flex items-center gap-3">
+              <div className={`p-2.5 rounded-xl ${isDark ? "bg-amber-500/20" : "bg-amber-100"}`}>
+                <Tag className={`h-5 w-5 ${isDark ? "text-amber-400" : "text-amber-600"}`} />
+              </div>
+              <div>
+                <h3 className={`font-bold ${t.text}`}>Kody rabatowe</h3>
+                <p className={`text-sm ${t.textMuted}`}>{rows.length} kodów</p>
+              </div>
+            </div>
+            <button
+              onClick={addCodeRow}
+              className="flex items-center gap-2 px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg font-medium transition"
+            >
+              <Plus className="h-4 w-4" />
+              Dodaj kod
+            </button>
           </div>
-        ) : (
-          <div className="overflow-x-auto rounded-md border bg-white">
-            <table className="min-w-full text-sm">
-              <thead className="bg-slate-50">
-                <tr>
-                  <th className="px-3 py-2 text-left font-medium text-slate-700">
-                    Kod
-                  </th>
-                  <th className="px-3 py-2 text-left font-medium text-slate-700">
-                    Typ
-                  </th>
-                  <th className="px-3 py-2 text-left font-medium text-slate-700">
-                    Wartość
-                  </th>
-                  <th className="px-3 py-2 text-left font-medium text-slate-700">
-                    Min. zamówienie (zł)
-                  </th>
-                  <th className="px-3 py-2 text-left font-medium text-slate-700">
-                    Max użyć (globalnie)
-                  </th>
-                  <th className="px-3 py-2 text-left font-medium text-slate-700">
-                    Max użyć / użytkownika
-                  </th>
-                  <th className="px-3 py-2 text-left font-medium text-slate-700">
-                    Wykorzystano
-                  </th>
-                  <th className="px-3 py-2 text-left font-medium text-slate-700">
-                    Start / Koniec
-                  </th>
-                  <th className="px-3 py-2 text-left font-medium text-slate-700">
-                    Publiczny / Aktywny
-                  </th>
-                  <th className="px-3 py-2 text-right font-medium text-slate-700">
-                    Akcje
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {rows.length === 0 ? (
-                  <tr>
-                    <td
-                      colSpan={10}
-                      className="px-3 py-4 text-center text-slate-500"
+
+          {/* Table header */}
+          {rows.length > 0 && (
+            <div className={`grid gap-3 px-4 py-2 mb-2 rounded-lg ${isDark ? "bg-slate-700/30" : "bg-gray-100"}`}
+              style={{ gridTemplateColumns: "minmax(100px, 1fr) 90px 90px 90px 90px 90px auto" }}
+            >
+              <div className={`text-xs font-medium ${t.textMuted}`}>Kod *</div>
+              <div className={`text-xs font-medium ${t.textMuted}`}>Typ</div>
+              <div className={`text-xs font-medium ${t.textMuted}`}>Wartość</div>
+              <div className={`text-xs font-medium ${t.textMuted}`}>Min. zam.</div>
+              <div className={`text-xs font-medium ${t.textMuted}`}>Max użyć</div>
+              <div className={`text-xs font-medium ${t.textMuted}`}>Na osobę</div>
+              <div className={`text-xs font-medium ${t.textMuted} text-right`}>Akcje</div>
+            </div>
+          )}
+
+          {/* Rows */}
+          {rows.length === 0 ? (
+            <div className={`text-center py-12 rounded-xl ${t.bgCard}`}>
+              <Tag className={`h-10 w-10 mx-auto mb-3 ${t.textMuted}`} />
+              <p className={`font-medium ${t.text}`}>Brak kodów rabatowych</p>
+              <p className={`text-sm ${t.textMuted}`}>Kliknij &quot;Dodaj kod&quot; aby utworzyć pierwszy</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {rows.map((row, idx) => (
+                <div key={row.id ?? `new-${idx}`} className={`rounded-xl border ${t.border} ${t.bgCard} p-4`}>
+                  <div className="grid gap-3 items-center" style={{ gridTemplateColumns: "minmax(100px, 1fr) 90px 90px 90px 90px 90px auto" }}>
+                    {/* Kod */}
+                    <input
+                      type="text"
+                      value={row.code}
+                      onChange={(e) => updateRowAt(idx, { code: e.target.value.toUpperCase() })}
+                      placeholder="KOD"
+                      className={`${t.input} font-mono`}
+                    />
+
+                    {/* Typ */}
+                    <select
+                      value={row.type}
+                      onChange={(e) => updateRowAt(idx, { type: e.target.value as DiscountType })}
+                      className={t.select}
                     >
-                      Brak zdefiniowanych kodów rabatowych.
-                    </td>
-                  </tr>
-                ) : (
-                  rows.map((row, index) => (
-                    <tr key={row.id ?? `new-${index}`}>
-                      <td className="px-3 py-2 align-top">
-                        <input
-                          className="w-full rounded border px-2 py-1 text-xs uppercase"
-                          value={row.code}
-                          onChange={(e) =>
-                            updateRowAt(index, { code: e.target.value })
-                          }
-                        />
-                        <div className="mt-1 text-[10px] text-slate-500">
-                          Pozostaw, aby nie zmieniać istniejącego kodu.
-                        </div>
-                      </td>
-                      <td className="px-3 py-2 align-top">
-                        <select
-                          className="w-full rounded border px-2 py-1 text-xs"
-                          value={row.type}
-                          onChange={(e) =>
-                            updateRowAt(index, {
-                              type: e.target.value as DiscountType,
-                            })
-                          }
-                        >
-                          <option value="percent">% od wartości</option>
-                          <option value="amount">Kwota (zł)</option>
-                        </select>
-                      </td>
-                      <td className="px-3 py-2 align-top">
-                        <input
-                          type="number"
-                          step="0.01"
-                          className="w-20 rounded border px-2 py-1 text-xs"
-                          value={row.value}
-                          onChange={(e) =>
-                            updateRowAt(index, {
-                              value:
-                                e.target.value === ""
-                                  ? ""
-                                  : Number(e.target.value),
-                            })
-                          }
-                        />
-                        <div className="mt-1 text-[10px] text-slate-500">
-                          Jednorazowy przykład: 30 = -30%
-                        </div>
-                      </td>
-                      <td className="px-3 py-2 align-top">
-                        <input
-                          type="number"
-                          step="0.01"
-                          className="w-24 rounded border px-2 py-1 text-xs"
-                          value={row.minOrder ?? ""}
-                          onChange={(e) =>
-                            updateRowAt(index, {
-                              minOrder:
-                                e.target.value === ""
-                                  ? ""
-                                  : Number(e.target.value),
-                            })
-                          }
-                          placeholder="brak"
-                        />
-                      </td>
-                      <td className="px-3 py-2 align-top">
-                        <input
-                          type="number"
-                          step="1"
-                          className="w-20 rounded border px-2 py-1 text-xs"
-                          value={row.maxUses ?? ""}
-                          onChange={(e) =>
-                            updateRowAt(index, {
-                              maxUses:
-                                e.target.value === ""
-                                  ? ""
-                                  : Number(e.target.value),
-                            })
-                          }
-                          placeholder="∞"
-                        />
-                        <div className="mt-1 text-[10px] text-slate-500">
-                          1 = kod jednorazowy; puste = bez limitu
-                        </div>
-                      </td>
-                      <td className="px-3 py-2 align-top">
-                        <input
-                          type="number"
-                          step="1"
-                          className="w-20 rounded border px-2 py-1 text-xs"
-                          value={row.perUserMaxUses ?? ""}
-                          onChange={(e) =>
-                            updateRowAt(index, {
-                              perUserMaxUses:
-                                e.target.value === ""
-                                  ? ""
-                                  : Number(e.target.value),
-                            })
-                          }
-                          placeholder="brak"
-                        />
-                      </td>
-                      <td className="px-3 py-2 align-top text-center text-xs text-slate-700">
-                        {row.usedCount}
-                      </td>
-                      <td className="px-3 py-2 align-top">
-                        <div className="flex flex-col gap-1">
-                          <input
-                            type="datetime-local"
-                            className="rounded border px-2 py-1 text-xs"
-                            value={row.startsAt}
-                            onChange={(e) =>
-                              updateRowAt(index, {
-                                startsAt: e.target.value,
-                              })
-                            }
-                          />
-                          <input
-                            type="datetime-local"
-                            className="rounded border px-2 py-1 text-xs"
-                            value={row.expiresAt}
-                            onChange={(e) =>
-                              updateRowAt(index, {
-                                expiresAt: e.target.value,
-                              })
-                            }
-                          />
-                        </div>
-                      </td>
-                      <td className="px-3 py-2 align-top">
-                        <div className="flex flex-col gap-1 text-xs">
-                          <label className="inline-flex items-center gap-1">
-                            <input
-                              type="checkbox"
-                              className="h-3 w-3 rounded border-slate-300"
-                              checked={row.isPublic}
-                              onChange={(e) =>
-                                updateRowAt(index, {
-                                  isPublic: e.target.checked,
-                                })
-                              }
-                            />
-                            publiczny
-                          </label>
-                          <label className="inline-flex items-center gap-1">
-                            <input
-                              type="checkbox"
-                              className="h-3 w-3 rounded border-slate-300"
-                              checked={row.active}
-                              onChange={(e) =>
-                                updateRowAt(index, {
-                                  active: e.target.checked,
-                                })
-                              }
-                            />
-                            aktywny
-                          </label>
-                        </div>
-                      </td>
-                      <td className="px-3 py-2 align-top text-right">
-                        <div className="space-x-2">
-                          <button
-                            type="button"
-                            onClick={() => saveCodeRow(row, index)}
-                            disabled={row._saving}
-                            className="rounded bg-indigo-600 px-3 py-1 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
-                          >
-                            Zapisz
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => removeCodeRow(row, index)}
-                            disabled={row._saving}
-                            className="rounded bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-200 disabled:opacity-50"
-                          >
-                            Usuń / wyłącz
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        )}
+                      <option value="percent">%</option>
+                      <option value="amount">zł</option>
+                    </select>
 
-        <button
-          type="button"
-          onClick={addCodeRow}
-          className="text-sm font-medium text-indigo-600 hover:text-indigo-800"
-        >
-          + Dodaj nowy kod rabatowy
-        </button>
+                    {/* Wartość */}
+                    <input
+                      type="number"
+                      min={0}
+                      value={row.value}
+                      onChange={(e) => updateRowAt(idx, { value: e.target.value === "" ? "" : Number(e.target.value) })}
+                      placeholder="0"
+                      className={t.input}
+                    />
+
+                    {/* Min zam */}
+                    <input
+                      type="number"
+                      min={0}
+                      value={row.minOrder ?? ""}
+                      onChange={(e) => updateRowAt(idx, { minOrder: e.target.value === "" ? "" : Number(e.target.value) })}
+                      placeholder="—"
+                      className={t.input}
+                    />
+
+                    {/* Max użyć */}
+                    <input
+                      type="number"
+                      min={0}
+                      value={row.maxUses ?? ""}
+                      onChange={(e) => updateRowAt(idx, { maxUses: e.target.value === "" ? "" : Number(e.target.value) })}
+                      placeholder="∞"
+                      className={t.input}
+                    />
+
+                    {/* Na osobę */}
+                    <input
+                      type="number"
+                      min={0}
+                      value={row.perUserMaxUses ?? ""}
+                      onChange={(e) => updateRowAt(idx, { perUserMaxUses: e.target.value === "" ? "" : Number(e.target.value) })}
+                      placeholder="∞"
+                      className={t.input}
+                    />
+
+                    {/* Actions */}
+                    <div className="flex items-center gap-2 justify-end">
+                      <button
+                        onClick={() => saveCodeRow(row, idx)}
+                        disabled={row._saving}
+                        className="flex items-center gap-1.5 px-3 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-sm font-medium transition disabled:opacity-50"
+                      >
+                        {row._saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                        Zapisz
+                      </button>
+                      <button
+                        onClick={() => removeCodeRow(row, idx)}
+                        disabled={row._saving}
+                        className="p-2 text-red-400 hover:text-white hover:bg-red-500 rounded-lg transition"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Bottom row - checkbox i statystyki */}
+                  <div className={`flex items-center gap-6 mt-3 pt-3 border-t ${t.border}`}>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={row.active}
+                        onChange={(e) => updateRowAt(idx, { active: e.target.checked })}
+                        className="sr-only"
+                      />
+                      <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition ${
+                        row.active 
+                          ? "bg-emerald-500 border-emerald-500" 
+                          : isDark ? "border-slate-500" : "border-gray-300"
+                      }`}>
+                        {row.active && <Check className="h-3 w-3 text-white" />}
+                      </div>
+                      <span className={`text-sm ${t.text}`}>Aktywny</span>
+                    </label>
+                    
+                    {row.usedCount > 0 && (
+                      <span className={`text-sm ${t.textMuted}`}>
+                        Użyto: <span className="font-semibold">{row.usedCount}x</span>
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
