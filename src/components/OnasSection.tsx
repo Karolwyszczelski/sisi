@@ -141,7 +141,7 @@ export default function OnasSection() {
                 </div>
                 <div>
                   <div className="text-xs md:text-sm text-white/40 mb-0.5 md:mb-1">Adres</div>
-                  <div className="text-sm md:text-base text-white font-semibold">ul. Płońska 35, Ciechanów</div>
+                  <div className="text-sm md:text-base text-white font-semibold">ul. Spółdzielcza 7, 06-400 Ciechanów</div>
                 </div>
               </div>
 
@@ -161,7 +161,7 @@ export default function OnasSection() {
                 </div>
                 <div>
                   <div className="text-xs md:text-sm text-white/40 mb-0.5 md:mb-1">Telefon</div>
-                  <div className="text-sm md:text-base text-white font-semibold">+48 123 456 789</div>
+                  <div className="text-sm md:text-base text-white font-semibold">+48 515 433 488</div>
                 </div>
               </div>
             </div>
