@@ -92,7 +92,7 @@ export default function Header() {
           </button>
         </div>
 
-        <nav className="flex flex-col gap-1 px-4 py-4 text-base">
+        <nav className="flex flex-col gap-1 px-4 py-4 text-base flex-1">
           <Link href="/#menu" className="rounded px-3 py-2 hover:bg-black/5" onClick={() => setOpen(false)}>Menu</Link>
           <Link href="/polityka-prywatnosci" className="rounded px-3 py-2 hover:bg-black/5" onClick={() => setOpen(false)}>Polityka Prywatności</Link>
           <Link href="/regulamin" className="rounded px-3 py-2 hover:bg-black/5" onClick={() => setOpen(false)}>Regulamin</Link>
@@ -105,10 +105,9 @@ export default function Header() {
             515 433 488
           </a>
         </nav>
-        </div>
         
         {/* Hidden admin link */}
-        <div className="mt-auto px-4 pb-4">
+        <div className="px-4 pb-4">
           <Link 
             href="/admin" 
             onClick={() => setOpen(false)}
@@ -117,6 +116,7 @@ export default function Header() {
             v2.0
           </Link>
         </div>
+      </aside>
     </header>
   );
 }
