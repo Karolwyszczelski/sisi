@@ -37,7 +37,7 @@ export default function OnasSection() {
             </h2>
 
             <p className="mt-4 md:mt-6 max-w-2xl mx-auto text-base md:text-xl text-white/60 leading-relaxed px-2">
-              Jesteśmy miejscem, gdzie tradycyjne receptury spotykają się z nowoczesnym smakiem
+              Jesteśmy miejscem, gdzie pasja do gotowania spotyka się z najlepszymi lokalnymi składnikami
             </p>
           </div>
 
@@ -51,9 +51,9 @@ export default function OnasSection() {
               </h3>
               
               <p className="text-sm md:text-base text-white/50 leading-relaxed">
-                Od pierwszego dnia stawiamy na jakość i świeżość. Nasze burgery powstają z najlepszej wołowiny, 
-                którą codziennie siekamy na miejscu. Bułki pieczone według własnej receptury, warzywa od lokalnych 
-                dostawców, a sosy przygotowywane z pasją.
+                Od pierwszego dnia stawiamy na jakość i świeżość. Mięso do burgerów przygotowujemy sami każdego ranka 
+                i smażymy na grillu. Bułki i warzywa zamawiamy od lokalnych i regionalnych dostawców, 
+                a sosy przygotowujemy z pasją.
               </p>
               
               <p className="text-sm md:text-base text-white/50 leading-relaxed">
@@ -117,7 +117,7 @@ export default function OnasSection() {
               </div>
               <h4 className="text-lg md:text-xl font-bold text-white mb-2 md:mb-3">Świeżość codziennie</h4>
               <p className="text-white/40 text-xs md:text-sm leading-relaxed">
-                Składniki dostarczane każdego ranka. Bułki pieczone na miejscu. Zero kompromisów.
+                Bułki i warzywa od lokalnych dostawców. Mięso przygotowujemy sami każdego ranka i smażymy na grillu.
               </p>
             </div>
 
