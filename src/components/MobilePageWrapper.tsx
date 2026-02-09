@@ -3,7 +3,7 @@
 import React, { useState, useCallback, useEffect, useRef } from "react";
 import { 
   Menu, X, ChevronLeft, Home, UtensilsCrossed, Info, Phone, User, Mail, Lock, Eye, EyeOff, ShoppingCart, Trash2, Minus, Plus,
-  History, Heart, MapPin, Settings, Gift, ChevronDown, ChevronUp, Package, Clock, Check, Truck, XCircle, Star, Edit3, LogOut, Repeat, CreditCard, Building
+  History, Heart, MapPin, Settings, Gift, ChevronDown, ChevronUp, Package, Clock, Check, Truck, XCircle, Star, Edit3, LogOut, Repeat, CreditCard, Building, Shield
 } from "lucide-react";
 import Image from "next/image";
 import dynamic from "next/dynamic";
@@ -73,6 +73,7 @@ export default function MobilePageWrapper() {
   const [menuVisited, setMenuVisited] = useState(false);
   const [profileTab, setProfileTab] = useState<ProfileTab>("orders");
   const [showIntro, setShowIntro] = useState(false);
+  const [userRole, setUserRole] = useState<"admin" | "employee" | "client" | null>(null);
   
   // Auth form state
   const [email, setEmail] = useState("");
@@ -238,6 +239,22 @@ export default function MobilePageWrapper() {
         });
     }
   }, [isProfileOpen, profileStep, session?.user?.id, supabase]);
+
+  // Fetch user role when session changes
+  useEffect(() => {
+    if (!session?.user?.id) {
+      setUserRole(null);
+      return;
+    }
+    supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", session.user.id)
+      .single()
+      .then(({ data }) => {
+        setUserRole((data?.role as "admin" | "employee" | "client") ?? null);
+      });
+  }, [session?.user?.id, supabase]);
 
   // Mobile Intro animation
   useEffect(() => {
@@ -1320,6 +1337,17 @@ export default function MobilePageWrapper() {
                     Program lojalnościowy
                     <span className="text-[10px] bg-yellow-400/20 text-yellow-400 px-2 py-0.5 rounded-full">Wkrótce</span>
                   </button>
+                  
+                  {/* Przycisk do panelu admina - tylko dla admin/employee */}
+                  {(userRole === "admin" || userRole === "employee") && (
+                    <a 
+                      href="/admin"
+                      className="w-full py-4 bg-gradient-to-r from-indigo-500 to-purple-600 text-white font-bold text-lg rounded-2xl active:scale-[0.98] transition-transform flex items-center justify-center gap-3"
+                    >
+                      <Shield size={22} />
+                      Panel {userRole === "admin" ? "Administratora" : "Pracownika"}
+                    </a>
+                  )}
                   
                   <button 
                     onClick={handleLogout}
