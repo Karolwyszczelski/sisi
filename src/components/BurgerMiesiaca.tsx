@@ -7,7 +7,7 @@ import useCartStore from "@/store/cartStore";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
 import clsx from "clsx";
 
-const MONTH_IMG = "/halloween.svg";           // obraz burgera miesiąca
+const MONTH_IMG = "/halloween.png";           // obraz burgera miesiąca
 
 const PlusSVG = (
   <svg
