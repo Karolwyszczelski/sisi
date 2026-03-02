@@ -64,7 +64,7 @@ export default function BurgerMonthPage() {
       }
 
       // Domyślne zdjęcie jeśli brak w bazie
-      const defaultImage = "/halloween.svg";
+      const defaultImage = "/halloween.png";
 
       if (bomData) {
         setForm({
