@@ -684,6 +684,32 @@ export async function getCategories(): Promise<{
 }
 
 /* ============================================================
+   Tables API
+   ============================================================ */
+
+export interface DotyposTable {
+  id: number;
+  name: string;
+  branchId?: number;
+  deleted?: boolean;
+  seats?: number;
+}
+
+/**
+ * Fetch all tables from Dotypos
+ */
+export async function getTables(): Promise<{
+  currentPage: string;
+  perPage: string;
+  totalItemsOnPage: string;
+  totalItemsCount: string;
+  data: DotyposTable[];
+}> {
+  const cloudId = await getCloudId();
+  return apiRequest(`/clouds/${cloudId}/tables`);
+}
+
+/* ============================================================
    Branches API
    ============================================================ */
 
@@ -932,6 +958,7 @@ export async function createDraftOrder(options: {
   lock?: boolean;          // Lock order for 45s for external changes
   webhookUrl?: string;
   discountPercent?: number; // 20 = 20%
+  tableId?: number;         // Table ID — shows "Stół: [name]" on bon
 }): Promise<DotyposPOSActionResponse> {
   const branchId = await getBranchId();
   
@@ -942,6 +969,10 @@ export async function createDraftOrder(options: {
     items: options.items,
     lock: options.lock,
   };
+  
+  if (options.tableId) {
+    action["table-id"] = options.tableId;
+  }
   
   if (options.discountPercent && options.discountPercent > 0) {
     action["discount-percent"] = options.discountPercent;

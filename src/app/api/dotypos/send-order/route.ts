@@ -25,7 +25,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import dotypos, { DotyposOrderItem } from "@/lib/dotypos";
+import dotypos, { DotyposOrderItem, DotyposTable } from "@/lib/dotypos";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -403,12 +403,58 @@ export async function POST(req: NextRequest) {
     const isTakeAway = (order.selected_option || order.order_type) !== "local" &&
                        (order.selected_option || order.order_type) !== "dine-in";
     
+    // 7.7. Find matching table ID for order type label on bon
+    // Dotypos shows "Stół: [name]" on the bon when a table is assigned.
+    // We look up tables by name to match order type (e.g. "kierowca" for delivery, "na wynos" for takeaway).
+    let tableId: number | undefined;
+    try {
+      // Check env vars first (fastest, no API call)
+      if (selectedOpt === "delivery" && process.env.DOTYPOS_TABLE_ID_DELIVERY) {
+        tableId = parseInt(process.env.DOTYPOS_TABLE_ID_DELIVERY, 10);
+      } else if (selectedOpt === "takeaway" && process.env.DOTYPOS_TABLE_ID_TAKEAWAY) {
+        tableId = parseInt(process.env.DOTYPOS_TABLE_ID_TAKEAWAY, 10);
+      } else if (selectedOpt === "local" && process.env.DOTYPOS_TABLE_ID_LOCAL) {
+        tableId = parseInt(process.env.DOTYPOS_TABLE_ID_LOCAL, 10);
+      }
+      
+      // Fallback: fetch tables from API and match by name
+      if (!tableId) {
+        const tablesRes = await dotypos.getTables();
+        const tables: DotyposTable[] = tablesRes.data || [];
+        
+        const findTable = (keywords: string[]): DotyposTable | undefined => {
+          for (const kw of keywords) {
+            const found = tables.find(t => 
+              !t.deleted && t.name.toLowerCase().includes(kw)
+            );
+            if (found) return found;
+          }
+          return undefined;
+        };
+        
+        let matched: DotyposTable | undefined;
+        if (selectedOpt === "delivery") {
+          matched = findTable(["kierowca", "dostawa", "dowóz", "delivery"]);
+        } else if (selectedOpt === "takeaway") {
+          matched = findTable(["wynos", "takeaway", "na wynos"]);
+        }
+        // For "local" we don't assign a table (it's dine-in, normal)
+        
+        if (matched) {
+          tableId = matched.id;
+          console.log(`[Dotypos Order] Matched table: "${matched.name}" (id: ${matched.id}) for ${selectedOpt}`);
+        }
+      }
+    } catch (tableErr) {
+      console.warn("[Dotypos Order] Table lookup failed (order will be sent without table):", tableErr);
+    }
+    
     // 8. Send to Dotypos
     // We use order/create (createDraftOrder) for ALL orders:
     // - No receipt is printed (paragon) — cashier will issue it manually when ready
     // - Kitchen/bon printers still print based on POS configuration
     // - For paid online orders, the note includes payment info
-    console.log(`[Dotypos Order] Sending ${dotyposItems.length} items, paid=${isPaid}, discount=${discountPercent}%`);
+    console.log(`[Dotypos Order] Sending ${dotyposItems.length} items, paid=${isPaid}, discount=${discountPercent}%, table=${tableId || 'none'}`);
     
     if (isPaid) {
       orderNoteParts.push("OPLACONE ONLINE");
@@ -421,6 +467,7 @@ export async function POST(req: NextRequest) {
       note: orderNoteParts.join(" | "),
       takeAway: isTakeAway,
       discountPercent: discountPercent > 0 ? discountPercent : undefined,
+      tableId,
       webhookUrl: getWebhookUrl(),
     });
     
