@@ -480,12 +480,13 @@ function MobileProductCard({ product, isFirst }: { product: any; isFirst: boolea
         {/* Cena */}
         <div className={`text-right flex-shrink-0 ${isFirst ? "text-black" : "text-white"}`}>
           <span className="text-2xl font-black">{product.price}</span>
-          <span className={`text-sm ml-0.5 ${isFirst ? "text-black/60" : "text-white/40"}`}>zł</span>
+          <span className={`text-sm ml-0.5 ${isFirst ? "text-black/70" : "text-white/60"}`}>zł</span>
         </div>
 
         {/* Przycisk dodaj */}
         <button
           onClick={(e) => { e.stopPropagation(); handleAdd(); }}
+          aria-label="Dodaj do koszyka"
           className={`
             w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0
             transition-all
@@ -510,7 +511,7 @@ function MobileProductCard({ product, isFirst }: { product: any; isFirst: boolea
             className={`
               text-xs leading-relaxed
               ${expanded ? "" : "line-clamp-1"}
-              ${isFirst ? "text-black/70" : "text-white/50"}
+              ${isFirst ? "text-black/70" : "text-white/70"}
             `}
           >
             {ingredients}

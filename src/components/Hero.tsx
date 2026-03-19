@@ -16,6 +16,7 @@ const INTRO_SHOWN_KEY = "sisi_intro_shown";
 
 export default function Hero({ onNavigateToMenu, onNavigateToBurger, onOpenReservation }: HeroProps) {
   const [showIntro, setShowIntro] = useState(false); // Start as false, then check
+  const [introVisible, setIntroVisible] = useState(false);
   const [slide, setSlide] = useState<0 | 1>(0);
   const [reducedMotion, setReducedMotion] = useState(false);
 
@@ -36,14 +37,20 @@ export default function Hero({ onNavigateToMenu, onNavigateToBurger, onOpenReser
     const alreadyShown = sessionStorage.getItem(INTRO_SHOWN_KEY);
     if (alreadyShown || reducedMotion) {
       setShowIntro(false);
+      setIntroVisible(false);
       return;
     }
     
-    // Show intro for first visit
+    // Show intro for first visit — as overlay, hero stays rendered underneath
     setShowIntro(true);
+    setIntroVisible(true);
     sessionStorage.setItem(INTRO_SHOWN_KEY, "true");
     
-    const t = setTimeout(() => setShowIntro(false), 1800);
+    const t = setTimeout(() => {
+      setIntroVisible(false);
+      // Remove from DOM after fade-out animation completes
+      setTimeout(() => setShowIntro(false), 500);
+    }, 1800);
     return () => clearTimeout(t);
   }, [reducedMotion]);
 
@@ -53,9 +60,14 @@ export default function Hero({ onNavigateToMenu, onNavigateToBurger, onOpenReser
     return () => clearInterval(id);
   }, [reducedMotion]);
 
+  let introOverlay: React.ReactNode = null;
   if (showIntro) {
-    return (
-      <section className="intro-section fixed inset-0 z-50 flex items-center justify-center bg-black text-white overflow-hidden">
+    introOverlay = (
+      <div
+        className="intro-section fixed inset-0 z-50 flex items-center justify-center bg-black text-white overflow-hidden"
+        style={{ opacity: introVisible ? 1 : 0, transition: "opacity 0.4s ease-in", pointerEvents: introVisible ? "auto" : "none" }}
+        aria-hidden={!introVisible}
+      >
         {/* Burger spadający z góry */}
         <div className="burger-drop absolute w-40 h-40 sm:w-48 sm:h-48 z-30 will-change-transform">
           <Image
@@ -78,7 +90,7 @@ export default function Hero({ onNavigateToMenu, onNavigateToBurger, onOpenReser
           <p className="intro-text text-4xl sm:text-5xl md:text-6xl font-black leading-tight tracking-tight">
             Witaj w <span className="text-yellow-400">SISI</span>! 🍔
           </p>
-          <p className="intro-subtext text-white/50 mt-3 text-lg sm:text-xl">Najlepsze burgery w mieście</p>
+          <p className="intro-subtext text-white/70 mt-3 text-lg sm:text-xl">Najlepsze burgery w mieście</p>
         </div>
 
         <style jsx>{`
@@ -183,12 +195,16 @@ export default function Hero({ onNavigateToMenu, onNavigateToBurger, onOpenReser
             100% { opacity: 0; }
           }
         `}</style>
-      </section>
+      </div>
     );
   }
 
   return (
-    <section className="relative w-full min-h-[100svh] overflow-hidden text-white">
+    <>
+      {/* Intro overlay — rendered on top, hero always stays in DOM */}
+      {introOverlay}
+
+      <section className="relative w-full min-h-[100svh] overflow-hidden text-white">
       <h1 className="sr-only">
         SISI Burger and Pancakes — najlepsze burgery i pancake w Ciechanowie
       </h1>
@@ -320,5 +336,6 @@ export default function Hero({ onNavigateToMenu, onNavigateToBurger, onOpenReser
 
       <div className="absolute bottom-0 left-0 right-0 h-32 md:h-48 bg-gradient-to-b from-transparent to-black pointer-events-none z-20" />
     </section>
+    </>
   );
 }

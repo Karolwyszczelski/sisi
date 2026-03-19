@@ -349,6 +349,7 @@ const ProductItem: React.FC<{
                 onClick={() => removeExtraMeat(prod.name)} 
                 disabled={!prod.extraMeatCount}
                 className="w-8 h-8 rounded-lg bg-white/10 text-white flex items-center justify-center hover:bg-white/20 transition disabled:opacity-30 disabled:cursor-not-allowed"
+                aria-label="Usuń dodatkowe mięso"
               >
                 −
               </button>
@@ -359,6 +360,7 @@ const ProductItem: React.FC<{
               <button 
                 onClick={() => addExtraMeat(prod.name)} 
                 className="w-8 h-8 rounded-lg bg-yellow-400 text-black flex items-center justify-center hover:bg-yellow-300 transition font-bold"
+                aria-label="Dodaj dodatkowe mięso"
               >
                 +
               </button>

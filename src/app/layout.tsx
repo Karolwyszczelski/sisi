@@ -15,7 +15,7 @@ const BASE = process.env.NEXT_PUBLIC_BASE_URL || "https://www.sisiciechanow.pl";
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
+  maximumScale: 5,
   viewportFit: "cover",
 };
 
@@ -89,7 +89,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
 <Script
   id="sw-register"
-  strategy="beforeInteractive"
+  strategy="afterInteractive"
 >{`
   try {
     if ('serviceWorker' in navigator) {
@@ -110,7 +110,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           src="/grafittiburger2.jpg"
           alt=""
           fill
-          priority
+          loading="lazy"
           className="hidden md:block object-cover opacity-20 pointer-events-none select-none -z-10"
         />
         <ClientProvider>

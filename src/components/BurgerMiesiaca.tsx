@@ -149,7 +149,7 @@ export default function BurgerMiesiaca() {
   }, [burgerDesc]);
 
   return (
-    <section className="relative w-full overflow-hidden text-white">
+    <section id="burger-miesiaca" className="relative w-full overflow-hidden text-white">
       {/* Tło sekcji - gradient czarny-żółty-czarny */}
       <div className="absolute inset-0 bg-black" />
       <div className="absolute inset-0 bg-gradient-to-b from-black via-transparent to-black" />
@@ -196,7 +196,7 @@ export default function BurgerMiesiaca() {
               alt="Burger miesiąca"
               width={280}
               height={280}
-              priority
+              loading="lazy"
               className="relative z-10 h-full w-full object-contain drop-shadow-2xl animate-float-slow"
             />
 
@@ -215,7 +215,7 @@ export default function BurgerMiesiaca() {
 
           {/* Miesiąc i nazwa */}
           <div className="text-center mb-6">
-            <span className="text-white/40 text-[10px] font-semibold tracking-[0.25em] uppercase block mb-1">
+            <span className="text-white/60 text-[10px] font-semibold tracking-[0.25em] uppercase block mb-1">
               Edycja · {loading ? "..." : monthLabel}
             </span>
             <h2 className="text-3xl font-black text-white leading-tight">
@@ -230,7 +230,7 @@ export default function BurgerMiesiaca() {
         {/* Składniki - karty */}
         {descLines.length > 0 && (
           <div className="mb-6">
-            <p className="text-[10px] font-semibold tracking-[0.2em] text-white/40 uppercase mb-3 text-center">
+            <p className="text-[10px] font-semibold tracking-[0.2em] text-white/60 uppercase mb-3 text-center">
               Co w środku?
             </p>
             <div className="grid grid-cols-2 gap-2">
@@ -255,7 +255,7 @@ export default function BurgerMiesiaca() {
             </div>
             <div>
               <p className="text-white font-semibold text-sm">Tylko do końca miesiąca!</p>
-              <p className="text-white/50 text-xs">Nie przegap tej wyjątkowej kompozycji smaków</p>
+              <p className="text-white/70 text-xs">Nie przegap tej wyjątkowej kompozycji smaków</p>
             </div>
           </div>
         </div>
@@ -322,7 +322,7 @@ export default function BurgerMiesiaca() {
                   alt="Burger miesiąca"
                   width={500}
                   height={500}
-                  priority
+                  loading="lazy"
                   className="relative z-10 w-full h-auto object-contain drop-shadow-2xl animate-float-slow"
                 />
                 
@@ -372,7 +372,7 @@ export default function BurgerMiesiaca() {
               {/* Składniki */}
               {descLines.length > 0 && (
                 <div className="space-y-4">
-                  <p className="text-[11px] font-semibold tracking-[0.2em] text-white/30 uppercase text-center lg:text-left">
+                  <p className="text-[11px] font-semibold tracking-[0.2em] text-white/60 uppercase text-center lg:text-left">
                     Co w środku?
                   </p>
                   <div className="flex flex-wrap gap-2 justify-center lg:justify-start">
@@ -411,7 +411,7 @@ export default function BurgerMiesiaca() {
                 </button>
                 
                 {/* Info o czasie */}
-                <div className="flex items-center gap-2 text-white/40 text-sm">
+                <div className="flex items-center gap-2 text-white/60 text-sm">
                   <span className="text-lg">⏰</span>
                   <span>Tylko do końca miesiąca</span>
                 </div>

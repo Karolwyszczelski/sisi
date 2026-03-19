@@ -27,6 +27,7 @@ export default function CartPopup() {
         <button 
           onClick={toggleCart}
           className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center hover:bg-white/20 transition-colors"
+          aria-label="Zamknij koszyk"
         >
           <X className="w-4 h-4" />
         </button>
@@ -52,6 +53,7 @@ export default function CartPopup() {
                     onClick={() => removeItem(item.name)}
                     className="w-7 h-7 rounded-lg bg-white/10 flex items-center justify-center hover:bg-red-500/20 hover:text-red-400 transition-colors"
                     title="Usuń 1 sztukę"
+                    aria-label="Usuń 1 sztukę"
                   >
                     <Minus size={14} />
                   </button>
