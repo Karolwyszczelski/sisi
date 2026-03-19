@@ -1,6 +1,9 @@
 // src/types/dotypos.ts
 // =============================================
 // TypeScript Types for Dotypos API v2 Integration
+// API Version: 2026.10.0
+// Documentation: https://docs.api.dotypos.com/
+// Last updated: 2026-03-10
 // =============================================
 
 /* ============================================================
@@ -20,9 +23,12 @@ export interface DotyposConfig {
    ============================================================ */
 
 export interface DotyposTokenResponse {
-  access_token: string;
-  token_type: "Bearer";
-  expires_in: number;
+  /** New 2026 format uses 'accessToken' (camelCase) */
+  accessToken?: string;
+  /** Legacy format (may still appear) */
+  access_token?: string;
+  token_type?: "Bearer";
+  expires_in?: number;
   refresh_token?: string;
   scope?: string;
 }
@@ -166,19 +172,49 @@ export interface DotyposOpeningHours {
    ============================================================ */
 
 export type DotyposPOSActionType = 
-  | "order/create"           // Create order only
-  | "order/create-issue"     // Create + issue receipt
-  | "order/create-issue-pay" // Create + issue + mark paid
-  | "order/cancel"           // Cancel order
-  | "receipt/issue"          // Issue receipt for existing order
-  | "receipt/cancel";        // Cancel receipt
+  | "order/hello"                   // Health check (1.239.8+)
+  | "order/create"                  // Create order only
+  | "order/create-issue"            // Create + issue receipt
+  | "order/create-issue-pay"        // Create + issue + mark paid
+  | "order/update"                  // Update existing order (1.234+)
+  | "order/add-item"                // Add items to order (1.234+)
+  | "order/issue"                   // Issue receipt for order
+  | "order/pay"                     // Pay issued order
+  | "order/issue-and-pay"           // Issue + pay
+  | "order/cancel"                  // Cancel empty order (1.243+)
+  | "order/list"                    // List open orders (1.235+)
+  | "order/split"                   // Split order (1.234)
+  | "order/split-issue"             // Split + issue (1.234)
+  | "order/split-issue-pay"         // Split + issue + pay (1.234)
+  | "order/set-item-takeaway"       // Set item takeaway (1.237+)
+  | "order/change-item-course"      // Change course (1.237+)
+  | "order/prepare-next-course"     // Prepare next course (1.237+)
+  | "order/perform-status-transition" // Change status (1.234+)
+  | "receipt/issue"                 // Issue receipt (legacy compat)
+  | "receipt/cancel";               // Cancel receipt (legacy compat)
 
 export interface DotyposOrderItem {
-  id: number;                    // Product ID
+  id: number;                    // Product ID (_productId)
   qty: number;                   // Quantity (can be decimal for weighted items)
   note?: string;                 // Item-level note
-  unitPriceWithVat?: number;     // Override price (optional)
-  discountPercent?: number;      // Item discount
+  "manual-price"?: number;       // Override unit price (since Dotypos 2.9)
+  "discount-percent"?: number;   // Item discount percentage
+  "course-id"?: number | null;   // Course ID (since 1.237)
+  "take-away"?: boolean;         // Item-level takeaway (since 1.237)
+  tags?: string[];               // Item tags
+  customizations?: DotyposItemCustomization[]; // Customizations (1.234+)
+  /** @deprecated Use "manual-price" instead */
+  unitPriceWithVat?: number;
+  /** @deprecated Use "discount-percent" instead */
+  discountPercent?: number;
+}
+
+export interface DotyposItemCustomization {
+  "product-customization-id": number;  // ID of customization definition
+  "product-id": number;                // Customization product ID
+  "manual-price"?: number;             // Override price (since Dotypos 2.9)
+  qty?: number;                         // Quantity (since Dotypos 2.17, April 2026)
+  "take-away"?: boolean;               // Item-level takeaway (since 1.237)
 }
 
 export interface DotyposCustomer {
@@ -193,20 +229,75 @@ export interface DotyposPOSActionRequest {
   action: DotyposPOSActionType;
   "external-id"?: string;
   "take-away"?: boolean;
-  "table-seat"?: string;
+  "table-id"?: number;
+  "order-id"?: number;               // For actions on existing orders
+  "user-id"?: number;                // Employee/user ID
+  "customer-id"?: number;            // Customer ID
   "payment-method-id"?: number;
   "payment-method-name"?: string;
+  "discount-percent"?: number;       // Order-level discount
+  "print-type"?: "local" | "remote" | "email" | "none";
+  "print-email"?: string;
+  "print-append"?: string;           // Extra text on receipt
+  "print-config"?: Record<string, unknown>;
+  webhook?: string;                   // Webhook URL for response
+  validity?: number;                  // Unix timestamp - request expiry
+  "idempotency-key"?: string;         // Dedup key (since Dotypos 2.1)
+  lock?: boolean;                     // Lock order for 45s (1.234+)
   customer?: DotyposCustomer;
-  items: DotyposOrderItem[];
+  items?: DotyposOrderItem[];
   note?: string;
+  /** @deprecated Use "table-id" instead */
+  "table-seat"?: string;
+  /** @deprecated Use direct fields instead */
   discount?: {
     percent?: number;
     value?: number;
   };
 }
 
+export interface DotyposPOSPassThroughError {
+  code: number;
+  description: string;
+  "localized-description"?: string;
+}
+
 export interface DotyposPOSActionResponse {
-  status: "ok" | "error" | "partial";
+  code: number;                   // Result code (0 = OK)
+  order?: {
+    id: number;
+    "external-id"?: string;
+    "price-total": number;
+    currency: string;
+    paid: boolean;
+    status?: string;
+    note?: string;
+    "order-number"?: string;
+    created: number;
+    completed?: number;
+    "locked-until"?: number;
+    "customer-id"?: number;
+    "user-id"?: number;
+    "table-id"?: number;
+  };
+  items?: Array<{
+    id: number;
+    "product-id": number;
+    name: string;
+    qty: number;
+    "price-with-vat": { unit: number; total: number; "unit-billed": number };
+    "price-without-vat": { unit: number; total: number; "unit-billed": number };
+    vat: number;
+    "take-away": boolean;
+    "course-id"?: number;
+    customizations?: unknown[];
+  }>;
+  print?: string[];               // Base64 receipt data
+  "print-png"?: string | null;    // Base64 receipt image (SK, 1.242+)
+  "pass-through-errors"?: DotyposPOSPassThroughError[]; // (1.242+)
+  deviceTimestamp?: number;       // Device UTC timestamp in ms (1.239.8+)
+  // Legacy compat
+  status?: "ok" | "error" | "partial";
   orderId?: number;
   receiptId?: number;
   message?: string;
@@ -215,6 +306,20 @@ export interface DotyposPOSActionResponse {
     code: string;
     message: string;
   }>;
+}
+
+/** Response from order/hello action (1.239.8+) */
+export interface DotyposPOSHelloResponse {
+  device: string;
+  timezone: string;
+  /** NOTE: The API literally returns "version:" with a trailing colon as the JSON key */
+  "version:": {
+    id: string;
+    code: number;
+    name: string;
+  };
+  code: number;
+  deviceTimestamp: number;
 }
 
 /* ============================================================
@@ -292,15 +397,47 @@ export interface DotyposPaymentMethod {
    Webhooks
    ============================================================ */
 
-export interface DotyposWebhookPayload {
-  event: DotyposWebhookEvent;
-  cloudId: number;
-  branchId?: number;
-  data: Record<string, unknown>;
-  timestamp: string;
-  signature: string;
+/** Registered webhook entity types (API v2) */
+export type DotyposWebhookEntity = 
+  | "STOCKLOG"     // Stock changes
+  | "POINTSLOG"    // Points changes
+  | "PRODUCT"      // Product changes
+  | "ORDERBEAN"    // Order changes
+  | "RESERVATION"; // Reservation changes
+
+export interface DotyposWebhookRegistration {
+  id: number;
+  _cloudId: number;
+  _warehouseId?: number;
+  method: "POST" | "GET";
+  url: string;
+  payloadEntity: DotyposWebhookEntity;
+  payloadVersion: "V1";
+  versionDate?: string;
 }
 
+/** Webhook notification payload received from Dotypos */
+export interface DotyposWebhookPayload {
+  cloudId: number;
+  branchId?: number;
+  warehouseId?: number;
+  entityId: number;              // ID of the changed entity
+  entityType: DotyposWebhookEntity;
+  action: "created" | "updated" | "deleted";
+  timestamp: number;             // Unix timestamp
+  data?: Record<string, unknown>;
+}
+
+/** POS Action webhook callback (response to webhook param in POS actions) */
+export interface DotyposPOSActionWebhookPayload {
+  order?: DotyposPOSActionResponse["order"];
+  items?: DotyposPOSActionResponse["items"];
+  code: number;
+  deviceTimestamp?: number;
+  "external-id"?: string;
+}
+
+/** @deprecated Use DotyposWebhookEntity instead */
 export type DotyposWebhookEvent = 
   | "order.created"
   | "order.updated"
