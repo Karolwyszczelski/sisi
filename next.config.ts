@@ -14,7 +14,7 @@ const csp = [
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://maps.googleapis.com https://*.googleapis.com https://*.google.com https://secure.przelewy24.pl https://sandbox.przelewy24.pl https://challenges.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com https://lottie.host",
   "frame-src 'self' https://*.google.com https://*.gstatic.com https://challenges.cloudflare.com https://secure.przelewy24.pl https://sandbox.przelewy24.pl",
-  "form-action 'self' https://secure.przelewy24.pl https://sandbox.przelewy24.pl",
+  "form-action 'self' https://secure.przelewy24.pl https://sandbox.przelewy24.pl https://admin.dotykacka.cz",
   "manifest-src 'self'",
   "worker-src 'self' blob:",
   "frame-ancestors 'none'",
