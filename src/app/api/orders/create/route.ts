@@ -797,7 +797,11 @@ export async function POST(req: Request) {
         .eq("auto_apply", true)
         .eq("active", true);
 
-      if (error || !data || !data.length) return null;
+      if (error || !data || !data.length) {
+        if (error) console.error("[orders.create] getBestAutoDiscount query error:", error.message);
+        else console.warn("[orders.create] getBestAutoDiscount: no active auto_apply codes found");
+        return null;
+      }
 
       const nowMs = Date.now();
       let best: { dc: DiscountCode; amount: number } | null = null;
@@ -1230,6 +1234,7 @@ const pricingType =
             Math.round((baseTotal - amount) * 100) / 100
           );
 
+          // Najpierw spróbuj zapisać redempcję (tracking)
           const { error: redErr } = await supabaseAdmin
             .from("discount_redemptions")
             .insert({
@@ -1241,31 +1246,40 @@ const pricingType =
               amount,
             });
 
-          if (!redErr) {
-            const { error: updErr } = await supabaseAdmin
-              .from("orders")
-              .update({
-                promo_code: dc.code,
-                discount_amount: amount,
-                total_price: newTotal,
-              })
-              .eq("id", newOrderId);
+          if (redErr) {
+            console.error("[orders.create] auto discount_redemptions insert error:", redErr.message, redErr);
+          }
 
-            if (!updErr) {
-              currentTotal = newTotal;
-              appliedCode = dc;
-              appliedDiscount = amount;
-            } else {
+          // ZAWSZE aplikuj rabat na zamówieniu – niezależnie od redempcji
+          const { error: updErr } = await supabaseAdmin
+            .from("orders")
+            .update({
+              promo_code: dc.code,
+              discount_amount: amount,
+              total_price: newTotal,
+            })
+            .eq("id", newOrderId);
+
+          if (!updErr) {
+            currentTotal = newTotal;
+            appliedCode = dc;
+            appliedDiscount = amount;
+          } else {
+            console.error("[orders.create] auto orders update error:", updErr.message, updErr);
+            // Cofnij redempcję jeśli była wstawiona
+            if (!redErr) {
               await supabaseAdmin
                 .from("discount_redemptions")
                 .delete()
                 .eq("order_id", newOrderId);
             }
           }
+        } else {
+          console.warn("[orders.create] auto promo: getBestAutoDiscount returned null for baseTotal:", baseTotal);
         }
       } catch (e: any) {
-        console.warn(
-          "[orders.create] auto promo skipped:",
+        console.error(
+          "[orders.create] auto promo error (order still created without discount):",
           e?.message || e
         );
       }
