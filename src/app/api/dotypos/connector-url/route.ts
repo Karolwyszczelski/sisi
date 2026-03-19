@@ -46,48 +46,20 @@ export async function GET(req: NextRequest) {
   const timestamp = Math.floor(Date.now() / 1000);
   const signature = generateSignature(CLIENT_SECRET, timestamp);
   
-  // Form data for POST submission (recommended since Jan 2026)
-  const formData = {
-    client_id: CLIENT_ID,
-    redirect_uri: redirectUri,
-    scope: "*",
-    state,
-    timestamp: String(timestamp),
-    signature,
-  };
-
-  // Check if request wants JSON (API call) or HTML (direct browser redirect)
-  const wantsJson = req.headers.get("accept")?.includes("application/json") ||
-                    req.headers.get("x-requested-with") === "fetch";
-  
-  if (wantsJson) {
-    return NextResponse.json({ 
-      action: DOTYPOS_CONNECTOR_URL,
-      method: "POST",
-      formData,
-      url: `${DOTYPOS_CONNECTOR_URL}?${new URLSearchParams(formData).toString()}`,
-      expiresIn: 300,
-    });
-  }
-  
-  // Return auto-submitting HTML form (most reliable POST method)
-  const inputs = Object.entries(formData)
-    .map(([k, v]) => `<input type="hidden" name="${k}" value="${v}" />`)
-    .join("\n      ");
-  
-  const html = `<!DOCTYPE html>
-<html>
-  <head><title>Łączenie z Dotypos...</title></head>
-  <body>
-    <p>Przekierowanie do Dotypos...</p>
-    <form id="dotypos-form" method="POST" action="${DOTYPOS_CONNECTOR_URL}">
-      ${inputs}
-    </form>
-    <script>document.getElementById("dotypos-form").submit();</script>
-  </body>
-</html>`;
-  
-  return new NextResponse(html, {
-    headers: { "Content-Type": "text/html; charset=utf-8" },
+  // Return form data for POST submission (Dotypos Connector v2, Jan 2026+)
+  // The CLIENT creates a DOM form and submits it — this is the official
+  // Dotypos-recommended approach (see docs.api.dotypos.com/authorization)
+  return NextResponse.json({
+    action: DOTYPOS_CONNECTOR_URL,
+    method: "POST",
+    formData: {
+      client_id: CLIENT_ID,
+      redirect_uri: redirectUri,
+      scope: "*",
+      state,
+      timestamp: String(timestamp),
+      signature,
+    },
+    expiresIn: 300,
   });
 }
