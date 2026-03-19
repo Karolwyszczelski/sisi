@@ -123,14 +123,14 @@ interface PosProduct {
 
 /**
  * Normalize product name for matching
- * Removes extra spaces, converts to lowercase
+ * Removes extra spaces, converts to lowercase, keeps Unicode letters (Polish chars)
  */
 function normalizeProductName(name: string): string {
   return name
     .toLowerCase()
     .trim()
     .replace(/\s+/g, " ")
-    .replace(/[^\w\s]/gi, ""); // remove special chars
+    .replace(/[^\p{L}\p{N}\s]/gu, ""); // keep letters (incl. Polish), digits, spaces
 }
 
 /**
@@ -283,8 +283,8 @@ export async function POST(req: NextRequest) {
       }
       return undefined;
     };
-    const packagingProduct = findSpecialProduct(["opakowanie", "pakowanie", "packaging"]);
-    const deliveryProduct = findSpecialProduct(["dostawa", "transport", "delivery"]);
+    const packagingProduct = findSpecialProduct(["pakowanie na wynos", "pakowanie", "opakowanie", "packaging"]);
+    const deliveryProduct = findSpecialProduct(["dowóz", "dowoz", "dostawa", "transport", "delivery"]);
     
     // 4. Map order items to Dotypos items
     const dotyposItems: DotyposOrderItem[] = [];
