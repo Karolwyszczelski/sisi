@@ -55,18 +55,39 @@ export async function GET(req: NextRequest) {
     timestamp: String(timestamp),
     signature,
   };
+
+  // Check if request wants JSON (API call) or HTML (direct browser redirect)
+  const wantsJson = req.headers.get("accept")?.includes("application/json") ||
+                    req.headers.get("x-requested-with") === "fetch";
   
-  // Legacy GET URL (still works but deprecated)
-  const params = new URLSearchParams(formData);
-  const url = `${DOTYPOS_CONNECTOR_URL}?${params.toString()}`;
+  if (wantsJson) {
+    return NextResponse.json({ 
+      action: DOTYPOS_CONNECTOR_URL,
+      method: "POST",
+      formData,
+      url: `${DOTYPOS_CONNECTOR_URL}?${new URLSearchParams(formData).toString()}`,
+      expiresIn: 300,
+    });
+  }
   
-  return NextResponse.json({ 
-    // POST form submission (recommended)
-    action: DOTYPOS_CONNECTOR_URL,
-    method: "POST",
-    formData,
-    // Legacy GET URL (deprecated but functional)
-    url,
-    expiresIn: 300, // URL valid for ~5 minutes due to timestamp
+  // Return auto-submitting HTML form (most reliable POST method)
+  const inputs = Object.entries(formData)
+    .map(([k, v]) => `<input type="hidden" name="${k}" value="${v}" />`)
+    .join("\n      ");
+  
+  const html = `<!DOCTYPE html>
+<html>
+  <head><title>Łączenie z Dotypos...</title></head>
+  <body>
+    <p>Przekierowanie do Dotypos...</p>
+    <form id="dotypos-form" method="POST" action="${DOTYPOS_CONNECTOR_URL}">
+      ${inputs}
+    </form>
+    <script>document.getElementById("dotypos-form").submit();</script>
+  </body>
+</html>`;
+  
+  return new NextResponse(html, {
+    headers: { "Content-Type": "text/html; charset=utf-8" },
   });
 }
