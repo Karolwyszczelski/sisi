@@ -112,42 +112,13 @@ export default function IntegrationsForm() {
   }, [searchParams, supabase, router]);
 
   /**
-   * Connect to Dotypos - fetches secure form data and submits via POST
-   * (GET method deprecated since Jan 2026)
+   * Connect to Dotypos - redirects to auto-submitting POST form
    */
   const handleConnect = async () => {
     setConnecting(true);
-    try {
-      const res = await fetch("/api/dotypos/connector-url");
-      const data = await res.json();
-      
-      if (data.action && data.formData) {
-        // Create hidden form and submit via POST (required since Jan 2026)
-        const form = document.createElement("form");
-        form.method = "POST";
-        form.action = data.action;
-        
-        Object.entries(data.formData).forEach(([key, value]) => {
-          const input = document.createElement("input");
-          input.type = "hidden";
-          input.name = key;
-          input.value = value as string;
-          form.appendChild(input);
-        });
-        
-        document.body.appendChild(form);
-        form.submit();
-      } else if (data.url) {
-        // Fallback to GET redirect
-        window.location.href = data.url;
-      } else {
-        console.error("Failed to get connector URL:", data.error);
-        setConnecting(false);
-      }
-    } catch (err) {
-      console.error("Failed to connect:", err);
-      setConnecting(false);
-    }
+    // Navigate directly to the connector-url endpoint
+    // which returns an auto-submitting HTML form (POST to Dotypos)
+    window.location.href = "/api/dotypos/connector-url";
   };
 
   const handleDisconnect = async () => {
