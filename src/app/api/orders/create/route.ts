@@ -1234,20 +1234,26 @@ const pricingType =
             Math.round((baseTotal - amount) * 100) / 100
           );
 
-          // Najpierw spróbuj zapisać redempcję (tracking)
+          // Zapisz redempcję (tracking) — upsert, bo auto-rabat może być
+          // wielokrotnie użyty przez tego samego emaila na różne zamówienia
           const { error: redErr } = await supabaseAdmin
             .from("discount_redemptions")
-            .insert({
-              code_id: dc.id,
-              code: dc.code,
-              order_id: newOrderId,
-              user_id: n.user ?? null,
-              email_lower: emailLower,
-              amount,
-            });
+            .upsert(
+              {
+                code_id: dc.id,
+                code: dc.code,
+                order_id: newOrderId,
+                user_id: n.user ?? null,
+                email_lower: emailLower,
+                amount,
+              },
+              { onConflict: "code,email_lower", ignoreDuplicates: false }
+            );
 
           if (redErr) {
-            console.error("[orders.create] auto discount_redemptions insert error:", redErr.message, redErr);
+            // Jeśli upsert też nie przejdzie, kontynuuj — rabat
+            // i tak zostanie zastosowany na zamówieniu
+            console.warn("[orders.create] auto discount_redemptions upsert warning:", redErr.message);
           }
 
           // ZAWSZE aplikuj rabat na zamówieniu – niezależnie od redempcji
@@ -1324,24 +1330,38 @@ if (Array.isArray(n.itemsArray) && n.itemsArray.length > 0) {
       };
     });
 
-    // odrzuć pozycje bez poprawnego product_id (DB ma NOT NULL)
-    const filtered = shaped.filter(r => r.product_id !== null);
-
-    if (filtered.length) {
+    // Wstaw WSZYSTKIE pozycje — product_id może być null
+    // (np. Burger Miesiąca dodawany bez product_id z frontendu)
+    if (shaped.length) {
       const { error: oiErr } = await supabaseAdmin
         .from("order_items")
-        .insert(filtered);
+        .insert(shaped);
       if (oiErr) {
+        // Jeśli DB wymaga NOT NULL na product_id, spróbuj bez tego pola
         console.warn("[orders.create] order_items insert error:", oiErr.message);
+        
+        // Fallback: spróbuj bez product_id dla pozycji gdzie jest null
+        const withId = shaped.filter(r => r.product_id !== null);
+        const withoutId = shaped
+          .filter(r => r.product_id === null)
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
+          .map(({ product_id: _pid, ...rest }) => rest);
+        
+        if (withId.length) {
+          const { error: e2 } = await supabaseAdmin.from("order_items").insert(withId);
+          if (e2) console.warn("[orders.create] order_items (with id) error:", e2.message);
+        }
+        if (withoutId.length) {
+          const { error: e3 } = await supabaseAdmin.from("order_items").insert(withoutId);
+          if (e3) console.warn("[orders.create] order_items (no id) error:", e3.message);
+        }
       }
-    } else {
-      console.warn("[orders.create] order_items: all dropped due to missing product_id");
     }
 
-    // diagnostyka: pokaż które pozycje wypadły (razem z nazwą)
-    const dropped = shaped.filter(r => r.product_id === null).map(r => r.name);
-    if (dropped.length) {
-      console.warn("[orders.create] dropped items (no product_id):", dropped);
+    // diagnostyka: pokaż pozycje bez product_id
+    const noId = shaped.filter(r => r.product_id === null).map(r => r.name);
+    if (noId.length) {
+      console.info("[orders.create] items without product_id:", noId);
     }
   } catch (e: any) {
     console.warn("[orders.create] order_items insert not executed:", e?.message);
@@ -1359,7 +1379,29 @@ if (Array.isArray(n.itemsArray) && n.itemsArray.length > 0) {
       console.error("[orders.create] push error:", pushErr);
     }
 
-
+    // 6.95) Wyślij zamówienie do kasy Dotypos POS (fire-and-forget)
+    // Nie blokujemy odpowiedzi dla klienta — wysyłka na kasę idzie w tle.
+    // Jeśli się nie uda, zamówienie nadal jest w bazie i można ponowić ręcznie.
+    try {
+      const appUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.APP_BASE_URL || new URL(req.url).origin;
+      fetch(`${appUrl}/api/dotypos/send-order`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderId: newOrderId }),
+      }).then(async (res) => {
+        if (res.ok) {
+          const data = await res.json().catch(() => null);
+          console.log(`[orders.create] Dotypos POS send OK:`, data?.dotypos?.status || "sent");
+        } else {
+          const errText = await res.text().catch(() => "");
+          console.error(`[orders.create] Dotypos POS send failed (${res.status}):`, errText.slice(0, 200));
+        }
+      }).catch((err) => {
+        console.error("[orders.create] Dotypos POS send error:", err?.message || err);
+      });
+    } catch (dotyposErr) {
+      console.error("[orders.create] Dotypos POS dispatch error:", dotyposErr);
+    }
 
     // 6.1) e-mail
     try {
