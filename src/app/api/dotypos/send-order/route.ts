@@ -284,7 +284,25 @@ export async function POST(req: NextRequest) {
       return undefined;
     };
     const packagingProduct = findSpecialProduct(["pakowanie na wynos", "pakowanie", "opakowanie", "packaging"]);
-    const deliveryProduct = findSpecialProduct(["dowóz", "dowoz", "dostawa", "transport", "delivery"]);
+
+    // Smart delivery product selection:
+    // - "Dowóz na terenie Ciechanowa" for Ciechanów addresses
+    // - "Dowóz poza Ciechanów" for out-of-city addresses
+    const orderCity = (order.city || "").toLowerCase().trim();
+    const isCiechanow = orderCity.includes("ciechan");
+    let deliveryProduct: PosProduct | undefined;
+    if (isCiechanow) {
+      deliveryProduct = findSpecialProduct(["dowóz na terenie", "dowoz na terenie", "na terenie ciechan"]);
+    } else {
+      deliveryProduct = findSpecialProduct(["poza ciechan", "dowóz poza", "dowoz poza"]);
+    }
+    // Fallback: any delivery product if specific one not found
+    if (!deliveryProduct) {
+      deliveryProduct = findSpecialProduct(["dowóz", "dowoz", "dostawa", "transport", "delivery"]);
+    }
+    if (deliveryProduct) {
+      console.log(`[Dotypos Order] Delivery product: "${deliveryProduct.name}" (city: ${order.city || "?"}, isCiechanow: ${isCiechanow})`);
+    }
     
     // 4. Map order items to Dotypos items
     const dotyposItems: DotyposOrderItem[] = [];
@@ -392,11 +410,36 @@ export async function POST(req: NextRequest) {
     
     // 7.5. Calculate discount percent for Dotypos
     // Dotypos supports discount-percent (e.g. 20 = 20%) on the whole order.
-    // We calculate it from base_before_discount and discount_amount.
+    // Look up the ACTUAL percentage from discount_codes table for accuracy.
     let discountPercent = 0;
-    if (order.discount_amount && order.discount_amount > 0 && order.base_before_discount && order.base_before_discount > 0) {
-      discountPercent = Math.round((order.discount_amount / order.base_before_discount) * 100 * 100) / 100;
-      console.log(`[Dotypos Order] Discount: ${order.discount_amount} zł / ${order.base_before_discount} zł = ${discountPercent}% (code: ${order.promo_code || "auto"})`);
+    if (order.discount_amount && order.discount_amount > 0) {
+      // Try to get the exact discount percentage from the promo code definition
+      if (order.promo_code) {
+        try {
+          const { data: dc } = await supabase
+            .from("discount_codes")
+            .select("type, value")
+            .ilike("code", order.promo_code)
+            .maybeSingle();
+          if (dc && dc.type === "percent") {
+            discountPercent = Number(dc.value);
+            console.log(`[Dotypos Order] Discount: ${discountPercent}% from code "${order.promo_code}" (type: percent, saved: ${order.discount_amount} zł)`);
+          } else if (dc && dc.type === "amount") {
+            // Fixed amount discount — calculate % from total POS items value
+            // Don't send discount-percent, the amounts already reflect the discount
+            console.log(`[Dotypos Order] Discount: fixed ${dc.value} zł from code "${order.promo_code}" — not sent as % to POS`);
+            discountPercent = 0; // Don't apply % discount for fixed-amount codes
+          }
+        } catch (e) {
+          console.warn("[Dotypos Order] Could not look up discount code:", e);
+        }
+      }
+      // Fallback: calculate from amounts if code lookup didn't work
+      if (discountPercent === 0 && order.base_before_discount && order.base_before_discount > 0) {
+        const totalBase = order.base_before_discount + (order.delivery_cost || 0);
+        discountPercent = Math.round((order.discount_amount / totalBase) * 100);
+        console.log(`[Dotypos Order] Discount (calculated): ${order.discount_amount} zł / ${totalBase} zł = ${discountPercent}% (code: ${order.promo_code || "auto"})`);
+      }
     }
     
     // Determine takeaway flag from selected_option (more reliable than order_type)
@@ -421,6 +464,7 @@ export async function POST(req: NextRequest) {
       if (!tableId) {
         const tablesRes = await dotypos.getTables();
         const tables: DotyposTable[] = tablesRes.data || [];
+        console.log(`[Dotypos Order] Tables found: ${tables.length}`, tables.map(t => ({ id: t.id, name: t.name, deleted: t.deleted })));
         
         const findTable = (keywords: string[]): DotyposTable | undefined => {
           for (const kw of keywords) {
