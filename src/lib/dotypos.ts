@@ -774,8 +774,10 @@ export async function executePOSAction(
   }
   
   // Add validity timestamp (request expiry)
+  // IMPORTANT: Dotypos POS compares validity against deviceTimestamp which is in MILLISECONDS.
+  // The docs say "Unix timestamp" but comparison is in ms, so validity must also be ms.
   if (options?.validitySeconds) {
-    action.validity = Math.floor(Date.now() / 1000) + options.validitySeconds;
+    action.validity = Date.now() + options.validitySeconds * 1000;
   }
   
   const response = await apiRequest<DotyposPOSActionResponse>(
