@@ -119,12 +119,61 @@ BEGIN
                  WHERE table_name = 'orders' AND column_name = 'dotypos_error') THEN
     ALTER TABLE orders ADD COLUMN dotypos_error TEXT;
   END IF;
+
+  -- Add dotypos_status column (sent, confirmed, pos_error)
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                 WHERE table_name = 'orders' AND column_name = 'dotypos_status') THEN
+    ALTER TABLE orders ADD COLUMN dotypos_status TEXT;
+  END IF;
+
+  -- Add dotypos_webhook_received_at column (when POS webhook callback arrived)
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                 WHERE table_name = 'orders' AND column_name = 'dotypos_webhook_received_at') THEN
+    ALTER TABLE orders ADD COLUMN dotypos_webhook_received_at TIMESTAMPTZ;
+  END IF;
+
+  -- Add dotypos_pos_response_code column (POS result code: 0 = OK)
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                 WHERE table_name = 'orders' AND column_name = 'dotypos_pos_response_code') THEN
+    ALTER TABLE orders ADD COLUMN dotypos_pos_response_code INTEGER;
+  END IF;
 END $$;
 
 -- Index for finding orders not yet sent to Dotypos
 CREATE INDEX IF NOT EXISTS idx_orders_dotypos_pending 
   ON orders(created_at) 
   WHERE dotypos_order_id IS NULL AND status = 'completed';
+
+-- Index for tracking Dotypos order status
+CREATE INDEX IF NOT EXISTS idx_orders_dotypos_status
+  ON orders(dotypos_status)
+  WHERE dotypos_status IS NOT NULL;
+
+-- ============================================
+-- 4b. Dotypos Webhook Logs Table (optional)
+-- ============================================
+-- Stores webhook payloads for debugging/auditing.
+-- Used by /api/dotypos/webhook route.
+-- Safe to drop if you don't need audit logs.
+
+CREATE TABLE IF NOT EXISTS dotypos_webhook_logs (
+  id BIGSERIAL PRIMARY KEY,
+  type TEXT NOT NULL,              -- 'pos-action-response', 'PRODUCT', 'ORDERBEAN', 'unknown', etc.
+  payload JSONB,                   -- Full webhook payload
+  received_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Auto-cleanup: keep only last 30 days of logs
+CREATE INDEX IF NOT EXISTS idx_webhook_logs_received 
+  ON dotypos_webhook_logs(received_at);
+
+-- RLS for webhook logs
+ALTER TABLE dotypos_webhook_logs ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Service role full access on dotypos_webhook_logs" ON dotypos_webhook_logs;
+CREATE POLICY "Service role full access on dotypos_webhook_logs"
+  ON dotypos_webhook_logs FOR ALL
+  USING (auth.jwt() ->> 'role' = 'service_role');
 
 -- ============================================
 -- 5. RLS Policies
@@ -209,6 +258,10 @@ COMMENT ON COLUMN orders.dotypos_order_id IS 'Order ID returned from Dotypos POS
 COMMENT ON COLUMN orders.dotypos_receipt_id IS 'Receipt ID from Dotypos POS';
 COMMENT ON COLUMN orders.dotypos_sent_at IS 'Timestamp when order was sent to Dotypos';
 COMMENT ON COLUMN orders.dotypos_error IS 'Error message if Dotypos sync failed';
+COMMENT ON COLUMN orders.dotypos_status IS 'Dotypos sync status: sent, confirmed, pos_error';
+COMMENT ON COLUMN orders.dotypos_webhook_received_at IS 'When POS webhook callback was received';
+COMMENT ON COLUMN orders.dotypos_pos_response_code IS 'POS result code (0 = OK, see docs for other codes)';
+COMMENT ON TABLE dotypos_webhook_logs IS 'Audit log of all webhook payloads received from Dotypos';
 
 -- ============================================
 -- Done!

@@ -1,13 +1,14 @@
 // src/app/api/dotypos/connector-url/route.ts
 // =============================================
-// Generate Dotypos OAuth Connector URL
+// Generate Dotypos OAuth Connector URL / Form Data
 // =============================================
 //
-// This endpoint generates a secure connector URL with HMAC-SHA256 signature.
-// It keeps the client_secret server-side for security.
+// This endpoint generates secure connector data for Dotypos OAuth v2.
+// As of Jan 2026, the GET method is deprecated — use POST form submission.
+// This returns both the URL (for backward compat) and form data for POST.
 //
 // Usage: GET /api/dotypos/connector-url
-// Returns: { url: "https://admin.dotykacka.cz/client/connect/v2?..." }
+// Returns: { url, formData, action, method, expiresIn }
 // =============================================
 
 import { NextRequest, NextResponse } from "next/server";
@@ -18,6 +19,7 @@ export const dynamic = "force-dynamic";
 
 const CLIENT_ID = process.env.DOTYPOS_CLIENT_ID || "";
 const CLIENT_SECRET = process.env.DOTYPOS_CLIENT_SECRET || "";
+const DOTYPOS_CONNECTOR_URL = "https://admin.dotykacka.cz/client/connect/v2";
 
 /**
  * Generate HMAC-SHA256 signature
@@ -37,29 +39,33 @@ export async function GET(req: NextRequest) {
     );
   }
   
-  // Get origin for redirect URI
-  const origin = req.headers.get("origin") || 
-                 req.headers.get("referer")?.replace(/\/[^/]*$/, "") ||
-                 process.env.NEXT_PUBLIC_APP_URL ||
-                 "https://sisiciechanow.pl";
-  
-  const redirectUri = `${origin}/api/dotypos/callback`;
+  // Redirect URI must be consistent - always use the canonical app URL
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://sisiciechanow.pl";
+  const redirectUri = `${appUrl}/api/dotypos/callback`;
   const state = crypto.randomUUID();
   const timestamp = Math.floor(Date.now() / 1000);
   const signature = generateSignature(CLIENT_SECRET, timestamp);
   
-  const params = new URLSearchParams({
+  // Form data for POST submission (recommended since Jan 2026)
+  const formData = {
     client_id: CLIENT_ID,
     redirect_uri: redirectUri,
     scope: "*",
     state,
     timestamp: String(timestamp),
     signature,
-  });
+  };
   
-  const url = `https://admin.dotykacka.cz/client/connect/v2?${params.toString()}`;
+  // Legacy GET URL (still works but deprecated)
+  const params = new URLSearchParams(formData);
+  const url = `${DOTYPOS_CONNECTOR_URL}?${params.toString()}`;
   
   return NextResponse.json({ 
+    // POST form submission (recommended)
+    action: DOTYPOS_CONNECTOR_URL,
+    method: "POST",
+    formData,
+    // Legacy GET URL (deprecated but functional)
     url,
     expiresIn: 300, // URL valid for ~5 minutes due to timestamp
   });

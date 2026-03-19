@@ -1,3 +1,5 @@
+// ⚠️ DEPRECATED - This route uses old Dotykačka API v1 (api.dotykacka.pl)
+// Use /api/dotypos/send-order instead (Dotypos API v2 at api.dotykacka.cz)
 import { NextResponse } from "next/server";
 import { getDotykackaToken } from "@/lib/dotykacka";
 import { createClient } from "@supabase/supabase-js";
