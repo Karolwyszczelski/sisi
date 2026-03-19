@@ -931,6 +931,7 @@ export async function createDraftOrder(options: {
   takeAway?: boolean;
   lock?: boolean;          // Lock order for 45s for external changes
   webhookUrl?: string;
+  discountPercent?: number; // 20 = 20%
 }): Promise<DotyposPOSActionResponse> {
   const branchId = await getBranchId();
   
@@ -941,6 +942,10 @@ export async function createDraftOrder(options: {
     items: options.items,
     lock: options.lock,
   };
+  
+  if (options.discountPercent && options.discountPercent > 0) {
+    action["discount-percent"] = options.discountPercent;
+  }
   
   if (options.customer) {
     action.customer = {

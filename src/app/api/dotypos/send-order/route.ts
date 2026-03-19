@@ -92,9 +92,13 @@ interface OrderData {
   phone?: string;
   email?: string;
   order_type?: "delivery" | "takeaway" | "dine-in";
+  selected_option?: string;
   note?: string;
   payment_status?: string;
   total_price?: number;
+  base_before_discount?: number;
+  discount_amount?: number;
+  promo_code?: string;
   dotypos_order_id?: number;
   dotypos_receipt_id?: number;
 }
@@ -323,37 +327,43 @@ export async function POST(req: NextRequest) {
       orderNoteParts.push(`⚠️ Niezmapowane: ${unmappedItems.join(", ")}`);
     }
     
-    // 7. Determine if order is paid
+    // 7. Determine if order is paid online
     const isPaid = order.payment_status === "paid" || 
                    order.payment_status === "completed";
     
-    // 8. Send to Dotypos
-    console.log(`[Dotypos Order] Sending ${dotyposItems.length} items, paid=${isPaid}`);
-    
-    let response;
-    if (isPaid) {
-      // order/create-issue-pay: Creates order, issues receipt, marks as paid
-      // payment-method-id comes from DOTYPOS_PAYMENT_METHOD_ID env var
-      // (configured in dotypos.ts). Without it, POS uses default (cash).
-      response = await dotypos.createOrder({
-        externalId: orderId,
-        items: dotyposItems,
-        customer,
-        note: orderNoteParts.join(" | "),
-        takeAway: order.order_type !== "dine-in",
-        webhookUrl: getWebhookUrl(), // undefined in sync mode (default)
-      });
-    } else {
-      // order/create-issue: Creates order + issues receipt, cashier handles payment
-      response = await dotypos.createUnpaidOrder({
-        externalId: orderId,
-        items: dotyposItems,
-        customer,
-        note: orderNoteParts.join(" | "),
-        takeAway: order.order_type !== "dine-in",
-        webhookUrl: getWebhookUrl(), // undefined in sync mode (default)
-      });
+    // 7.5. Calculate discount percent for Dotypos
+    // Dotypos supports discount-percent (e.g. 20 = 20%) on the whole order.
+    // We calculate it from base_before_discount and discount_amount.
+    let discountPercent = 0;
+    if (order.discount_amount && order.discount_amount > 0 && order.base_before_discount && order.base_before_discount > 0) {
+      discountPercent = Math.round((order.discount_amount / order.base_before_discount) * 100 * 100) / 100;
+      console.log(`[Dotypos Order] Discount: ${order.discount_amount} zł / ${order.base_before_discount} zł = ${discountPercent}% (code: ${order.promo_code || "auto"})`);
     }
+    
+    // Determine takeaway flag from selected_option (more reliable than order_type)
+    const isTakeAway = (order.selected_option || order.order_type) !== "local" &&
+                       (order.selected_option || order.order_type) !== "dine-in";
+    
+    // 8. Send to Dotypos
+    // We use order/create (createDraftOrder) for ALL orders:
+    // - No receipt is printed (paragon) — cashier will issue it manually when ready
+    // - Kitchen/bon printers still print based on POS configuration
+    // - For paid online orders, the note includes payment info
+    console.log(`[Dotypos Order] Sending ${dotyposItems.length} items, paid=${isPaid}, discount=${discountPercent}%`);
+    
+    if (isPaid) {
+      orderNoteParts.push("✅ OPŁACONE ONLINE");
+    }
+    
+    const response = await dotypos.createDraftOrder({
+      externalId: orderId,
+      items: dotyposItems,
+      customer,
+      note: orderNoteParts.join(" | "),
+      takeAway: isTakeAway,
+      discountPercent: discountPercent > 0 ? discountPercent : undefined,
+      webhookUrl: getWebhookUrl(),
+    });
     
     console.log("[Dotypos Order] Response:", response);
     
