@@ -193,7 +193,7 @@ export async function POST(req: NextRequest) {
   
   try {
     const body = await req.json();
-    const { orderId, force } = body;
+    const { orderId } = body;
     
     if (!orderId) {
       return NextResponse.json(
@@ -202,7 +202,7 @@ export async function POST(req: NextRequest) {
       );
     }
     
-    console.log(`[Dotypos Order] Processing order: ${orderId}${force ? " (FORCE resend)" : ""}`);
+    console.log(`[Dotypos Order] Processing order: ${orderId}`);
     
     const supabase = getSupabase();
     
@@ -223,8 +223,8 @@ export async function POST(req: NextRequest) {
     
     const order: OrderData = orders[0];
     
-    // Check if already sent to Dotypos (skip if force=true)
-    if (order.dotypos_order_id && !force) {
+    // Check if already sent to Dotypos
+    if (order.dotypos_order_id) {
       console.log(`[Dotypos Order] Order already sent: ${order.dotypos_order_id}`);
       return NextResponse.json({
         success: true,
@@ -359,12 +359,10 @@ export async function POST(req: NextRequest) {
     };
     
     // 6. Build order note (include customer info for POS visibility)
+    // NOTE: Order type (NA WYNOS / DOSTAWA) is NOT in the note — it's handled
+    // by the take-away flag which Dotypos displays below S-number on the bon.
+    // This way it appears in the right place (under order number, not at the top).
     const orderNoteParts: string[] = [];
-    if (selectedOpt === "delivery") {
-      orderNoteParts.push("🚗 DOSTAWA");
-    } else if (selectedOpt === "takeaway") {
-      orderNoteParts.push("📦 NA WYNOS");
-    }
     if (customerName) {
       orderNoteParts.push(`Klient: ${customerName}`);
     }
@@ -385,7 +383,7 @@ export async function POST(req: NextRequest) {
       orderNoteParts.push(`Uwagi: ${order.order_note}`);
     }
     if (unmappedItems.length > 0) {
-      orderNoteParts.push(`⚠️ Niezmapowane: ${unmappedItems.join(", ")}`);
+      orderNoteParts.push(`Niezmapowane: ${unmappedItems.join(", ")}`);
     }
     
     // 7. Determine if order is paid online
@@ -413,7 +411,7 @@ export async function POST(req: NextRequest) {
     console.log(`[Dotypos Order] Sending ${dotyposItems.length} items, paid=${isPaid}, discount=${discountPercent}%`);
     
     if (isPaid) {
-      orderNoteParts.push("✅ OPŁACONE ONLINE");
+      orderNoteParts.push("OPLACONE ONLINE");
     }
     
     const response = await dotypos.createDraftOrder({
