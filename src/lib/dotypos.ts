@@ -1251,6 +1251,9 @@ const dotypos = {
   getBranches,
   getBranchId,
   
+  // Tables
+  getTables,
+  
   // Orders / POS Actions
   createOrder,
   createUnpaidOrder,
