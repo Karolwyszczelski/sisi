@@ -193,7 +193,7 @@ export async function POST(req: NextRequest) {
   
   try {
     const body = await req.json();
-    const { orderId } = body;
+    const { orderId, force } = body;
     
     if (!orderId) {
       return NextResponse.json(
@@ -202,7 +202,7 @@ export async function POST(req: NextRequest) {
       );
     }
     
-    console.log(`[Dotypos Order] Processing order: ${orderId}`);
+    console.log(`[Dotypos Order] Processing order: ${orderId}${force ? " (FORCE resend)" : ""}`);
     
     const supabase = getSupabase();
     
@@ -223,8 +223,8 @@ export async function POST(req: NextRequest) {
     
     const order: OrderData = orders[0];
     
-    // Check if already sent to Dotypos
-    if (order.dotypos_order_id) {
+    // Check if already sent to Dotypos (skip if force=true)
+    if (order.dotypos_order_id && !force) {
       console.log(`[Dotypos Order] Order already sent: ${order.dotypos_order_id}`);
       return NextResponse.json({
         success: true,

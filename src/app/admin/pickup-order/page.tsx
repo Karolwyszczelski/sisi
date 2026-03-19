@@ -7,7 +7,7 @@ import CancelButton from "@/components/CancelButton";
 import PushNotificationControl from "@/components/admin/PushNotificationControl";
 import ThemeToggle from "@/components/admin/ThemeToggle";
 import { useTheme } from "@/components/admin/ThemeContext";
-import { Power, Truck, ShoppingBag, MapPin, RefreshCw, ChevronDown, ChevronUp, Settings, Filter, Clock, CalendarDays, Users, Phone, CheckCircle, XCircle, AlertCircle } from "lucide-react";
+import { Power, Truck, ShoppingBag, MapPin, RefreshCw, ChevronDown, ChevronUp, Settings, Filter, Clock, CalendarDays, Users, Phone, CheckCircle, XCircle, AlertCircle, Printer } from "lucide-react";
 
 type Any = Record<string, any>;
 type PaymentMethod = "Gotówka" | "Terminal" | "Online";
@@ -425,6 +425,69 @@ const InlineCountdown: React.FC<{ targetTime: string; onComplete?: () => void }>
   const ss = String(sec % 60).padStart(2, "0");
   const isLow = sec < 120;
   return <span className={`rounded-lg px-3 py-1 font-mono text-sm font-semibold ${isLow ? 'bg-rose-500/20 text-rose-400' : 'bg-slate-700 text-white'}`}>{mm}:{ss}</span>;
+};
+
+/* ---- Wyślij na kasę (Dotypos POS) ---- */
+const ResendToPosButton: React.FC<{ orderId: string }> = ({ orderId }) => {
+  const [state, setState] = useState<"idle" | "sending" | "ok" | "error">("idle");
+  const [msg, setMsg] = useState("");
+
+  const send = async () => {
+    setState("sending");
+    setMsg("");
+    try {
+      const res = await fetch("/api/dotypos/send-order", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderId, force: true }),
+      });
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.success) {
+        setState("ok");
+        setMsg("Wysłano na kasę ✓");
+        setTimeout(() => setState("idle"), 4000);
+      } else if (data?.already_sent) {
+        setState("ok");
+        setMsg("Już wysłane wcześniej");
+        setTimeout(() => setState("idle"), 4000);
+      } else {
+        setState("error");
+        setMsg(data?.error || `Błąd (${res.status})`);
+        setTimeout(() => setState("idle"), 5000);
+      }
+    } catch (err) {
+      setState("error");
+      setMsg("Brak połączenia");
+      setTimeout(() => setState("idle"), 5000);
+    }
+  };
+
+  return (
+    <div className="relative inline-flex items-center gap-1">
+      <button
+        onClick={send}
+        disabled={state === "sending"}
+        title="Wyślij ponownie na kasę Dotypos"
+        className={`h-10 rounded-lg px-3 text-sm font-medium transition-colors inline-flex items-center gap-1.5 ${
+          state === "sending"
+            ? "bg-amber-600/50 text-amber-200 cursor-wait"
+            : state === "ok"
+            ? "bg-emerald-700 text-emerald-200"
+            : state === "error"
+            ? "bg-rose-700 text-rose-200"
+            : "bg-amber-600 text-white hover:bg-amber-500"
+        }`}
+      >
+        <Printer className={`h-4 w-4 ${state === "sending" ? "animate-pulse" : ""}`} />
+        {state === "sending" ? "Wysyłam..." : state === "ok" ? "OK" : state === "error" ? "Błąd" : "Kasa"}
+      </button>
+      {msg && (
+        <span className={`text-xs ${state === "ok" ? "text-emerald-400" : "text-rose-400"}`}>
+          {msg}
+        </span>
+      )}
+    </div>
+  );
 };
 
 const AcceptButton: React.FC<{
@@ -1097,6 +1160,7 @@ useEffect(() => {
                         onEditEnd={() => setEditingOrderId(null)}
                       />
                       <CancelButton orderId={o.id} onOrderUpdated={() => fetchOrders()} />
+                      <ResendToPosButton orderId={o.id} />
                     </>
                   )}
 
@@ -1128,16 +1192,20 @@ useEffect(() => {
                       >
                         Zrealizowany
                       </button>
+                      <ResendToPosButton orderId={o.id} />
                     </>
                   )}
 
                   {o.status === "cancelled" && (
-                    <button
-                      onClick={() => restoreOrder(o.id)}
-                      className={`h-10 rounded-lg px-4 text-sm font-semibold transition-colors ${isDark ? "bg-slate-700 text-slate-300 hover:bg-slate-600" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
-                    >
-                      Przywróć
-                    </button>
+                    <>
+                      <button
+                        onClick={() => restoreOrder(o.id)}
+                        className={`h-10 rounded-lg px-4 text-sm font-semibold transition-colors ${isDark ? "bg-slate-700 text-slate-300 hover:bg-slate-600" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
+                      >
+                        Przywróć
+                      </button>
+                      <ResendToPosButton orderId={o.id} />
+                    </>
                   )}
                 </footer>
               </article>
