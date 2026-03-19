@@ -477,7 +477,11 @@ export async function POST(req: NextRequest) {
         const activeTables = tables.filter((t: { deleted: boolean }) => !t.deleted);
         console.log(`[Dotypos Order] Active tables: ${activeTables.map((t: { name: string; id: number }) => `"${t.name}"(${t.id})`).join(", ")}`);
         
-        const findTable = (keywords: string[]): { id: number; name: string } | undefined => {
+        // Try exact name match first, then includes (to avoid "kierowca 2" matching before "kierowca")
+        const findTableExact = (name: string): { id: number; name: string } | undefined => {
+          return activeTables.find((t: { name: string }) => t.name.toLowerCase().trim() === name);
+        };
+        const findTableIncludes = (keywords: string[]): { id: number; name: string } | undefined => {
           for (const kw of keywords) {
             const found = activeTables.find((t: { name: string }) => 
               t.name.toLowerCase().includes(kw)
@@ -489,16 +493,26 @@ export async function POST(req: NextRequest) {
         
         let matched: { id: number; name: string } | undefined;
         if (selectedOpt === "delivery") {
-          matched = findTable(["kierowca"]);
+          matched = findTableExact("kierowca") || findTableIncludes(["kierowca", "dostawa"]);
         } else if (selectedOpt === "takeaway") {
-          matched = findTable(["wynos"]);
+          matched = findTableExact("wynos") || findTableIncludes(["wynos", "takeaway"]);
         }
         
         if (matched) {
           tableId = matched.id;
           console.log(`[Dotypos Order] Matched table: "${matched.name}" (id: ${matched.id}, type: ${typeof matched.id}) for ${selectedOpt}`);
         } else {
-          console.warn(`[Dotypos Order] No table matched for "${selectedOpt}". Active: ${activeTables.map((t: { name: string; id: number }) => `"${t.name}"(${t.id})`).join(", ")}`);
+          // Hardcoded fallback IDs (from known Dotypos tables)
+          const KNOWN_TABLE_IDS: Record<string, number> = {
+            delivery: 1595942776188800,  // "kierowca"
+            takeaway: 1297326584999827,  // "wynos"
+          };
+          if (KNOWN_TABLE_IDS[selectedOpt]) {
+            tableId = KNOWN_TABLE_IDS[selectedOpt];
+            console.log(`[Dotypos Order] Using hardcoded table ID for ${selectedOpt}: ${tableId}`);
+          } else {
+            console.warn(`[Dotypos Order] No table matched for "${selectedOpt}". Active: ${activeTables.map((t: { name: string; id: number }) => `"${t.name}"(${t.id})`).join(", ")}`);
+          }
         }
       }
     } catch (tableErr) {
