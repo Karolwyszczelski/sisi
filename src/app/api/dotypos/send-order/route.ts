@@ -462,31 +462,43 @@ export async function POST(req: NextRequest) {
       
       // Fallback: fetch tables from API and match by name
       if (!tableId) {
+        console.log(`[Dotypos Order] Fetching tables from API for selectedOpt="${selectedOpt}"...`);
         const tablesRes = await dotypos.getTables();
-        const tables: DotyposTable[] = tablesRes.data || [];
-        console.log(`[Dotypos Order] Tables found: ${tables.length}`, tables.map(t => ({ id: t.id, name: t.name, deleted: t.deleted })));
+        const rawTables = tablesRes.data || [];
+        console.log(`[Dotypos Order] Raw tables:`, JSON.stringify(rawTables.map((t: any) => ({ id: t.id, name: t.name, deleted: t.deleted, tid: typeof t.id, tdel: typeof t.deleted }))));
         
-        const findTable = (keywords: string[]): DotyposTable | undefined => {
+        // Normalize: API may return id as string and deleted as various types
+        const tables = rawTables.map((t: any) => ({
+          id: typeof t.id === "string" ? parseInt(t.id, 10) : Number(t.id),
+          name: String(t.name || ""),
+          deleted: t.deleted === true || t.deleted === "true" || t.deleted === 1,
+        }));
+        
+        const activeTables = tables.filter((t: { deleted: boolean }) => !t.deleted);
+        console.log(`[Dotypos Order] Active tables: ${activeTables.map((t: { name: string; id: number }) => `"${t.name}"(${t.id})`).join(", ")}`);
+        
+        const findTable = (keywords: string[]): { id: number; name: string } | undefined => {
           for (const kw of keywords) {
-            const found = tables.find(t => 
-              !t.deleted && t.name.toLowerCase().includes(kw)
+            const found = activeTables.find((t: { name: string }) => 
+              t.name.toLowerCase().includes(kw)
             );
             if (found) return found;
           }
           return undefined;
         };
         
-        let matched: DotyposTable | undefined;
+        let matched: { id: number; name: string } | undefined;
         if (selectedOpt === "delivery") {
-          matched = findTable(["kierowca", "dostawa", "dowóz", "delivery"]);
+          matched = findTable(["kierowca"]);
         } else if (selectedOpt === "takeaway") {
-          matched = findTable(["wynos", "takeaway", "na wynos"]);
+          matched = findTable(["wynos"]);
         }
-        // For "local" we don't assign a table (it's dine-in, normal)
         
         if (matched) {
           tableId = matched.id;
-          console.log(`[Dotypos Order] Matched table: "${matched.name}" (id: ${matched.id}) for ${selectedOpt}`);
+          console.log(`[Dotypos Order] Matched table: "${matched.name}" (id: ${matched.id}, type: ${typeof matched.id}) for ${selectedOpt}`);
+        } else {
+          console.warn(`[Dotypos Order] No table matched for "${selectedOpt}". Active: ${activeTables.map((t: { name: string; id: number }) => `"${t.name}"(${t.id})`).join(", ")}`);
         }
       }
     } catch (tableErr) {
@@ -498,7 +510,12 @@ export async function POST(req: NextRequest) {
     // - No receipt is printed (paragon) — cashier will issue it manually when ready
     // - Kitchen/bon printers still print based on POS configuration
     // - For paid online orders, the note includes payment info
-    console.log(`[Dotypos Order] Sending ${dotyposItems.length} items, paid=${isPaid}, discount=${discountPercent}%, table=${tableId || 'none'}`);
+    // Ensure tableId is a valid number
+    if (tableId !== undefined && (isNaN(tableId) || tableId <= 0)) {
+      console.warn(`[Dotypos Order] Invalid tableId: ${tableId}, resetting`);
+      tableId = undefined;
+    }
+    console.log(`[Dotypos Order] Sending ${dotyposItems.length} items, paid=${isPaid}, discount=${discountPercent}%, tableId=${tableId ?? "none"} (type: ${typeof tableId})`);
     
     if (isPaid) {
       orderNoteParts.push("OPLACONE ONLINE");
