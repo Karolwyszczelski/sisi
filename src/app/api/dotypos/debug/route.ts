@@ -21,20 +21,20 @@ export async function GET() {
       results.branchesError = e instanceof Error ? e.message : String(e);
     }
     
-    // Raw products (first page, limit 3)
+    // Raw products (first page, limit 3) - no sort param
     try {
       const products = await dotypos.apiRequest<unknown>(
         `/clouds/${cloudId}/products`,
-        { params: { page: 1, limit: 3, sort: "-id" } }
+        { params: { page: 1, limit: 3 } }
       );
       results.sampleProducts = products;
     } catch (e) {
       results.productsError = e instanceof Error ? e.message : String(e);
     }
     
-    // Payment methods
+    // Payment methods - try branch-level
     try {
-      const pm = await dotypos.apiRequest<unknown>(`/clouds/${cloudId}/payment-methods`);
+      const pm = await dotypos.apiRequest<unknown>(`/clouds/${cloudId}/branches/175697700/payment-methods`);
       results.paymentMethods = pm;
     } catch (e) {
       results.paymentMethodsError = e instanceof Error ? e.message : String(e);

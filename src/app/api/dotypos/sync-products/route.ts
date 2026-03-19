@@ -131,11 +131,12 @@ export async function GET(req: NextRequest) {
     // 5. Also fetch and sync categories
     let categoriesSynced = 0;
     try {
-      const { data: categories } = await dotypos.getCategories();
+      const categoriesResponse = await dotypos.getCategories();
+      const categories = categoriesResponse.data || [];
       
-      if (categories && categories.length > 0) {
+      if (categories.length > 0) {
         const categoryData = categories.map((c) => ({
-          pos_id: c.id,
+          pos_id: typeof c.id === 'string' ? parseInt(c.id as string, 10) : c.id,
           name: c.name,
           parent_id: c.parentCategoryId,
           sort_order: c.sortOrder,

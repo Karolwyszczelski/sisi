@@ -95,11 +95,14 @@ export interface DotyposCategory {
 export interface DotyposBranch {
   id: number;
   name: string;
-  cloudId: number;
+  _cloudId: string;
   externalId: string | null;
-  enabled: boolean;
+  display: boolean;
   deleted: boolean;
-  modifiedAt: string;
+  flags: string;
+  features: string;
+  created: string;
+  versionDate: string;
 }
 
 export interface DotyposOrderItem {
@@ -614,7 +617,22 @@ export async function getProducts(
   if (options.filter) params.filter = options.filter;
   if (options.includeDeleted) params.includeDeleted = true;
   
-  return apiRequest(`/clouds/${cloudId}/products`, { params });
+  // Dotypos API returns paginated response with string values:
+  // { currentPage: "1", perPage: "100", totalItemsCount: "152", data: [...] }
+  const raw = await apiRequest<{
+    currentPage: string;
+    perPage: string;
+    totalItemsOnPage: string;
+    totalItemsCount: string;
+    data: DotyposProduct[];
+  }>(`/clouds/${cloudId}/products`, { params });
+  
+  return {
+    data: raw.data || [],
+    page: parseInt(raw.currentPage, 10) || 1,
+    pageSize: parseInt(raw.perPage, 10) || 100,
+    total: parseInt(raw.totalItemsCount, 10) || 0,
+  };
 }
 
 /**
@@ -654,7 +672,13 @@ export async function getProduct(productId: number): Promise<DotyposProduct> {
 /**
  * Fetch all categories from Dotypos
  */
-export async function getCategories(): Promise<{ data: DotyposCategory[] }> {
+export async function getCategories(): Promise<{
+  currentPage: string;
+  perPage: string;
+  totalItemsOnPage: string;
+  totalItemsCount: string;
+  data: DotyposCategory[];
+}> {
   const cloudId = await getCloudId();
   return apiRequest(`/clouds/${cloudId}/categories`);
 }
@@ -666,7 +690,13 @@ export async function getCategories(): Promise<{ data: DotyposCategory[] }> {
 /**
  * Fetch all branches for the cloud
  */
-export async function getBranches(): Promise<{ data: DotyposBranch[] }> {
+export async function getBranches(): Promise<{
+  currentPage: string;
+  perPage: string;
+  totalItemsOnPage: string;
+  totalItemsCount: string;
+  data: DotyposBranch[];
+}> {
   const cloudId = await getCloudId();
   return apiRequest(`/clouds/${cloudId}/branches`);
 }
@@ -680,14 +710,15 @@ export async function getBranchId(): Promise<number> {
     return parseInt(envBranchId, 10);
   }
   
-  const { data: branches } = await getBranches();
-  const activeBranch = branches.find(b => b.enabled && !b.deleted);
+  const branchesResponse = await getBranches();
+  const branches = branchesResponse.data || [];
+  const activeBranch = branches.find(b => b.display && !b.deleted);
   
   if (!activeBranch) {
     throw new Error("No active branch found in Dotypos");
   }
   
-  return activeBranch.id;
+  return typeof activeBranch.id === 'string' ? parseInt(activeBranch.id, 10) : activeBranch.id;
 }
 
 /* ============================================================
@@ -1121,7 +1152,8 @@ export async function testConnection(): Promise<{
 }> {
   try {
     const cloudId = await getCloudId();
-    const { data: branches } = await getBranches();
+    const branchesResponse = await getBranches();
+    const branches = branchesResponse.data || [];
     
     // Also try POS hello to check if device is online
     let posOnline = false;
@@ -1140,8 +1172,8 @@ export async function testConnection(): Promise<{
       connected: true,
       cloudId,
       branches: branches
-        .filter(b => b.enabled && !b.deleted)
-        .map(b => ({ id: b.id, name: b.name })),
+        .filter(b => b.display && !b.deleted)
+        .map(b => ({ id: typeof b.id === 'string' ? parseInt(b.id as string, 10) : b.id, name: b.name })),
       posOnline,
       posDevice,
     };
