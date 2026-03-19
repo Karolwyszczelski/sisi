@@ -26,7 +26,8 @@ const supabase = new Proxy({} as ReturnType<typeof getSupabase>, {
 
 export async function GET(req: NextRequest) {
   // auth: Bearer <CRON_SECRET> lub ?token=<CRON_SECRET>
-  const auth = headers().get("authorization")?.replace(/^Bearer\s+/i, "");
+  const hdrs = await headers();
+  const auth = hdrs.get("authorization")?.replace(/^Bearer\s+/i, "");
   const token = new URL(req.url).searchParams.get("token");
   if (CRON_SECRET && auth !== CRON_SECRET && token !== CRON_SECRET) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

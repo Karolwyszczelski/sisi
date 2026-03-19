@@ -47,12 +47,13 @@ export default function CookieBanner() {
             <button 
               onClick={() => save({ necessary: true, analytics: false, marketing: false })}
               className="w-8 h-8 flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 rounded-full transition"
+              aria-label="Zamknij baner cookies"
             >
               <X size={18} />
             </button>
           </div>
           
-          <p className="text-white/60 text-sm leading-relaxed mb-5">
+          <p className="text-white/70 text-sm leading-relaxed mb-5">
             Używamy plików cookie, aby zapewnić Ci najlepsze doświadczenia na naszej stronie.
           </p>
 
@@ -60,6 +61,7 @@ export default function CookieBanner() {
           <button 
             onClick={() => setShowDetails(!showDetails)}
             className="w-full flex items-center justify-between text-sm text-white/50 hover:text-white/70 mb-4 transition"
+            aria-expanded={showDetails}
           >
             <span className="flex items-center gap-2">
               <Shield size={14} />
@@ -110,7 +112,7 @@ export default function CookieBanner() {
                 </div>
                 <div>
                   <h3 className="text-white font-semibold mb-0.5">Szanujemy Twoją prywatność</h3>
-                  <p className="text-white/50 text-sm">
+                  <p className="text-white/70 text-sm">
                     Używamy plików cookie, aby zapewnić Ci najlepsze doświadczenia.{" "}
                     <Link href="/polityka-prywatnosci" className="text-yellow-400 hover:underline">Dowiedz się więcej</Link>
                   </p>

@@ -9,4 +9,10 @@ jobs:
     steps:
       - name: Ping reconcile endpoint
         run: |
-          curl -fsS "https://www.sisiciechanow.pl/api/p24/reconcile?token=${{ secrets.CRON_SECRET }}"
+          curl -fsS \
+            --retry 3 \
+            --retry-delay 5 \
+            --retry-connrefused \
+            --max-time 30 \
+            --connect-timeout 10 \
+            "https://www.sisiciechanow.pl/api/p24/reconcile?token=${{ secrets.CRON_SECRET }}"

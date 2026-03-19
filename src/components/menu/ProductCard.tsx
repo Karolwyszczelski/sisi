@@ -106,7 +106,7 @@ export default function ProductCard({ product, index }: ProductCardProps) {
               <p className={`
                 text-[13px] leading-relaxed
                 ${expanded ? "" : "line-clamp-2"}
-                ${isFirst ? "text-black/50" : "text-white/40"}
+                ${isFirst ? "text-black/70" : "text-white/60"}
               `}>
                 {bodyText}
               </p>
@@ -114,6 +114,7 @@ export default function ProductCard({ product, index }: ProductCardProps) {
                 <button
                   type="button"
                   onClick={toggleExpand}
+                  aria-expanded={expanded}
                   className={`
                     mt-1.5 text-[11px] font-semibold
                     ${isFirst ? "text-black/70 hover:text-black" : "text-yellow-400/80 hover:text-yellow-400"}
@@ -141,7 +142,7 @@ export default function ProductCard({ product, index }: ProductCardProps) {
             </span>
             <span className={`
               text-base font-semibold
-              ${isFirst ? "text-black/40" : "text-white/30"}
+              ${isFirst ? "text-black/70" : "text-white/60"}
             `}>
               zł
             </span>

@@ -8,7 +8,6 @@ import OnasSection from "@/components/OnasSection";
 import ContactSection from "@/components/ContactSection";
 import FloatingAuthButtons from "@/components/FloatingLoginButton";
 import ReservationFloatingButton from "@/components/ReservationFloatingButton";
-import PromoTickerMount from "@/components/PromoTickerMount";
 import MobilePageWrapper from "@/components/MobilePageWrapper";
 
 export const metadata: Metadata = {
@@ -20,7 +19,6 @@ export default function Home() {
     <>
       {/* Desktop: standardowy layout */}
       <main className="hidden md:block">
-        <PromoTickerMount />
         <Hero />
         <BurgerMiesiaca />
         <MenuSection />
@@ -33,7 +31,6 @@ export default function Home() {
 
       {/* pływające guziki tylko na desktop */}
       <div className="hidden md:block">
-        <PromoTickerMount />
         <FloatingAuthButtons />
         <ReservationFloatingButton />
       </div>

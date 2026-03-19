@@ -64,6 +64,7 @@ export default function CookieBanner() {
             <button 
               onClick={() => save({ necessary: true, analytics: false, marketing: false })}
               className="w-10 h-10 flex items-center justify-center text-white/50 hover:text-white hover:bg-white/10 rounded-xl transition"
+              aria-label="Zamknij baner cookies"
             >
               <X size={20} />
             </button>
@@ -71,7 +72,7 @@ export default function CookieBanner() {
           
           {/* Content */}
           <div className="px-5 pb-6">
-            <p className="text-white/60 text-sm leading-relaxed mb-5">
+            <p className="text-white/70 text-sm leading-relaxed mb-5">
               Używamy plików cookie, aby strona działała poprawnie i mogliśmy ją ulepszać.
             </p>
 
@@ -79,6 +80,7 @@ export default function CookieBanner() {
             <button 
               onClick={() => setShowDetails(!showDetails)}
               className="w-full flex items-center justify-between text-sm text-white/50 hover:text-white/70 mb-4 py-2 transition"
+              aria-expanded={showDetails}
             >
               <span className="flex items-center gap-2">
                 <Shield size={16} />
@@ -149,7 +151,7 @@ export default function CookieBanner() {
             </div>
             <div className="flex-1">
               <h3 className="text-white font-bold mb-1">Ciasteczka 🍪</h3>
-              <p className="text-white/50 text-sm leading-relaxed">
+              <p className="text-white/70 text-sm leading-relaxed">
                 Używamy plików cookie, aby strona działała poprawnie.{" "}
                 <Link href="/polityka-prywatnosci" className="text-yellow-400 hover:underline">Dowiedz się więcej</Link>
               </p>
@@ -157,6 +159,7 @@ export default function CookieBanner() {
             <button 
               onClick={() => save({ necessary: true, analytics: false, marketing: false })}
               className="w-8 h-8 flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 rounded-lg transition -mt-1 -mr-1"
+              aria-label="Zamknij baner cookies"
             >
               <X size={16} />
             </button>

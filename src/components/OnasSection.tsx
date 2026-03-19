@@ -36,7 +36,7 @@ export default function OnasSection() {
               O <span className="text-yellow-400">NAS</span>
             </h2>
 
-            <p className="mt-4 md:mt-6 max-w-2xl mx-auto text-base md:text-xl text-white/60 leading-relaxed px-2">
+            <p className="mt-4 md:mt-6 max-w-2xl mx-auto text-base md:text-xl text-white/70 leading-relaxed px-2">
               Jesteśmy miejscem, gdzie pasja do gotowania spotyka się z najlepszymi lokalnymi składnikami
             </p>
           </div>
@@ -50,13 +50,13 @@ export default function OnasSection() {
                 <span className="text-yellow-400">SISI</span> Burger & Pancake
               </h3>
               
-              <p className="text-sm md:text-base text-white/50 leading-relaxed">
+              <p className="text-sm md:text-base text-white/70 leading-relaxed">
                 Od pierwszego dnia stawiamy na jakość i świeżość. Mięso do burgerów przygotowujemy sami każdego ranka 
                 i smażymy na grillu. Bułki i warzywa zamawiamy od lokalnych i regionalnych dostawców, 
                 a sosy przygotowujemy z pasją.
               </p>
               
-              <p className="text-sm md:text-base text-white/50 leading-relaxed">
+              <p className="text-sm md:text-base text-white/70 leading-relaxed">
                 Pancake? To nasza druga specjalność! Puszyste, złociste i podawane z najlepszymi dodatkami — 
                 od klasycznego syropu klonowego, przez świeże owoce, aż po nutellę i bitą śmietanę.
               </p>
@@ -82,19 +82,19 @@ export default function OnasSection() {
             <div className="grid grid-cols-2 gap-3 md:gap-4">
               <div className="bg-gradient-to-br from-zinc-800/80 to-zinc-900/80 rounded-2xl md:rounded-3xl p-4 md:p-6 border border-white/5 hover:border-yellow-400/30 transition-colors duration-300">
                 <div className="text-2xl sm:text-3xl md:text-5xl font-black text-yellow-400">5+</div>
-                <div className="text-xs md:text-sm text-white/50 mt-1 md:mt-2">lat doświadczenia</div>
+                <div className="text-xs md:text-sm text-white/70 mt-1 md:mt-2">lat doświadczenia</div>
               </div>
               <div className="bg-gradient-to-br from-zinc-800/80 to-zinc-900/80 rounded-2xl md:rounded-3xl p-4 md:p-6 border border-white/5 hover:border-yellow-400/30 transition-colors duration-300">
                 <div className="text-2xl sm:text-3xl md:text-5xl font-black text-white">100%</div>
-                <div className="text-xs md:text-sm text-white/50 mt-1 md:mt-2">świeżych składników</div>
+                <div className="text-xs md:text-sm text-white/70 mt-1 md:mt-2">świeżych składników</div>
               </div>
               <div className="bg-gradient-to-br from-zinc-800/80 to-zinc-900/80 rounded-2xl md:rounded-3xl p-4 md:p-6 border border-white/5 hover:border-yellow-400/30 transition-colors duration-300">
                 <div className="text-2xl sm:text-3xl md:text-5xl font-black text-white">1000+</div>
-                <div className="text-xs md:text-sm text-white/50 mt-1 md:mt-2">zadowolonych klientów</div>
+                <div className="text-xs md:text-sm text-white/70 mt-1 md:mt-2">zadowolonych klientów</div>
               </div>
               <div className="bg-gradient-to-br from-yellow-400 to-amber-500 rounded-2xl md:rounded-3xl p-4 md:p-6">
                 <div className="text-2xl sm:text-3xl md:text-5xl font-black text-black">#1</div>
-                <div className="text-xs md:text-sm text-black/60 mt-1 md:mt-2">smak w Ciechanowie</div>
+                <div className="text-xs md:text-sm text-black/70 mt-1 md:mt-2">smak w Ciechanowie</div>
               </div>
             </div>
           </div>
@@ -106,7 +106,7 @@ export default function OnasSection() {
                 <Flame className="text-yellow-400" size={24} />
               </div>
               <h4 className="text-lg md:text-xl font-bold text-white mb-2 md:mb-3">Grillowane na ogniu</h4>
-              <p className="text-white/40 text-xs md:text-sm leading-relaxed">
+              <p className="text-white/70 text-xs md:text-sm leading-relaxed">
                 Każdy burger grillujemy na otwartym ogniu, co nadaje mu wyjątkowy, głęboki smak.
               </p>
             </div>
@@ -116,7 +116,7 @@ export default function OnasSection() {
                 <Sparkles className="text-yellow-400" size={24} />
               </div>
               <h4 className="text-lg md:text-xl font-bold text-white mb-2 md:mb-3">Świeżość codziennie</h4>
-              <p className="text-white/40 text-xs md:text-sm leading-relaxed">
+              <p className="text-white/70 text-xs md:text-sm leading-relaxed">
                 Bułki i warzywa od lokalnych dostawców. Mięso przygotowujemy sami każdego ranka i smażymy na grillu.
               </p>
             </div>
@@ -126,7 +126,7 @@ export default function OnasSection() {
                 <Heart className="text-yellow-400" size={24} />
               </div>
               <h4 className="text-lg md:text-xl font-bold text-white mb-2 md:mb-3">Robione z pasją</h4>
-              <p className="text-white/40 text-xs md:text-sm leading-relaxed">
+              <p className="text-white/70 text-xs md:text-sm leading-relaxed">
                 Każde danie przygotowujemy z miłością. Bo wiemy, że smak zaczyna się od serca.
               </p>
             </div>
@@ -140,7 +140,7 @@ export default function OnasSection() {
                   <MapPin className="text-black" size={20} />
                 </div>
                 <div>
-                  <div className="text-xs md:text-sm text-white/40 mb-0.5 md:mb-1">Adres</div>
+                  <div className="text-xs md:text-sm text-white/60 mb-0.5 md:mb-1">Adres</div>
                   <div className="text-sm md:text-base text-white font-semibold">ul. Spółdzielcza 7, 06-400 Ciechanów</div>
                 </div>
               </div>
@@ -150,7 +150,7 @@ export default function OnasSection() {
                   <Clock className="text-black" size={20} />
                 </div>
                 <div>
-                  <div className="text-xs md:text-sm text-white/40 mb-0.5 md:mb-1">Godziny otwarcia</div>
+                  <div className="text-xs md:text-sm text-white/60 mb-0.5 md:mb-1">Godziny otwarcia</div>
                   <div className="text-sm md:text-base text-white font-semibold">Pon-Nd: 12:00 - 21:00</div>
                 </div>
               </div>
@@ -160,7 +160,7 @@ export default function OnasSection() {
                   <Phone className="text-black" size={20} />
                 </div>
                 <div>
-                  <div className="text-xs md:text-sm text-white/40 mb-0.5 md:mb-1">Telefon</div>
+                  <div className="text-xs md:text-sm text-white/60 mb-0.5 md:mb-1">Telefon</div>
                   <div className="text-sm md:text-base text-white font-semibold">+48 515 433 488</div>
                 </div>
               </div>
