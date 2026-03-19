@@ -1234,26 +1234,23 @@ const pricingType =
             Math.round((baseTotal - amount) * 100) / 100
           );
 
-          // Zapisz redempcję (tracking) — upsert, bo auto-rabat może być
-          // wielokrotnie użyty przez tego samego emaila na różne zamówienia
+          // Zapisz redempcję (tracking) — zwykły insert.
+          // Auto-rabat może być wielokrotnie użyty przez ten sam email
+          // na różne zamówienia, więc nie potrzebujemy unique constraint.
           const { error: redErr } = await supabaseAdmin
             .from("discount_redemptions")
-            .upsert(
-              {
-                code_id: dc.id,
-                code: dc.code,
-                order_id: newOrderId,
-                user_id: n.user ?? null,
-                email_lower: emailLower,
-                amount,
-              },
-              { onConflict: "code,email_lower", ignoreDuplicates: false }
-            );
+            .insert({
+              code_id: dc.id,
+              code: dc.code,
+              order_id: newOrderId,
+              user_id: n.user ?? null,
+              email_lower: emailLower,
+              amount,
+            });
 
           if (redErr) {
-            // Jeśli upsert też nie przejdzie, kontynuuj — rabat
-            // i tak zostanie zastosowany na zamówieniu
-            console.warn("[orders.create] auto discount_redemptions upsert warning:", redErr.message);
+            // Kontynuuj — rabat i tak zostanie zastosowany na zamówieniu
+            console.warn("[orders.create] auto discount_redemptions insert warning:", redErr.message);
           }
 
           // ZAWSZE aplikuj rabat na zamówieniu – niezależnie od redempcji
@@ -1389,12 +1386,13 @@ if (Array.isArray(n.itemsArray) && n.itemsArray.length > 0) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ orderId: newOrderId }),
       }).then(async (res) => {
-        if (res.ok) {
-          const data = await res.json().catch(() => null);
+        const data = await res.json().catch(() => null);
+        if (res.ok && data?.success) {
           console.log(`[orders.create] Dotypos POS send OK:`, data?.dotypos?.status || "sent");
+        } else if (res.ok && !data?.success) {
+          console.error(`[orders.create] Dotypos POS rejected (code ${data?.dotypos?.code}):`, data?.dotypos?.status);
         } else {
-          const errText = await res.text().catch(() => "");
-          console.error(`[orders.create] Dotypos POS send failed (${res.status}):`, errText.slice(0, 200));
+          console.error(`[orders.create] Dotypos POS send failed (${res.status}):`, JSON.stringify(data).slice(0, 300));
         }
       }).catch((err) => {
         console.error("[orders.create] Dotypos POS send error:", err?.message || err);
