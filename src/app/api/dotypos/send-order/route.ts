@@ -25,7 +25,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import dotypos, { DotyposOrderItem, DotyposTable } from "@/lib/dotypos";
+import dotypos, { DotyposOrderItem, DotyposTable, getTables } from "@/lib/dotypos";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -97,6 +97,7 @@ interface OrderData {
   selected_option?: string;
   note?: string;
   order_note?: string;
+  payment_method?: string;
   payment_status?: string;
   total_price?: number;
   base_before_discount?: number;
@@ -381,6 +382,10 @@ export async function POST(req: NextRequest) {
     // by the take-away flag which Dotypos displays below S-number on the bon.
     // This way it appears in the right place (under order number, not at the top).
     const orderNoteParts: string[] = [];
+    // Metoda płatności na samej górze bonu
+    if (order.payment_method) {
+      orderNoteParts.push(`Płatność: ${order.payment_method}`);
+    }
     if (customerName) {
       orderNoteParts.push(`Klient: ${customerName}`);
     }
@@ -463,7 +468,7 @@ export async function POST(req: NextRequest) {
       // Fallback: fetch tables from API and match by name
       if (!tableId) {
         console.log(`[Dotypos Order] Fetching tables from API for selectedOpt="${selectedOpt}"...`);
-        const tablesRes = await dotypos.getTables();
+        const tablesRes = await getTables();
         const rawTables = tablesRes.data || [];
         console.log(`[Dotypos Order] Raw tables:`, JSON.stringify(rawTables.map((t: any) => ({ id: t.id, name: t.name, deleted: t.deleted, tid: typeof t.id, tdel: typeof t.deleted }))));
         
