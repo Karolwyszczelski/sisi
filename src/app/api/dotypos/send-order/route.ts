@@ -89,16 +89,24 @@ interface OrderData {
   id: string;
   items: string | OrderItem[];
   customer_name?: string;
+  name?: string;
   phone?: string;
   email?: string;
+  contact_email?: string;
   order_type?: "delivery" | "takeaway" | "dine-in";
   selected_option?: string;
   note?: string;
+  order_note?: string;
   payment_status?: string;
   total_price?: number;
   base_before_discount?: number;
   discount_amount?: number;
+  delivery_cost?: number;
   promo_code?: string;
+  address?: string;
+  street?: string;
+  city?: string;
+  flat_number?: string;
   dotypos_order_id?: number;
   dotypos_receipt_id?: number;
 }
@@ -265,6 +273,19 @@ export async function POST(req: NextRequest) {
       );
     }
     
+    // 3.5. Find special POS products for packaging and delivery
+    const findSpecialProduct = (keywords: string[]): PosProduct | undefined => {
+      for (const kw of keywords) {
+        const found = posProducts.find(p => 
+          normalizeProductName(p.name).includes(kw)
+        );
+        if (found) return found;
+      }
+      return undefined;
+    };
+    const packagingProduct = findSpecialProduct(["opakowanie", "pakowanie", "packaging"]);
+    const deliveryProduct = findSpecialProduct(["dostawa", "transport", "delivery"]);
+    
     // 4. Map order items to Dotypos items
     const dotyposItems: DotyposOrderItem[] = [];
     const unmappedItems: string[] = [];
@@ -297,31 +318,71 @@ export async function POST(req: NextRequest) {
       );
     }
     
+    // 4.5. Add packaging cost as order item
+    const selectedOpt = order.selected_option || order.order_type || "local";
+    const needsPackaging = selectedOpt === "delivery" || selectedOpt === "takeaway";
+    
+    if (needsPackaging && packagingProduct) {
+      dotyposItems.push({
+        id: packagingProduct.pos_id,
+        qty: 1,
+        note: "Opakowanie",
+        // Use POS price (set in Dotypos for the packaging product)
+      });
+      console.log(`[Dotypos Order] Added packaging: POS product "${packagingProduct.name}" (id: ${packagingProduct.pos_id})`);
+    } else if (needsPackaging && !packagingProduct) {
+      console.warn('[Dotypos Order] No "Opakowanie" product found in POS. Create it in Dotypos to include packaging cost.');
+    }
+    
+    // 4.6. Add delivery cost as order item
+    if (selectedOpt === "delivery" && order.delivery_cost && order.delivery_cost > 0) {
+      if (deliveryProduct) {
+        dotyposItems.push({
+          id: deliveryProduct.pos_id,
+          qty: 1,
+          "manual-price": order.delivery_cost, // Override with actual calculated delivery cost
+          note: "Dostawa",
+        });
+        console.log(`[Dotypos Order] Added delivery: ${order.delivery_cost} zł (POS product "${deliveryProduct.name}", id: ${deliveryProduct.pos_id})`);
+      } else {
+        console.warn(`[Dotypos Order] No "Dostawa" product found in POS. Create it in Dotypos to include delivery cost. Delivery: ${order.delivery_cost} zł`);
+      }
+    }
+    
     // 5. Build customer info
-    // NOTE: The POS Actions API only supports "customer-id" (numeric),
-    // not a "customer" object. The customer object in the request may be
-    // silently ignored. We include customer info in the order note as fallback.
+    const customerName = order.customer_name || order.name || undefined;
+    const customerEmail = order.email || order.contact_email || undefined;
     const customer = {
-      name: order.customer_name || undefined,
+      name: customerName,
       phone: order.phone || undefined,
-      email: order.email || undefined,
+      email: customerEmail,
     };
     
     // 6. Build order note (include customer info for POS visibility)
     const orderNoteParts: string[] = [];
-    if (order.order_type === "delivery") {
+    if (selectedOpt === "delivery") {
       orderNoteParts.push("🚗 DOSTAWA");
-    } else if (order.order_type === "takeaway") {
+    } else if (selectedOpt === "takeaway") {
       orderNoteParts.push("📦 NA WYNOS");
     }
-    if (order.customer_name) {
-      orderNoteParts.push(`Klient: ${order.customer_name}`);
+    if (customerName) {
+      orderNoteParts.push(`Klient: ${customerName}`);
     }
     if (order.phone) {
       orderNoteParts.push(`Tel: ${order.phone}`);
     }
-    if (order.note) {
-      orderNoteParts.push(order.note);
+    // Add delivery address to note
+    if (selectedOpt === "delivery") {
+      const addrParts = [order.street || order.address, order.flat_number ? `m. ${order.flat_number}` : null, order.city].filter(Boolean);
+      if (addrParts.length) {
+        orderNoteParts.push(`Adres: ${addrParts.join(", ")}`);
+      }
+      if (order.delivery_cost) {
+        orderNoteParts.push(`Dostawa: ${order.delivery_cost.toFixed(2)} zł`);
+      }
+    }
+    if (order.order_note) {
+      orderNoteParts.push(`Uwagi: ${order.order_note}`);
     }
     if (unmappedItems.length > 0) {
       orderNoteParts.push(`⚠️ Niezmapowane: ${unmappedItems.join(", ")}`);
