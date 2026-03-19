@@ -112,13 +112,47 @@ export default function IntegrationsForm() {
   }, [searchParams, supabase, router]);
 
   /**
-   * Connect to Dotypos - redirects to auto-submitting POST form
+   * Connect to Dotypos - official Connector v2 flow:
+   * 1. Fetch signed form data from our API (HMAC signature generated server-side)
+   * 2. Create a real DOM <form> with hidden inputs
+   * 3. Append to document.body and submit (browser navigates via POST to Dotypos)
+   * This is the exact approach from: docs.api.dotypos.com/authorization/#implementation-example
    */
   const handleConnect = async () => {
     setConnecting(true);
-    // Navigate directly to the connector-url endpoint
-    // which returns an auto-submitting HTML form (POST to Dotypos)
-    window.location.href = "/api/dotypos/connector-url";
+    try {
+      const res = await fetch("/api/dotypos/connector-url");
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Błąd serwera" }));
+        alert(err.error || "Nie udało się pobrać danych połączenia");
+        setConnecting(false);
+        return;
+      }
+      const data = await res.json();
+
+      // Create a hidden POST form — exactly as Dotypos documentation recommends
+      const form = document.createElement("form");
+      form.method = "POST";
+      form.action = data.action; // https://admin.dotykacka.cz/client/connect/v2
+      form.style.display = "none";
+
+      // Add all form fields as hidden inputs
+      for (const [name, value] of Object.entries(data.formData)) {
+        const input = document.createElement("input");
+        input.type = "hidden";
+        input.name = name;
+        input.value = String(value);
+        form.appendChild(input);
+      }
+
+      // Append to DOM and submit — browser will navigate to Dotypos login page
+      document.body.appendChild(form);
+      form.submit();
+    } catch (err) {
+      console.error("Błąd łączenia z Dotypos:", err);
+      alert("Nie udało się nawiązać połączenia z Dotypos. Sprawdź konsolę.");
+      setConnecting(false);
+    }
   };
 
   const handleDisconnect = async () => {
