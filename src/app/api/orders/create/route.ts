@@ -739,7 +739,7 @@ export async function POST(req: Request) {
       userId: string | null,
       emailLower: string | null
     ) {
-      const [allQ, userQ, emailLowerQ, emailPlainQ] = await Promise.all([
+      const [allQ, userQ, emailLowerQ] = await Promise.all([
         supabaseAdmin
           .from("discount_redemptions")
           .select("*", { head: true, count: "exact" })
@@ -758,21 +758,12 @@ export async function POST(req: Request) {
               .eq("code_id", codeId)
               .eq("email_lower", emailLower)
           : Promise.resolve({ count: 0 }),
-        emailLower
-          ? supabaseAdmin
-              .from("discount_redemptions")
-              .select("*", { head: true, count: "exact" })
-              .eq("code_id", codeId)
-              .eq("email", emailLower)
-          : Promise.resolve({ count: 0 }),
       ]);
 
       return {
         all: Number((allQ as any).count || 0),
         byUser: Number((userQ as any).count || 0),
-        byEmail:
-          Number((emailLowerQ as any).count || 0) +
-          Number((emailPlainQ as any).count || 0),
+        byEmail: Number((emailLowerQ as any).count || 0),
       };
     }
 
@@ -853,32 +844,6 @@ export async function POST(req: Request) {
 
         if (!best || amount > best.amount) {
           best = { dc, amount };
-        }
-      }
-
-      // Sprawdź czy tożsamość (user/email) nie ma już aktywnego zamówienia
-      // z tym kodem — unique index one_use_per_identity_active_order
-      if (best) {
-        const identity = userId || emailLower;
-        if (identity) {
-          let q = supabaseAdmin
-            .from("orders")
-            .select("id", { head: true, count: "exact" })
-            .eq("promo_code", best.dc.code)
-            .neq("status", "cancelled")
-            .neq("status", "failed");
-
-          if (userId) {
-            q = q.eq("user", userId);
-          } else {
-            q = q.is("user", null).ilike("contact_email", emailLower!);
-          }
-
-          const { count } = await q;
-          if ((count ?? 0) > 0) {
-            // tożsamość ma już aktywne zamówienie z tym kodem → skip
-            return null;
-          }
         }
       }
 
@@ -1293,14 +1258,7 @@ const pricingType =
             appliedCode = dc;
             appliedDiscount = amount;
           } else {
-            // 23505 = unique_violation (one_use_per_identity_active_order)
-            // Nie jest to błąd krytyczny — zamówienie istnieje, po prostu bez rabatu.
-            const isUniqueViolation = (updErr as any)?.code === "23505";
-            if (isUniqueViolation) {
-              console.info("[orders.create] auto promo skipped — identity already has active order with code:", dc.code);
-            } else {
-              console.error("[orders.create] auto orders update error:", updErr.message, updErr);
-            }
+            console.error("[orders.create] auto orders update error:", updErr.message, updErr);
             // Cofnij redempcję jeśli była wstawiona
             if (!redErr) {
               await supabaseAdmin

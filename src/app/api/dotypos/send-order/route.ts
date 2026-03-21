@@ -168,23 +168,6 @@ function findPosProduct(
   return match;
 }
 
-/**
- * Build item note with addons and special instructions
- */
-function buildItemNote(item: OrderItem): string | undefined {
-  const parts: string[] = [];
-  
-  if (item.addons && item.addons.length > 0) {
-    parts.push(`Dodatki: ${item.addons.join(", ")}`);
-  }
-  
-  if (item.note) {
-    parts.push(item.note);
-  }
-  
-  return parts.length > 0 ? parts.join(" | ") : undefined;
-}
-
 /* ============================================================
    POST Handler - Send Order to Dotypos
    ============================================================ */
@@ -274,6 +257,18 @@ export async function POST(req: NextRequest) {
       );
     }
     
+    // 3.4. Fetch addon categories from database for proper POS product mapping
+    const { data: addonCategoriesData } = await supabase
+      .from("addons")
+      .select("name, category")
+      .eq("available", true);
+    const addonCategoryMap = new Map<string, string>();
+    if (addonCategoriesData) {
+      for (const a of addonCategoriesData) {
+        addonCategoryMap.set((a.name as string).toLowerCase(), a.category as string);
+      }
+    }
+    
     // 3.5. Find special POS products for packaging and delivery
     const findSpecialProduct = (keywords: string[]): PosProduct | undefined => {
       for (const kw of keywords) {
@@ -305,23 +300,106 @@ export async function POST(req: NextRequest) {
       console.log(`[Dotypos Order] Delivery product: "${deliveryProduct.name}" (city: ${order.city || "?"}, isCiechanow: ${isCiechanow})`);
     }
     
+    // Find special POS products for addon mapping
+    const extraMeatProduct = findSpecialProduct(["dodatkowe mięso", "dodatkowe mieso"]);
+    const extraIngredientProduct = findSpecialProduct(["dodatkowy składnik", "dodatkowy skladnik"]);
+    const extraSauceProduct = findSpecialProduct(["dodatkowy sos"]);
+    const extraFluidCheeseProduct = findSpecialProduct(["dodatkowy płynny ser", "dodatkowy plynny ser"]);
+    console.log(`[Dotypos Order] Addon POS products — mięso: ${extraMeatProduct?.pos_id ?? "brak"}, składnik: ${extraIngredientProduct?.pos_id ?? "brak"}, sos: ${extraSauceProduct?.pos_id ?? "brak"}, płynny ser: ${extraFluidCheeseProduct?.pos_id ?? "brak"}`);
+    
     // 4. Map order items to Dotypos items
+    // Każda sztuka produktu jest osobną pozycją z własnym blokiem dodatków.
+    // Dzięki temu kucharz widzi dokładnie które dodatki należą do którego burgera.
     const dotyposItems: DotyposOrderItem[] = [];
     const unmappedItems: string[] = [];
     
     for (const item of items) {
       const posProduct = findPosProduct(item.name, posProducts);
       
-      if (posProduct) {
-        dotyposItems.push({
-          id: posProduct.pos_id,
-          qty: item.quantity || 1,
-          note: buildItemNote(item),
-          // Don't override price - use POS price
-        });
-      } else {
+      if (!posProduct) {
         unmappedItems.push(item.name);
         console.warn(`[Dotypos Order] Unmapped product: ${item.name}`);
+        continue;
+      }
+      
+      // Rozbij addons na kategorie:
+      //   meatTypeNote  → tylko notatka bonu (wybór mięsa, bezpłatne)
+      //   extraMeatCount → osobna pozycja POS "Dodatkowe mięso"
+      //   regularAddons  → osobne pozycje POS wg kategorii z bazy addons
+      const regularAddons: string[] = [];
+      let meatTypeNote: string | undefined;
+      let extraMeatCount = 0;
+      
+      for (const addon of (item.addons || [])) {
+        // "Mięso: kurczak" → tylko w notatce, NIE jako płatny produkt
+        const meatMatch = addon.match(/^Mięso:\s*(.+)$/i);
+        if (meatMatch) {
+          meatTypeNote = meatMatch[1].trim();
+          continue;
+        }
+        // "Dodatkowe mięso x2" → osobna pozycja POS
+        const extraMeatMatch = addon.match(/^Dodatkowe mięso x(\d+)$/i);
+        if (extraMeatMatch) {
+          extraMeatCount += parseInt(extraMeatMatch[1], 10);
+          continue;
+        }
+        regularAddons.push(addon);
+      }
+      
+      // Notatka do produktu: typ mięsa + opcjonalna ręczna notatka klienta
+      const noteParts: string[] = [];
+      if (meatTypeNote) noteParts.push(`Mięso: ${meatTypeNote}`);
+      if (item.note)     noteParts.push(item.note);
+      const itemNote = noteParts.length > 0 ? noteParts.join(" | ") : undefined;
+      
+      const qty = item.quantity || 1;
+      if (qty > 1) {
+        console.log(`[Dotypos Order] Splitting "${item.name}" × ${qty} into individual units (each with own addons)`);
+      }
+      
+      // Każda sztuka → własna pozycja burgera + własne dodatki
+      for (let unit = 0; unit < qty; unit++) {
+        // Główny produkt
+        dotyposItems.push({
+          id: posProduct.pos_id,
+          qty: 1,
+          note: itemNote,
+        });
+        
+        // Dodatkowe mięso dla tej sztuki
+        if (extraMeatCount > 0) {
+          if (extraMeatProduct) {
+            dotyposItems.push({
+              id: extraMeatProduct.pos_id,
+              qty: extraMeatCount,
+              note: `Do: ${item.name}`,
+            });
+          } else {
+            console.warn(`[Dotypos Order] Brak produktu "Dodatkowe mięso" w POS`);
+          }
+        }
+        
+        // Płatne dodatki dla tej sztuki
+        for (const addonName of regularAddons) {
+          const category = addonCategoryMap.get(addonName.toLowerCase()) || "dodatek";
+          
+          let addonPosProduct: PosProduct | undefined;
+          if (category === "sos")     addonPosProduct = extraSauceProduct;
+          else if (category === "premium") addonPosProduct = extraFluidCheeseProduct;
+          else                          addonPosProduct = extraIngredientProduct;
+          
+          if (addonPosProduct) {
+            dotyposItems.push({
+              id: addonPosProduct.pos_id,
+              qty: 1,
+              note: addonName,
+            });
+          } else {
+            console.warn(`[Dotypos Order] Brak produktu POS dla dodatku "${addonName}" (kategoria: ${category})`);
+            // Dodaj do unmapped tylko raz (przy pierwszej sztuce)
+            if (unit === 0) unmappedItems.push(`Dodatek: ${addonName}`);
+          }
+        }
       }
     }
     

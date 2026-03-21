@@ -50,7 +50,7 @@ async function getUsageCounts(
   userId: string | null,
   emailLower: string | null
 ) {
-  const [allQ, userQ, emailLowerQ, emailPlainQ] = await Promise.all([
+  const [allQ, userQ, emailLowerQ] = await Promise.all([
     supabaseAdmin
       .from("discount_redemptions")
       .select("*", { head: true, count: "exact" })
@@ -69,21 +69,12 @@ async function getUsageCounts(
           .eq("code_id", codeId)
           .eq("email_lower", emailLower)
       : Promise.resolve({ count: 0 }),
-    emailLower
-      ? supabaseAdmin
-          .from("discount_redemptions")
-          .select("*", { head: true, count: "exact" })
-          .eq("code_id", codeId)
-          .eq("email", emailLower)
-      : Promise.resolve({ count: 0 }),
   ]);
 
   return {
     all: Number((allQ as any).count || 0),
     byUser: Number((userQ as any).count || 0),
-    byEmail:
-      Number((emailLowerQ as any).count || 0) +
-      Number((emailPlainQ as any).count || 0),
+    byEmail: Number((emailLowerQ as any).count || 0),
   };
 }
 
