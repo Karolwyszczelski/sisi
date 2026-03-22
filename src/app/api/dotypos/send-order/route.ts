@@ -135,37 +135,61 @@ function normalizeProductName(name: string): string {
 }
 
 /**
- * Find best matching POS product for an order item
- * Uses fuzzy matching if exact match not found
+ * Find best matching POS product for an order item.
+ *
+ * Strategy (ordered by precision):
+ * 1. Exact match after normalization.
+ * 2. Contains match — only when exactly ONE POS product matches (unambiguous).
+ * 3. Word-overlap scoring — score every candidate by how many item words
+ *    appear in the POS name (substring both ways); return the highest scorer.
+ *    Ties are broken by preferring the POS product whose name is longer
+ *    (more specific). This prevents "TexMex Cheeseburger" from matching
+ *    "TexMex Vegeburger" just because they share the "texmex" word.
  */
 function findPosProduct(
   itemName: string,
   posProducts: PosProduct[]
 ): PosProduct | undefined {
   const normalizedItemName = normalizeProductName(itemName);
-  
-  // 1. Try exact match
-  let match = posProducts.find(
+
+  // 1. Exact match
+  const exact = posProducts.find(
     (p) => normalizeProductName(p.name) === normalizedItemName
   );
-  if (match) return match;
-  
-  // 2. Try contains match (item name in POS name or vice versa)
-  match = posProducts.find(
-    (p) =>
-      normalizeProductName(p.name).includes(normalizedItemName) ||
-      normalizedItemName.includes(normalizeProductName(p.name))
-  );
-  if (match) return match;
-  
-  // 3. Try partial word match (at least 3 chars)
-  const itemWords = normalizedItemName.split(" ").filter((w) => w.length >= 3);
-  match = posProducts.find((p) => {
-    const posWords = normalizeProductName(p.name).split(" ");
-    return itemWords.some((w) => posWords.some((pw) => pw.includes(w)));
+  if (exact) return exact;
+
+  // 2. Unambiguous contains match
+  const containsCandidates = posProducts.filter((p) => {
+    const posNorm = normalizeProductName(p.name);
+    return posNorm.includes(normalizedItemName) || normalizedItemName.includes(posNorm);
   });
-  
-  return match;
+  if (containsCandidates.length === 1) return containsCandidates[0];
+
+  // 3. Word-overlap scoring (min 3-char words)
+  const itemWords = normalizedItemName.split(" ").filter((w) => w.length >= 3);
+  if (itemWords.length === 0) return undefined;
+
+  let bestMatch: PosProduct | undefined;
+  let bestScore = 0;
+
+  for (const p of posProducts) {
+    const posWords = normalizeProductName(p.name).split(" ");
+    // Count item words that have a substring overlap with any POS word
+    const score = itemWords.filter((w) =>
+      posWords.some((pw) => pw.includes(w) || w.includes(pw))
+    ).length;
+
+    if (
+      score > bestScore ||
+      // Tie-break: prefer longer (more specific) POS name
+      (score === bestScore && score > 0 && p.name.length > (bestMatch?.name.length ?? 0))
+    ) {
+      bestScore = score;
+      bestMatch = p;
+    }
+  }
+
+  return bestScore > 0 ? bestMatch : undefined;
 }
 
 /* ============================================================
