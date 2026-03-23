@@ -123,7 +123,7 @@ interface PosProduct {
    ============================================================ */
 
 /**
- * Normalize product name for matching
+ * Normalize product name for matching (basic — used by findSpecialProduct)
  * Removes extra spaces, converts to lowercase, keeps Unicode letters (Polish chars)
  */
 function normalizeProductName(name: string): string {
@@ -134,62 +134,178 @@ function normalizeProductName(name: string): string {
     .replace(/[^\p{L}\p{N}\s]/gu, ""); // keep letters (incl. Polish), digits, spaces
 }
 
+/** Strip Polish diacritics → ASCII equivalents for fuzzy comparison */
+function stripDiacritics(s: string): string {
+  return s
+    .replace(/[ąĄ]/g, (c) => (c === "ą" ? "a" : "A"))
+    .replace(/[ćĆ]/g, (c) => (c === "ć" ? "c" : "C"))
+    .replace(/[ęĘ]/g, (c) => (c === "ę" ? "e" : "E"))
+    .replace(/[łŁ]/g, (c) => (c === "ł" ? "l" : "L"))
+    .replace(/[ńŃ]/g, (c) => (c === "ń" ? "n" : "N"))
+    .replace(/[óÓ]/g, (c) => (c === "ó" ? "o" : "O"))
+    .replace(/[śŚ]/g, (c) => (c === "ś" ? "s" : "S"))
+    .replace(/[źŹ]/g, (c) => (c === "ź" ? "z" : "Z"))
+    .replace(/[żŻ]/g, (c) => (c === "ż" ? "z" : "Z"));
+}
+
+/** Strip leading number prefix like "1. ", "11. " from POS product names */
+function stripNumberPrefix(name: string): string {
+  return name.replace(/^\d+\.\s*/, "");
+}
+
+/** Full normalization for matching: strip prefix → lowercase → remove punctuation → strip diacritics */
+function normalizeForMatching(name: string): string {
+  return stripDiacritics(normalizeProductName(stripNumberPrefix(name)));
+}
+
+/** Levenshtein distance between two strings */
+function levenshtein(a: string, b: string): number {
+  const m = a.length, n = b.length;
+  if (m === 0) return n;
+  if (n === 0) return m;
+  const dp: number[][] = Array.from({ length: m + 1 }, (_, i) => {
+    const row = new Array(n + 1).fill(0);
+    row[0] = i;
+    return row;
+  });
+  for (let j = 1; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] =
+        a[i - 1] === b[j - 1]
+          ? dp[i - 1][j - 1]
+          : 1 + Math.min(dp[i - 1][j - 1], dp[i - 1][j], dp[i][j - 1]);
+    }
+  }
+  return dp[m][n];
+}
+
+/**
+ * Check if two words are a "fuzzy match".
+ *   1. Exact equality
+ *   2. Substring — only when shorter word is ≥75 % of longer word length
+ *      (avoids "gazowana" ⊂ "niegazowana" false positive)
+ *   3. Levenshtein distance ≤ ceil(longerLen × 0.25), max 2
+ *      (catches typos like "cheesburger" ≈ "cheeseburger")
+ */
+function wordsMatch(a: string, b: string): boolean {
+  if (a === b) return true;
+  const longer = a.length >= b.length ? a : b;
+  const shorter = a.length < b.length ? a : b;
+  // Substring with length ratio guard
+  if (shorter.length >= 3 && longer.includes(shorter) && shorter.length / longer.length >= 0.75) {
+    return true;
+  }
+  // Levenshtein for words ≥ 4 chars
+  if (a.length >= 4 && b.length >= 4) {
+    const maxDist = Math.min(2, Math.ceil(Math.max(a.length, b.length) * 0.25));
+    if (levenshtein(a, b) <= maxDist) return true;
+  }
+  return false;
+}
+
 /**
  * Find best matching POS product for an order item.
  *
  * Strategy (ordered by precision):
- * 1. Exact match after normalization.
- * 2. Contains match — only when exactly ONE POS product matches (unambiguous).
- * 3. Word-overlap scoring — score every candidate by how many item words
- *    appear in the POS name (substring both ways); return the highest scorer.
- *    Ties are broken by preferring the POS product whose name is longer
- *    (more specific). This prevents "TexMex Cheeseburger" from matching
- *    "TexMex Vegeburger" just because they share the "texmex" word.
+ * 1. Exact match after full normalization (strip prefix + diacritics).
+ * 2. Exact match with all spaces removed (catches "Red Bull" → "RedBull").
+ * 3. Bidirectional word-overlap scoring with fuzzy word matching:
+ *    - itemCoverage = matched item words / total item words
+ *    - posCoverage  = matched POS words / total POS words
+ *    - score = itemCoverage + posCoverage  (max 2.0)
+ *    - +0.5 bonus when prices match (strong disambiguation signal)
+ *    - Tie-break: prefer shorter POS name (= more specific / less extra words)
+ *    - Minimum score: 1.0
  */
 function findPosProduct(
   itemName: string,
-  posProducts: PosProduct[]
+  posProducts: PosProduct[],
+  itemPrice?: number
 ): PosProduct | undefined {
-  const normalizedItemName = normalizeProductName(itemName);
+  const normItem = normalizeForMatching(itemName);
+
+  // Pre-compute stripped POS names
+  const candidates = posProducts.map((p) => ({
+    product: p,
+    stripped: normalizeForMatching(p.name),
+  }));
 
   // 1. Exact match
-  const exact = posProducts.find(
-    (p) => normalizeProductName(p.name) === normalizedItemName
-  );
-  if (exact) return exact;
+  const exact = candidates.find((c) => c.stripped === normItem);
+  if (exact) {
+    console.log(`[POS Match] "${itemName}" → exact → "${exact.product.name}" (pos_id: ${exact.product.pos_id})`);
+    return exact.product;
+  }
 
-  // 2. Unambiguous contains match
-  const containsCandidates = posProducts.filter((p) => {
-    const posNorm = normalizeProductName(p.name);
-    return posNorm.includes(normalizedItemName) || normalizedItemName.includes(posNorm);
-  });
-  if (containsCandidates.length === 1) return containsCandidates[0];
-
-  // 3. Word-overlap scoring (min 3-char words)
-  const itemWords = normalizedItemName.split(" ").filter((w) => w.length >= 3);
-  if (itemWords.length === 0) return undefined;
-
-  let bestMatch: PosProduct | undefined;
-  let bestScore = 0;
-
-  for (const p of posProducts) {
-    const posWords = normalizeProductName(p.name).split(" ");
-    // Count item words that have a substring overlap with any POS word
-    const score = itemWords.filter((w) =>
-      posWords.some((pw) => pw.includes(w) || w.includes(pw))
-    ).length;
-
-    if (
-      score > bestScore ||
-      // Tie-break: prefer longer (more specific) POS name
-      (score === bestScore && score > 0 && p.name.length > (bestMatch?.name.length ?? 0))
-    ) {
-      bestScore = score;
-      bestMatch = p;
+  // 1.5. Exact match ignoring all spaces (handles compound words like RedBull)
+  const itemNoSpaces = normItem.replace(/ /g, "");
+  if (itemNoSpaces.length >= 4) {
+    const exactNS = candidates.find((c) => c.stripped.replace(/ /g, "") === itemNoSpaces);
+    if (exactNS) {
+      console.log(`[POS Match] "${itemName}" → exact-no-spaces → "${exactNS.product.name}" (pos_id: ${exactNS.product.pos_id})`);
+      return exactNS.product;
     }
   }
 
-  return bestScore > 0 ? bestMatch : undefined;
+  // 2. Bidirectional word-overlap scoring with fuzzy matching
+  const itemWords = normItem.split(" ").filter((w) => w.length >= 3);
+  if (itemWords.length === 0) return undefined;
+
+  let bestProduct: PosProduct | undefined;
+  let bestScore = 0;
+  let bestStrippedLen = Infinity;
+
+  for (const c of candidates) {
+    const posWords = c.stripped.split(" ").filter((w) => w.length >= 3);
+    if (posWords.length === 0) continue;
+
+    // How many item words fuzzy-match some POS word
+    const matchedItemWords = itemWords.filter((iw) =>
+      posWords.some((pw) => wordsMatch(iw, pw))
+    ).length;
+    if (matchedItemWords === 0) continue;
+
+    // How many POS words fuzzy-match some item word (bidirectional!)
+    const matchedPosWords = posWords.filter((pw) =>
+      itemWords.some((iw) => wordsMatch(iw, pw))
+    ).length;
+
+    const itemCoverage = matchedItemWords / itemWords.length;
+    const posCoverage = matchedPosWords / posWords.length;
+    let score = itemCoverage + posCoverage;
+
+    // Price match bonus — strong disambiguation signal
+    if (
+      itemPrice != null &&
+      c.product.price != null &&
+      Math.abs(Number(c.product.price) - itemPrice) < 0.01
+    ) {
+      score += 0.5;
+    }
+
+    const isBetter =
+      score > bestScore ||
+      (score === bestScore && c.stripped.length < bestStrippedLen);
+
+    if (isBetter) {
+      bestScore = score;
+      bestProduct = c.product;
+      bestStrippedLen = c.stripped.length;
+    }
+  }
+
+  if (bestProduct && bestScore >= 1.0) {
+    console.log(
+      `[POS Match] "${itemName}" → fuzzy (score ${bestScore.toFixed(2)}) → "${bestProduct.name}" (pos_id: ${bestProduct.pos_id})`
+    );
+    return bestProduct;
+  }
+
+  console.warn(
+    `[POS Match] "${itemName}" → NO MATCH (best score: ${bestScore.toFixed(2)}, candidate: "${bestProduct?.name ?? "none"}")`
+  );
+  return undefined;
 }
 
 /* ============================================================
@@ -338,7 +454,7 @@ export async function POST(req: NextRequest) {
     const unmappedItems: string[] = [];
     
     for (const item of items) {
-      const posProduct = findPosProduct(item.name, posProducts);
+      const posProduct = findPosProduct(item.name, posProducts, item.price);
       
       if (!posProduct) {
         unmappedItems.push(item.name);
