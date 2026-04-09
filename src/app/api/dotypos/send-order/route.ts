@@ -104,6 +104,8 @@ interface OrderData {
   discount_amount?: number;
   delivery_cost?: number;
   promo_code?: string;
+  client_delivery_time?: string | null;
+  delivery_time?: string | null;
   address?: string;
   street?: string;
   city?: string;
@@ -132,6 +134,49 @@ function normalizeProductName(name: string): string {
     .trim()
     .replace(/\s+/g, " ")
     .replace(/[^\p{L}\p{N}\s]/gu, ""); // keep letters (incl. Polish), digits, spaces
+}
+
+const APP_TZ = "Europe/Warsaw";
+
+function formatHourPL(input?: string | null): string | null {
+  if (!input) return null;
+  const value = String(input).trim();
+  if (!value) return null;
+
+  if (/^\d{1,2}:\d{2}$/.test(value)) return value;
+
+  const t = Date.parse(value);
+  if (!Number.isNaN(t)) {
+    return new Date(t).toLocaleTimeString("pl-PL", {
+      timeZone: APP_TZ,
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  }
+
+  return null;
+}
+
+function parseRequestedClientTime(raw?: string | null): string | null {
+  if (!raw) return null;
+  const value = String(raw).trim();
+  if (!value) return null;
+
+  if (value.toLowerCase() === "asap") return "Jak najszybciej";
+
+  const direct = formatHourPL(value);
+  if (direct) return direct;
+
+  // Legacy/edge case: JSON string e.g. {"client_delivery_time":"18:30"}
+  try {
+    const parsed = JSON.parse(value);
+    const nested = parsed?.client_delivery_time ?? parsed?.clientDelivery ?? null;
+    if (!nested) return null;
+    if (String(nested).toLowerCase() === "asap") return "Jak najszybciej";
+    return formatHourPL(String(nested));
+  } catch {
+    return null;
+  }
 }
 
 /** Strip Polish diacritics → ASCII equivalents for fuzzy comparison */
@@ -317,7 +362,8 @@ export async function POST(req: NextRequest) {
   
   try {
     const body = await req.json();
-    const { orderId } = body;
+    const { orderId, force } = body;
+    const isForceResend = force === true;
     
     if (!orderId) {
       return NextResponse.json(
@@ -326,7 +372,7 @@ export async function POST(req: NextRequest) {
       );
     }
     
-    console.log(`[Dotypos Order] Processing order: ${orderId}`);
+    console.log(`[Dotypos Order] Processing order: ${orderId}${isForceResend ? " (force resend)" : ""}`);
     
     const supabase = getSupabase();
     
@@ -347,14 +393,18 @@ export async function POST(req: NextRequest) {
     
     const order: OrderData = orders[0];
     
-    // Check if already sent to Dotypos
-    if (order.dotypos_order_id) {
+    // Check if already sent to Dotypos (unless force resend was requested)
+    if (order.dotypos_order_id && !isForceResend) {
       console.log(`[Dotypos Order] Order already sent: ${order.dotypos_order_id}`);
       return NextResponse.json({
         success: true,
         already_sent: true,
         dotypos_order_id: order.dotypos_order_id,
       });
+    }
+
+    if (order.dotypos_order_id && isForceResend) {
+      console.log(`[Dotypos Order] Force resend requested for order ${orderId} (existing Dotypos ID: ${order.dotypos_order_id})`);
     }
     
     // 2. Parse items
@@ -604,6 +654,19 @@ export async function POST(req: NextRequest) {
     if (order.payment_method) {
       orderNoteParts.push(`Płatność: ${order.payment_method}`);
     }
+
+    // Requested client time (visible on kitchen/receipt print)
+    const requestedClientTime = parseRequestedClientTime(order.client_delivery_time);
+    if (requestedClientTime) {
+      orderNoteParts.push(`Czas klienta: ${requestedClientTime}`);
+    }
+
+    // Internal accepted ETA (when available, e.g. reprint after acceptance)
+    const acceptedEta = formatHourPL(order.delivery_time);
+    if (acceptedEta) {
+      orderNoteParts.push(`Realizacja: ${acceptedEta}`);
+    }
+
     if (customerName) {
       orderNoteParts.push(`Klient: ${customerName}`);
     }
@@ -758,8 +821,12 @@ export async function POST(req: NextRequest) {
       orderNoteParts.push("OPLACONE ONLINE");
     }
     
+    const externalId = isForceResend
+      ? `${orderId}:reprint:${Date.now()}`
+      : orderId;
+
     const response = await dotypos.createDraftOrder({
-      externalId: orderId,
+      externalId,
       items: dotyposItems,
       customer,
       note: orderNoteParts.join(" | "),
@@ -776,7 +843,7 @@ export async function POST(req: NextRequest) {
     const dotyposReceiptId = response.receiptId;
     const dotyposStatus = response.code === 0 ? "sent" : (response.status || "unknown");
     
-    if (dotyposOrderId) {
+    if (dotyposOrderId && (!isForceResend || !order.dotypos_order_id)) {
       await supabase
         .from("orders")
         .update({
@@ -793,6 +860,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: response.code === 0 || response.status === "ok",
       orderId,
+      forceResend: isForceResend,
       dotypos: {
         orderId: dotyposOrderId,
         receiptId: dotyposReceiptId,
