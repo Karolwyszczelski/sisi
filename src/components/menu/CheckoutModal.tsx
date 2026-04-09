@@ -133,7 +133,7 @@ const buildClientDeliveryTime = (
   deliveryTimeOption: "asap" | "schedule",
   scheduledTime: string
 ): string | null => {
-  if (selectedOption !== "delivery") return null;
+  if (selectedOption !== "delivery" && selectedOption !== "takeaway") return null;
   if (deliveryTimeOption === "asap") return "asap";
   // krótkie "HH:mm" zgodnie z kolumną
   return scheduledTime;
@@ -1045,12 +1045,15 @@ export default function CheckoutModal() {
       order_note: orderNote.trim() ? orderNote.trim().slice(0, 500) : null,
       status: "placed",
     };
+    // Czas klienta dla dostawy i na wynos
+    if (client_delivery_time) {
+      payload.client_delivery_time = client_delivery_time;
+    }
     if (selectedOption === "delivery") {
       payload.street = street || null;
       payload.postal_code = postalCode || null;
       payload.city = city || null;
       payload.flat_number = flatNumber || null;
-      payload.client_delivery_time = client_delivery_time;
       if (custCoords) {
         payload.delivery_lat = custCoords.lat;
         payload.delivery_lng = custCoords.lng;
@@ -1405,9 +1408,9 @@ export default function CheckoutModal() {
                       })}
                     </div>
 
-                    {selectedOption === "delivery" && (
+                    {(selectedOption === "delivery" || selectedOption === "takeaway") && (
                       <div className="space-y-2">
-                        <h3 className="font-semibold text-white">Czas dostawy</h3>
+                        <h3 className="font-semibold text-white">{selectedOption === "delivery" ? "Czas dostawy" : "Czas odbioru"}</h3>
                         <div className="flex flex-wrap gap-6 items-center">
                           <label className="flex items-center gap-2 text-white/80">
                             <input type="radio" name="timeOption" value="asap" checked={deliveryTimeOption === "asap"} onChange={() => setDeliveryTimeOption("asap")} disabled={submitting} className="accent-yellow-400" />

@@ -681,7 +681,6 @@ export async function POST(req: Request) {
     }
 
     // --- PROMO: helpery bez joinów i bez RPC ---
-    // --- PROMO: helpery bez joinów i bez RPC ---
     type DiscountCode = {
       id: string;
       code: string;
