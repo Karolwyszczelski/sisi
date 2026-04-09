@@ -1008,9 +1008,11 @@ const distance_km = googleKm ?? haversineKm(originLL, destLL);
 
       deliveryMinRequired = Number(zone.min_order_value || 0);
 
-      if (baseFromItems < deliveryMinRequired) {
+      // Porównuj z kwotą samych produktów (bez opakowania i dostawy)
+      const productsOnlyTotal = calcSubtotalFromItems("local", n.itemsArray, 0, addonPriceMap, productCategoryMap);
+      if (productsOnlyTotal < deliveryMinRequired) {
         return NextResponse.json(
-          { error: `Minimalna wartość zamówienia dla dostawy to ${deliveryMinRequired.toFixed(2)} zł.` },
+          { error: `Minimalna wartość zamówienia dla dostawy to ${deliveryMinRequired.toFixed(2)} zł (wartość produktów: ${productsOnlyTotal.toFixed(2)} zł).` },
           { status: 400 }
         );
       }

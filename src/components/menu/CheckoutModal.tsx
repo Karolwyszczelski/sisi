@@ -896,7 +896,8 @@ export default function CheckoutModal() {
       if (freeOver != null && subtotal >= freeOver) cost = 0;
 
       const minOrderValue = Number(zone.min_order_value || 0);
-      const minOk = subtotal >= minOrderValue;
+      // Porównuj z samymi produktami (baseTotal), bez opakowania i dostawy
+      const minOk = baseTotal >= minOrderValue;
       setDeliveryMinOk(minOk);
       setDeliveryMinRequired(minOrderValue);
 
@@ -913,6 +914,12 @@ export default function CheckoutModal() {
     setCustCoords({ lat, lng });
     calcDelivery(lat, lng);
   };
+
+  // Re-check min order value reactively when baseTotal changes (e.g. item added/removed after address set)
+  useEffect(() => {
+    if (selectedOption !== "delivery" || !deliveryMinRequired) return;
+    setDeliveryMinOk(baseTotal >= deliveryMinRequired);
+  }, [baseTotal, deliveryMinRequired, selectedOption]);
 
    const discount = useMemo(() => {
     const base = subtotal + (deliveryInfo?.cost || 0);

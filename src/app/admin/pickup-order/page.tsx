@@ -7,7 +7,7 @@ import CancelButton from "@/components/CancelButton";
 import PushNotificationControl from "@/components/admin/PushNotificationControl";
 import ThemeToggle from "@/components/admin/ThemeToggle";
 import { useTheme } from "@/components/admin/ThemeContext";
-import { Power, Truck, ShoppingBag, MapPin, RefreshCw, ChevronDown, ChevronUp, Settings, Filter, Clock, CalendarDays, Users, Phone, CheckCircle, XCircle, AlertCircle } from "lucide-react";
+import { Power, Truck, ShoppingBag, MapPin, RefreshCw, ChevronDown, ChevronUp, Settings, Filter, Clock, CalendarDays, Users, Phone, CheckCircle, XCircle, AlertCircle, Printer } from "lucide-react";
 
 type Any = Record<string, any>;
 type PaymentMethod = "Gotówka" | "Terminal" | "Online";
@@ -427,15 +427,65 @@ const InlineCountdown: React.FC<{ targetTime: string; onComplete?: () => void }>
   return <span className={`rounded-lg px-3 py-1 font-mono text-sm font-semibold ${isLow ? 'bg-rose-500/20 text-rose-400' : 'bg-slate-700 text-white'}`}>{mm}:{ss}</span>;
 };
 
+/**
+ * Parse clientDelivery (e.g. "17:00", "asap", ISO, JSON) into today's ISO datetime.
+ * Returns null if asap, missing, or unparseable.
+ */
+const parseClientTimeToISO = (clientDelivery?: string): string | null => {
+  if (!clientDelivery) return null;
+  let value = clientDelivery;
+  try {
+    const parsed = JSON.parse(clientDelivery);
+    if (parsed && typeof parsed === "object") {
+      value = parsed.client_delivery_time || parsed.clientDelivery || "";
+    }
+  } catch { /* not JSON */ }
+  if (!value || value.toLowerCase() === "asap") return null;
+
+  // HH:MM format → build today's date in Warsaw TZ
+  const hhmm = value.match(/^(\d{1,2}):(\d{2})$/);
+  if (hhmm) {
+    const h = parseInt(hhmm[1], 10);
+    const m = parseInt(hhmm[2], 10);
+    if (h >= 0 && h <= 23 && m >= 0 && m <= 59) {
+      // Build date string for today in Warsaw timezone
+      const now = new Date();
+      const warsawNow = new Date(now.toLocaleString("en-US", { timeZone: APP_TZ }));
+      const target = new Date(warsawNow);
+      target.setHours(h, m, 0, 0);
+      // Convert back: offset between Warsaw locale parse and UTC
+      const offset = warsawNow.getTime() - now.getTime();
+      return new Date(target.getTime() - offset).toISOString();
+    }
+  }
+
+  // ISO string
+  const t = Date.parse(value);
+  if (!Number.isNaN(t)) return new Date(t).toISOString();
+  return null;
+};
+
+/** Extract display label like "17:00" from clientDelivery (null if asap/missing) */
+const getClientTimeLabel = (clientDelivery?: string): string | null => {
+  const formatted = formatClientDeliveryTime(clientDelivery);
+  if (!formatted || formatted === "-" || formatted === "Jak najszybciej") return null;
+  return formatted;
+};
+
 const AcceptButton: React.FC<{
   order: Order;
   onAccept: (minutes: number) => Promise<void> | void;
-}> = ({ order, onAccept }) => {
+  onAcceptAtTime?: (isoTime: string) => Promise<void> | void;
+}> = ({ order, onAccept, onAcceptAtTime }) => {
   const isDelivery = order.selected_option === "delivery";
   const options = isDelivery ? [30, 60, 90, 120] : [15, 30, 45, 60];
   const [open, setOpen] = useState(false);
   const [minutes, setMinutes] = useState(options[0]);
   const ref = useRef<HTMLDivElement | null>(null);
+
+  const clientTimeLabel = getClientTimeLabel(order.clientDelivery);
+  const clientTimeISO = parseClientTimeToISO(order.clientDelivery);
+  const hasScheduledTime = !!clientTimeLabel && !!clientTimeISO;
 
   useEffect(() => {
     const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
@@ -444,7 +494,17 @@ const AcceptButton: React.FC<{
   }, []);
 
   return (
-    <div className="relative" ref={ref}>
+    <div className="relative flex gap-2" ref={ref}>
+      {/* Przycisk "Potwierdź na HH:MM" jeśli klient wybrał konkretną godzinę */}
+      {hasScheduledTime && onAcceptAtTime && (
+        <button
+          className="h-10 rounded-lg bg-amber-600 px-4 text-sm font-semibold text-white shadow-lg shadow-amber-900/30 hover:bg-amber-500 transition-colors inline-flex items-center gap-1.5"
+          onClick={async () => { await onAcceptAtTime(clientTimeISO!); }}
+        >
+          <Clock className="h-4 w-4" />
+          Potwierdź na {clientTimeLabel}
+        </button>
+      )}
       <button
         className="h-10 rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white shadow-lg shadow-emerald-900/30 hover:bg-emerald-500 transition-colors"
         onClick={() => setOpen((o) => !o)}
@@ -452,7 +512,21 @@ const AcceptButton: React.FC<{
         Akceptuj ({minutes >= 60 ? `${minutes / 60} h` : `${minutes} min`})
       </button>
       {open && (
-        <div className="absolute left-0 top-11 z-10 w-44 overflow-hidden rounded-lg border border-slate-700 bg-slate-800 shadow-xl">
+        <div className="absolute left-0 top-11 z-10 w-52 overflow-hidden rounded-lg border border-slate-700 bg-slate-800 shadow-xl">
+          {hasScheduledTime && onAcceptAtTime && (
+            <>
+              <div className="px-3 pt-2 pb-1 text-xs text-slate-500 uppercase tracking-wider">Czas klienta</div>
+              <button
+                onClick={async () => { setOpen(false); await onAcceptAtTime(clientTimeISO!); }}
+                className="flex w-full items-center justify-between px-3 py-2.5 text-sm text-amber-400 hover:bg-slate-700 transition-colors font-medium"
+              >
+                <span>Na {clientTimeLabel}</span>
+                <Clock className="h-3.5 w-3.5" />
+              </button>
+              <div className="border-t border-slate-700 my-1" />
+              <div className="px-3 pt-1 pb-1 text-xs text-slate-500 uppercase tracking-wider">Od teraz</div>
+            </>
+          )}
           {options.map((m) => (
             <button
               key={m}
@@ -485,6 +559,7 @@ export default function PickupOrdersPage() {
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
+  const [printingOrderId, setPrintingOrderId] = useState<string | null>(null);
 
   // Ustawienia dostępności zamówień
   const [orderSettings, setOrderSettings] = useState({
@@ -829,6 +904,20 @@ useEffect(() => {
     } finally { setEditingOrderId(null); }
   };
 
+  const acceptAtExactTime = async (order: Order, isoTime: string) => {
+    try {
+      setEditingOrderId(order.id);
+      const res = await fetch(`/api/orders/${order.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "accepted", delivery_time: isoTime }),
+      });
+      if (!res.ok) return;
+      updateLocal(order.id, { status: "accepted", delivery_time: isoTime });
+      fetchOrders();
+    } finally { setEditingOrderId(null); }
+  };
+
   const extendTime = async (order: Order, minutes: number) => {
     const base = order.delivery_time && !isNaN(Date.parse(order.delivery_time)) ? new Date(order.delivery_time) : new Date();
     const dt = new Date(base.getTime() + minutes * 60000).toISOString();
@@ -852,6 +941,30 @@ useEffect(() => {
       body: JSON.stringify({ status: "new" }),
     });
     if (res.ok) { updateLocal(id, { status: "new" }); fetchOrders(); }
+  };
+
+  const forcePrintOrder = async (id: string) => {
+    try {
+      setPrintingOrderId(id);
+      const res = await fetch("/api/dotypos/send-order", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderId: id, force: true }),
+      });
+
+      const payload = await res.json().catch(() => null);
+      if (!res.ok || !payload?.success) {
+        alert(payload?.error || "Nie udało się wymusić wydruku bonu.");
+        return;
+      }
+
+      alert("Wysłano żądanie ponownego wydruku bonu.");
+    } catch (err) {
+      console.error("Błąd wymuszenia druku bonu:", err);
+      alert("Nie udało się wymusić wydruku bonu.");
+    } finally {
+      setPrintingOrderId(null);
+    }
   };
 
   const paymentBadge = (o: Order) => {
@@ -1085,9 +1198,20 @@ useEffect(() => {
                 </div>
 
                 <footer className="mt-5 flex flex-wrap items-center gap-2">
+                  {o.status !== "cancelled" && (
+                    <button
+                      onClick={() => forcePrintOrder(o.id)}
+                      disabled={printingOrderId === o.id}
+                      className={`h-10 rounded-lg px-4 text-sm font-semibold transition-colors inline-flex items-center gap-2 ${isDark ? "bg-violet-600 text-white hover:bg-violet-500 disabled:bg-violet-800/60" : "bg-violet-600 text-white hover:bg-violet-500 disabled:bg-violet-300"}`}
+                    >
+                      <Printer className="h-4 w-4" />
+                      {printingOrderId === o.id ? "Drukowanie..." : "Wymuś druk bonu"}
+                    </button>
+                  )}
+
                   {(o.status === "new" || o.status === "pending" || o.status === "placed") && (
                     <>
-                      <AcceptButton order={o} onAccept={(m) => acceptAndSetTime(o, m)} />
+                      <AcceptButton order={o} onAccept={(m) => acceptAndSetTime(o, m)} onAcceptAtTime={(iso) => acceptAtExactTime(o, iso)} />
                       <EditOrderButton
                         orderId={o.id}
                         currentProducts={parseProducts(o.items).map(normalizeProduct)}
