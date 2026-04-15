@@ -17,7 +17,7 @@ interface Order {
   created_at: string;
   status: "new" | "pending" | "placed" | "accepted" | "cancelled" | "completed";
   clientDelivery?: string;
-  deliveryTime?: string;
+  delivery_time?: string;
   address?: string;
   street?: string;
   flat_number?: string;
@@ -464,8 +464,8 @@ export default function PickupOrdersPage() {
         delivery_cost: o.delivery_cost ?? null,
         created_at: o.created_at,
         status: o.status,
-        clientDelivery: o.client_delivery_time ?? o.delivery_time ?? o.clientDelivery,
-        deliveryTime: o.deliveryTime,
+        clientDelivery: o.client_delivery_time ?? o.clientDelivery,
+        delivery_time: o.delivery_time ?? undefined,
         address:
           o.selected_option === "delivery"
             ? `${o.street || ""}${o.flat_number ? `, nr ${o.flat_number}` : ""}${o.city ? `, ${o.city}` : ""}`
@@ -587,26 +587,26 @@ export default function PickupOrdersPage() {
       const res = await fetch(`/api/orders/${order.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "accepted", deliveryTime: dt }),
+        body: JSON.stringify({ status: "accepted", delivery_time: dt }),
       });
       if (!res.ok) return;
-      updateLocal(order.id, { status: "accepted", deliveryTime: dt });
+      updateLocal(order.id, { status: "accepted", delivery_time: dt });
       fetchOrders();
     } finally { setEditingOrderId(null); }
   };
 
   const extendTime = async (order: Order, minutes: number) => {
-    const base = order.deliveryTime && !isNaN(Date.parse(order.deliveryTime)) ? new Date(order.deliveryTime) : new Date();
+    const base = order.delivery_time && !isNaN(Date.parse(order.delivery_time)) ? new Date(order.delivery_time) : new Date();
     const dt = new Date(base.getTime() + minutes * 60000).toISOString();
     try {
       setEditingOrderId(order.id);
       const res = await fetch(`/api/orders/${order.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ deliveryTime: dt }),
+        body: JSON.stringify({ delivery_time: dt }),
       });
       if (!res.ok) return;
-      updateLocal(order.id, { deliveryTime: dt });
+      updateLocal(order.id, { delivery_time: dt });
       fetchOrders();
     } finally { setEditingOrderId(null); }
   };
@@ -767,7 +767,7 @@ export default function PickupOrdersPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-3 text-sm">
-                    {o.status === "accepted" && o.deliveryTime && <InlineCountdown targetTime={o.deliveryTime} onComplete={() => completeOrder(o.id)} />}
+                    {o.status === "accepted" && o.delivery_time && <InlineCountdown targetTime={o.delivery_time} onComplete={() => completeOrder(o.id)} />}
                     <span className="text-slate-600">{new Date(o.created_at).toLocaleString()}</span>
                   </div>
                 </header>
