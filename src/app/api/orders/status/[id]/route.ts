@@ -33,7 +33,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
   const { data, error } = await supabaseAdmin
     .from("orders")
     .select(`
-      id,status,eta,deliveryTime,
+      id,status,eta,delivery_time,
       selected_option,total_price,created_at,
       client_delivery_time,payment_status,payment_method
     `)
@@ -46,7 +46,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
   }
   if (!data) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
-  const etaFinal: string | null = (data as any).eta ?? (data as any).deliveryTime ?? null;
+  const etaFinal: string | null = (data as any).eta ?? (data as any).delivery_time ?? null;
 
   return NextResponse.json({
     id: data.id,

@@ -1402,6 +1402,15 @@ if (Array.isArray(n.itemsArray) && n.itemsArray.length > 0) {
             ? currentTotal.toFixed(2).replace(".", ",")
             : String(currentTotal ?? "0");
 
+        // Czytelny czas klienta
+        const clientTimeRaw = n.client_delivery_time;
+        let clientTimeDisplay = "";
+        if (clientTimeRaw && clientTimeRaw.toLowerCase() !== "asap") {
+          clientTimeDisplay = `<p style="margin:8px 0">Wybrany czas: <strong>${clientTimeRaw}</strong></p>`;
+        } else if (clientTimeRaw && clientTimeRaw.toLowerCase() === "asap") {
+          clientTimeDisplay = `<p style="margin:8px 0">Wybrany czas: <strong>Jak najszybciej</strong></p>`;
+        }
+
         const html = `
           <div style="font-family:Inter,Arial,sans-serif;line-height:1.5;color:#111">
             <h2 style="margin:0 0 8px">Potwierdzenie zamówienia #${newOrderId}</h2>
@@ -1413,6 +1422,7 @@ if (Array.isArray(n.itemsArray) && n.itemsArray.length > 0) {
             </p>
             <p style="margin:8px 0">Kwota: <strong>${total} zł</strong></p>
             <p style="margin:8px 0">Opcja: <strong>${optLabel(orderRow.selected_option)}</strong></p>
+            ${clientTimeDisplay}
             <hr style="margin:20px 0;border:none;border-top:1px solid #eee" />
             <p style="font-size:12px;color:#555;margin:0">
               Akceptacja: Regulamin v${TERMS_VERSION} (<a href="${TERMS_URL}">link</a>),
