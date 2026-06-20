@@ -141,8 +141,8 @@ export default function BurgerMonthPage() {
 
   // Image upload
   const uploadImage = async (file: File) => {
-    if (!file.type.startsWith("image/")) {
-      setError("Plik musi być obrazem");
+    if (!["image/jpeg", "image/png", "image/webp", "image/gif"].includes(file.type)) {
+      setError("Dozwolone formaty to JPG, PNG, WEBP i GIF");
       return;
     }
     if (file.size > 5 * 1024 * 1024) {
@@ -154,21 +154,20 @@ export default function BurgerMonthPage() {
     setError(null);
 
     try {
-      const ext = file.name.split(".").pop();
-      const fileName = `burger-miesiaca-${Date.now()}.${ext}`;
-      const filePath = `images/${fileName}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from("products")
-        .upload(filePath, file, { upsert: true });
-
-      if (uploadError) throw uploadError;
-
-      const publicUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/products/${filePath}`;
-      setForm((f) => ({ ...f, image_url: publicUrl }));
+      const uploadData = new FormData();
+      uploadData.append("file", file);
+      const response = await fetch("/api/admin/burger-month/image", {
+        method: "POST",
+        body: uploadData,
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || typeof payload.url !== "string") {
+        throw new Error(payload.error || "Nie udało się wgrać zdjęcia");
+      }
+      setForm((f) => ({ ...f, image_url: payload.url }));
     } catch (e) {
       console.error("Błąd uploadu:", e);
-      setError("Nie udało się wgrać zdjęcia");
+      setError(e instanceof Error ? e.message : "Nie udało się wgrać zdjęcia");
     } finally {
       setUploading(false);
     }
@@ -183,6 +182,7 @@ export default function BurgerMonthPage() {
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = "";
     if (file) uploadImage(file);
   };
 
@@ -367,17 +367,20 @@ export default function BurgerMonthPage() {
                   </div>
 
                   {/* Zmień zdjęcie */}
-                  <label className={`mt-3 flex items-center justify-center gap-2 px-4 py-2 rounded-xl cursor-pointer transition ${
+                  <label className={`mt-3 flex items-center justify-center gap-2 px-4 py-2 rounded-xl transition ${
+                    uploading ? "cursor-wait opacity-60" : "cursor-pointer"
+                  } ${
                     isDark
                       ? "bg-slate-700 hover:bg-slate-600 text-slate-300"
                       : "bg-gray-100 hover:bg-gray-200 text-gray-700"
                   }`}>
-                    <Upload className="h-4 w-4" />
-                    <span className="text-sm">Zmień zdjęcie</span>
+                    {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                    <span className="text-sm">{uploading ? "Przesyłanie..." : "Zmień zdjęcie"}</span>
                     <input
                       type="file"
-                      accept="image/*"
+                      accept="image/jpeg,image/png,image/webp,image/gif"
                       onChange={handleFileSelect}
+                      disabled={uploading}
                       className="hidden"
                     />
                   </label>
@@ -409,8 +412,9 @@ export default function BurgerMonthPage() {
                       <p className={`text-xs ${t.textMuted}`}>PNG, JPG do 5MB</p>
                       <input
                         type="file"
-                        accept="image/*"
+                        accept="image/jpeg,image/png,image/webp,image/gif"
                         onChange={handleFileSelect}
+                        disabled={uploading}
                         className="absolute inset-0 opacity-0 cursor-pointer"
                       />
                     </>
