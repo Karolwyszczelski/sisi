@@ -83,6 +83,10 @@ interface OrderItem {
   price: number;
   addons?: string[];
   note?: string;
+  product_id?: number | string;
+  _src?: {
+    product_id?: number | string;
+  };
 }
 
 interface OrderData {
@@ -119,6 +123,14 @@ interface PosProduct {
   name: string;
   price?: number;
 }
+
+// Stable mappings for products whose website and POS names intentionally differ.
+// Database overrides take precedence, while these defaults keep ordering safe
+// before the pos_product_overrides migration is deployed.
+const DEFAULT_POS_PRODUCT_OVERRIDES: Readonly<Record<number, number>> = {
+  29: 4307445928075278, // Coca-Cola 0,25 l -> Coca-cola szklo
+  31: 2047713206299330, // Fanta 0,5l -> Fanta 0,25 l
+};
 
 /* ============================================================
    Helper Functions
@@ -459,6 +471,33 @@ export async function POST(req: NextRequest) {
       }
     }
     
+    // 3.6. Load manual overrides (internal product_id -> pos_id)
+    const { data: overridesData, error: overridesError } = await supabase
+      .from("pos_product_overrides")
+      .select("internal_product_id, pos_id");
+
+    const overrideMap = new Map<number, number>(
+      Object.entries(DEFAULT_POS_PRODUCT_OVERRIDES).map(([productId, posId]) => [
+        Number(productId),
+        posId,
+      ])
+    );
+
+    if (overridesError && overridesError.code !== "42P01") {
+      console.warn("[Dotypos Order] Failed to load POS overrides:", overridesError.message);
+    }
+
+    if (overridesData) {
+      for (const o of overridesData) {
+        const internalProductId = Number(o.internal_product_id);
+        const posId = Number(o.pos_id);
+        if (Number.isSafeInteger(internalProductId) && Number.isSafeInteger(posId)) {
+          overrideMap.set(internalProductId, posId);
+        }
+      }
+    }
+    console.log(`[Dotypos Order] Loaded ${overrideMap.size} manual pos overrides`);
+
     // 3.5. Find special POS products for packaging and delivery
     const findSpecialProduct = (keywords: string[]): PosProduct | undefined => {
       for (const kw of keywords) {
@@ -504,8 +543,32 @@ export async function POST(req: NextRequest) {
     const unmappedItems: string[] = [];
     
     for (const item of items) {
-      const posProduct = findPosProduct(item.name, posProducts, item.price);
-      
+      // Prefer manual override by internal product id (if available in order payload)
+      let posProduct: PosProduct | undefined;
+      const rawInternalProductId = item._src?.product_id ?? item.product_id;
+      const internalProductId = rawInternalProductId == null
+        ? null
+        : Number(rawInternalProductId);
+      const overriddenPosId = internalProductId != null
+        ? overrideMap.get(internalProductId)
+        : undefined;
+
+      if (overriddenPosId !== undefined) {
+        posProduct = posProducts.find((p) => Number(p.pos_id) === overriddenPosId);
+        if (posProduct) {
+          console.log(`[POS Override] Item "${item.name}" internal_id=${internalProductId} -> forced pos_id=${overriddenPosId} (${posProduct.name})`);
+        } else {
+          console.error(`[POS Override] Override pos_id=${overriddenPosId} for internal_id=${internalProductId} not found in active pos_products`);
+          unmappedItems.push(`${item.name} (brak produktu z jawnego mapowania POS)`);
+          continue;
+        }
+      }
+
+      // Fallback to fuzzy matching
+      if (!posProduct) {
+        posProduct = findPosProduct(item.name, posProducts, item.price);
+      }
+
       if (!posProduct) {
         unmappedItems.push(item.name);
         console.warn(`[Dotypos Order] Unmapped product: ${item.name}`);
