@@ -85,8 +85,8 @@ export default function Sidebar({
   initialUserEmail: string;
 }) {
   const { isDark } = useTheme();
-  const [role, setRole] = useState<Role>(initialRole);
-  const [userEmail, setUserEmail] = useState(initialUserEmail);
+  const role: Role = initialRole;
+  const userEmail = initialUserEmail;
   
   // Desktop: collapsed state
   const [collapsed, setCollapsed] = useState(false);
@@ -151,41 +151,6 @@ export default function Sidebar({
       document.body.style.overflow = "";
     };
   }, [mobileOpen]);
-
-  // Fetch user role and listen for auth state changes
-  useEffect(() => {
-    const fetchRole = async () => {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session) return;
-        setUserEmail(session.user.email || "");
-        const { data } = await supabase.from("profiles").select("role").eq("id", session.user.id).single();
-        if (data?.role === "admin" || data?.role === "employee") {
-          setRole(data.role);
-        }
-      } catch {
-        // Server layout already supplied a verified role; keep rendering it.
-      }
-    };
-
-    fetchRole();
-
-    // Listen for auth state changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (event === 'SIGNED_IN' && session) {
-        setUserEmail(session.user.email || "");
-        const { data } = await supabase.from("profiles").select("role").eq("id", session.user.id).single();
-        setRole((data?.role as Role) ?? null);
-      } else if (event === 'SIGNED_OUT') {
-        setRole(null);
-        setUserEmail("");
-      }
-    });
-
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, [supabase]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
