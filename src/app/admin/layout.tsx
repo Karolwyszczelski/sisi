@@ -28,13 +28,19 @@ export default async function AdminLayout({
 
   // Pobierz rolę użytkownika jeśli zalogowany
   let isAuthenticated = false;
+  let role: "admin" | "employee" | null = null;
+  let userEmail = "";
   if (user) {
     const { data: profile } = await supabase
       .from("profiles")
       .select("role")
       .eq("id", user.id)
       .single();
-    isAuthenticated = profile?.role === "admin" || profile?.role === "employee";
+    if (profile?.role === "admin" || profile?.role === "employee") {
+      role = profile.role;
+      userEmail = user.email || "";
+      isAuthenticated = true;
+    }
   }
 
   // Jeśli niezalogowany - nie pokazuj sidebar (tylko login page)
@@ -53,7 +59,7 @@ export default async function AdminLayout({
   return (
     <ThemeProvider>
       <div className="flex min-h-screen">
-        <Sidebar />
+        <Sidebar initialRole={role!} initialUserEmail={userEmail} />
         <CookieBanner />
         {/* pt-14 na mobile dla fixed header (MobileHeader z sidebar), lg:pt-0 na desktop */}
         <main className="flex-1 min-h-screen overflow-x-hidden pt-14 lg:pt-0">

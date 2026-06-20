@@ -77,14 +77,20 @@ const MENU_SECTIONS: { title: string; items: MenuItem[] }[] = [
 
 const STORAGE_KEY = "admin_sidebar_collapsed";
 
-export default function Sidebar() {
+export default function Sidebar({
+  initialRole,
+  initialUserEmail,
+}: {
+  initialRole: Exclude<Role, null>;
+  initialUserEmail: string;
+}) {
   const { isDark } = useTheme();
-  const [role, setRole] = useState<Role>(null);
-  const [userEmail, setUserEmail] = useState<string>("");
-  const [loading, setLoading] = useState(true);
+  const [role, setRole] = useState<Role>(initialRole);
+  const [userEmail, setUserEmail] = useState(initialUserEmail);
   
   // Desktop: collapsed state
-  const [collapsed, setCollapsed] = useState<boolean>(true);
+  const [collapsed, setCollapsed] = useState(false);
+  const [collapsedStateLoaded, setCollapsedStateLoaded] = useState(false);
   
   // Mobile: drawer open state
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -94,7 +100,7 @@ export default function Sidebar() {
 
   const pathname = usePathname() || "";
   const router = useRouter();
-  const supabase = createClientComponentClient();
+  const [supabase] = useState(() => createClientComponentClient());
 
   // Check screen size
   useEffect(() => {
@@ -114,16 +120,20 @@ export default function Sidebar() {
       if (saved != null) {
         setCollapsed(saved === "true");
       }
-    } catch {}
+    } catch {
+      // localStorage may be unavailable in private browsing mode.
+    } finally {
+      setCollapsedStateLoaded(true);
+    }
   }, []);
 
   // Save collapsed state
   useEffect(() => {
-    if (typeof window === "undefined" || isMobile) return;
+    if (typeof window === "undefined" || isMobile || !collapsedStateLoaded) return;
     try {
       localStorage.setItem(STORAGE_KEY, collapsed ? "true" : "false");
     } catch {}
-  }, [collapsed, isMobile]);
+  }, [collapsed, collapsedStateLoaded, isMobile]);
 
   // Close mobile drawer on route change
   useEffect(() => {
@@ -147,18 +157,14 @@ export default function Sidebar() {
     const fetchRole = async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
-        if (!session) { 
-          setRole(null); 
-          setLoading(false);
-          return; 
-        }
+        if (!session) return;
         setUserEmail(session.user.email || "");
         const { data } = await supabase.from("profiles").select("role").eq("id", session.user.id).single();
-        setRole((data?.role as Role) ?? null);
-        setLoading(false);
+        if (data?.role === "admin" || data?.role === "employee") {
+          setRole(data.role);
+        }
       } catch {
-        setRole(null);
-        setLoading(false);
+        // Server layout already supplied a verified role; keep rendering it.
       }
     };
 
@@ -170,11 +176,9 @@ export default function Sidebar() {
         setUserEmail(session.user.email || "");
         const { data } = await supabase.from("profiles").select("role").eq("id", session.user.id).single();
         setRole((data?.role as Role) ?? null);
-        setLoading(false);
       } else if (event === 'SIGNED_OUT') {
         setRole(null);
         setUserEmail("");
-        setLoading(false);
       }
     });
 
@@ -359,73 +363,6 @@ export default function Sidebar() {
       </div>
     </div>
   );
-
-  // ===================== LOADING STATE =====================
-  if (loading) {
-    return (
-      <>
-        {/* Mobile Header */}
-        <MobileHeader />
-
-        {/* Mobile Drawer Overlay - even in loading state */}
-        {mobileOpen && (
-          <div
-            className="lg:hidden fixed inset-0 z-50 bg-black/50 backdrop-blur-sm"
-            onClick={() => setMobileOpen(false)}
-          />
-        )}
-
-        {/* Mobile Drawer - loading skeleton */}
-        <aside
-          className={`lg:hidden fixed top-0 left-0 z-50 h-[100dvh] w-72 transform transition-transform duration-300 ease-in-out ${
-            mobileOpen ? "translate-x-0" : "-translate-x-full"
-          } ${isDark ? "bg-slate-900 border-r border-slate-800" : "bg-white border-r border-gray-200"}`}
-        >
-          <div className="flex flex-col h-full p-4">
-            <div className="flex items-center justify-between mb-6">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center shadow-lg shadow-amber-500/20">
-                  <span className="text-white font-bold text-sm">SS</span>
-                </div>
-                <div>
-                  <div className={`h-4 w-20 rounded ${isDark ? "bg-slate-700" : "bg-gray-200"} animate-pulse`} />
-                  <div className={`h-3 w-16 mt-1 rounded ${isDark ? "bg-slate-700" : "bg-gray-200"} animate-pulse`} />
-                </div>
-              </div>
-              <button
-                onClick={() => setMobileOpen(false)}
-                className={`p-2 rounded-lg transition-colors ${
-                  isDark ? "hover:bg-slate-800 text-slate-400" : "hover:bg-gray-100 text-gray-500"
-                }`}
-                aria-label="Zamknij"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <div className="space-y-4">
-              {[1, 2, 3, 4].map((i) => (
-                <div key={i} className={`h-10 rounded-lg ${isDark ? "bg-slate-800" : "bg-gray-100"} animate-pulse`} />
-              ))}
-            </div>
-          </div>
-        </aside>
-        
-        {/* Desktop Sidebar - loading */}
-        <aside
-          className={`hidden lg:flex sticky top-0 z-30 h-[100dvh] border-r flex-none transition-[width] duration-300 ease-in-out ${
-            collapsed ? "w-[72px]" : "w-72"
-          } ${isDark ? "bg-slate-900 border-slate-800/60" : "bg-white border-gray-200"}`}
-        >
-          <div className="h-full w-full flex items-center justify-center">
-            <div className="animate-pulse flex flex-col items-center gap-2">
-              <div className={`w-8 h-8 rounded-full ${isDark ? "bg-slate-700" : "bg-gray-200"}`} />
-              {!collapsed && <div className={`w-24 h-4 rounded ${isDark ? "bg-slate-700" : "bg-gray-200"}`} />}
-            </div>
-          </div>
-        </aside>
-      </>
-    );
-  }
 
   // ===================== RENDER =====================
   return (
