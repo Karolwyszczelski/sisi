@@ -25,7 +25,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import dotypos, { DotyposOrderItem, DotyposTable, getTables } from "@/lib/dotypos";
+import dotypos, { DotyposOrderItem } from "@/lib/dotypos";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -130,6 +130,13 @@ interface PosProduct {
 const DEFAULT_POS_PRODUCT_OVERRIDES: Readonly<Record<number, number>> = {
   29: 4307445928075278, // Coca-Cola 0,25 l -> Coca-cola szklo
   31: 2047713206299330, // Fanta 0,5l -> Fanta 0,25 l
+};
+
+// Verified active Dotypos tables for online orders (branch 175697700).
+// Environment variables can override them if the POS layout changes.
+const DEFAULT_ORDER_TYPE_TABLE_IDS: Readonly<Record<string, number>> = {
+  delivery: 1595942776188800, // kierowca (type: DELIVERY)
+  takeaway: 1297326584999827, // wynos (type: DOOR)
 };
 
 /* ============================================================
@@ -795,77 +802,27 @@ export async function POST(req: NextRequest) {
     const isTakeAway = (order.selected_option || order.order_type) !== "local" &&
                        (order.selected_option || order.order_type) !== "dine-in";
     
-    // 7.7. Find matching table ID for order type label on bon
-    // Dotypos shows "Stół: [name]" on the bon when a table is assigned.
-    // We look up tables by name to match order type (e.g. "kierowca" for delivery, "na wynos" for takeaway).
+    // 7.7. Assign the verified Dotypos table for the order type.
+    // Do not search the paginated table list by name here: the first page can
+    // contain hidden duplicates (e.g. "kierowca 2") before the active table.
     let tableId: number | undefined;
-    try {
-      // Check env vars first (fastest, no API call)
-      if (selectedOpt === "delivery" && process.env.DOTYPOS_TABLE_ID_DELIVERY) {
-        tableId = parseInt(process.env.DOTYPOS_TABLE_ID_DELIVERY, 10);
-      } else if (selectedOpt === "takeaway" && process.env.DOTYPOS_TABLE_ID_TAKEAWAY) {
-        tableId = parseInt(process.env.DOTYPOS_TABLE_ID_TAKEAWAY, 10);
-      } else if (selectedOpt === "local" && process.env.DOTYPOS_TABLE_ID_LOCAL) {
-        tableId = parseInt(process.env.DOTYPOS_TABLE_ID_LOCAL, 10);
-      }
-      
-      // Fallback: fetch tables from API and match by name
-      if (!tableId) {
-        console.log(`[Dotypos Order] Fetching tables from API for selectedOpt="${selectedOpt}"...`);
-        const tablesRes = await getTables();
-        const rawTables = tablesRes.data || [];
-        console.log(`[Dotypos Order] Raw tables:`, JSON.stringify(rawTables.map((t: any) => ({ id: t.id, name: t.name, deleted: t.deleted, tid: typeof t.id, tdel: typeof t.deleted }))));
-        
-        // Normalize: API may return id as string and deleted as various types
-        const tables = rawTables.map((t: any) => ({
-          id: typeof t.id === "string" ? parseInt(t.id, 10) : Number(t.id),
-          name: String(t.name || ""),
-          deleted: t.deleted === true || t.deleted === "true" || t.deleted === 1,
-        }));
-        
-        const activeTables = tables.filter((t: { deleted: boolean }) => !t.deleted);
-        console.log(`[Dotypos Order] Active tables: ${activeTables.map((t: { name: string; id: number }) => `"${t.name}"(${t.id})`).join(", ")}`);
-        
-        // Try exact name match first, then includes (to avoid "kierowca 2" matching before "kierowca")
-        const findTableExact = (name: string): { id: number; name: string } | undefined => {
-          return activeTables.find((t: { name: string }) => t.name.toLowerCase().trim() === name);
-        };
-        const findTableIncludes = (keywords: string[]): { id: number; name: string } | undefined => {
-          for (const kw of keywords) {
-            const found = activeTables.find((t: { name: string }) => 
-              t.name.toLowerCase().includes(kw)
-            );
-            if (found) return found;
-          }
-          return undefined;
-        };
-        
-        let matched: { id: number; name: string } | undefined;
-        if (selectedOpt === "delivery") {
-          matched = findTableExact("kierowca") || findTableIncludes(["kierowca", "dostawa"]);
-        } else if (selectedOpt === "takeaway") {
-          matched = findTableExact("wynos") || findTableIncludes(["wynos", "takeaway"]);
-        }
-        
-        if (matched) {
-          tableId = matched.id;
-          console.log(`[Dotypos Order] Matched table: "${matched.name}" (id: ${matched.id}, type: ${typeof matched.id}) for ${selectedOpt}`);
-        } else {
-          // Hardcoded fallback IDs (from known Dotypos tables)
-          const KNOWN_TABLE_IDS: Record<string, number> = {
-            delivery: 1595942776188800,  // "kierowca"
-            takeaway: 1297326584999827,  // "wynos"
-          };
-          if (KNOWN_TABLE_IDS[selectedOpt]) {
-            tableId = KNOWN_TABLE_IDS[selectedOpt];
-            console.log(`[Dotypos Order] Using hardcoded table ID for ${selectedOpt}: ${tableId}`);
-          } else {
-            console.warn(`[Dotypos Order] No table matched for "${selectedOpt}". Active: ${activeTables.map((t: { name: string; id: number }) => `"${t.name}"(${t.id})`).join(", ")}`);
-          }
-        }
-      }
-    } catch (tableErr) {
-      console.warn("[Dotypos Order] Table lookup failed (order will be sent without table):", tableErr);
+    const envTableId =
+      selectedOpt === "delivery"
+        ? process.env.DOTYPOS_TABLE_ID_DELIVERY
+        : selectedOpt === "takeaway"
+          ? process.env.DOTYPOS_TABLE_ID_TAKEAWAY
+          : selectedOpt === "local"
+            ? process.env.DOTYPOS_TABLE_ID_LOCAL
+            : undefined;
+
+    if (envTableId) {
+      tableId = Number(envTableId);
+    } else {
+      tableId = DEFAULT_ORDER_TYPE_TABLE_IDS[selectedOpt];
+    }
+
+    if (tableId) {
+      console.log(`[Dotypos Order] Assigned table ID ${tableId} for ${selectedOpt}`);
     }
     
     // 8. Send to Dotypos
