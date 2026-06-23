@@ -1045,7 +1045,7 @@ export default function CheckoutModal() {
       order_note: orderNote.trim() ? orderNote.trim().slice(0, 500) : null,
       status: "placed",
     };
-    // Czas klienta dla dostawy i na wynos
+    // Czas klienta dla dostawy i odbioru osobistego
     if (client_delivery_time) {
       payload.client_delivery_time = client_delivery_time;
     }
@@ -1379,7 +1379,7 @@ export default function CheckoutModal() {
                     <div className="grid grid-cols-3 gap-4">
                       {(["local", "takeaway", "delivery"] as const).map((opt) => {
                         const Icon = opt === "local" ? MapPin : opt === "takeaway" ? ShoppingBag : Truck;
-                        const label = opt === "local" ? "Na miejscu" : opt === "takeaway" ? "Na wynos" : "Dostawa";
+                        const label = opt === "local" ? "Na miejscu" : opt === "takeaway" ? "Odbiór osobisty" : "Dostawa";
                         
                         // Sprawdź czy opcja jest włączona
                         const isEnabled = orderSettings.orders_enabled && (

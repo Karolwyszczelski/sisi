@@ -16,19 +16,12 @@ import { createClient, SupabaseClient } from "@supabase/supabase-js";
 const DOTYPOS_API_BASE = "https://api.dotykacka.cz/v2";
 const DOTYPOS_ADMIN_URL = "https://admin.dotykacka.cz";
 
-// Environment variables
-const CLIENT_ID = process.env.DOTYPOS_CLIENT_ID || "";
-const CLIENT_SECRET = process.env.DOTYPOS_CLIENT_SECRET || "";
-
 // Payment method ID for online payments (get from POS config or Dotypos admin)
 // This is REQUIRED for create-issue-pay action. The API only accepts numeric IDs,
 // NOT payment method names like "Przelewy24".
 const ONLINE_PAYMENT_METHOD_ID = process.env.DOTYPOS_PAYMENT_METHOD_ID
   ? parseInt(process.env.DOTYPOS_PAYMENT_METHOD_ID, 10)
   : undefined;
-
-// Cache configuration
-const TOKEN_CACHE_TTL_MS = 55 * 60 * 1000; // 55 minutes (access token expires in 60)
 
 /* ============================================================
    Types & Interfaces
@@ -408,8 +401,40 @@ async function exchangeRefreshToken(
   
   if (!response.ok) {
     const errorText = await response.text();
-    console.error("[Dotypos] Token exchange failed:", response.status, errorText);
-    throw new Error(`Token exchange failed: ${response.status}`);
+
+    let parsedReason: string | undefined;
+    let parsedMessage: string | undefined;
+
+    try {
+      const parsed = JSON.parse(errorText) as {
+        reason?: string;
+        message?: string;
+      };
+      parsedReason = parsed.reason;
+      parsedMessage = parsed.message;
+    } catch {
+      // Non-JSON error payload, keep raw text fallback.
+    }
+
+    console.error("[Dotypos] Token exchange failed:", response.status, {
+      reason: parsedReason,
+      message: parsedMessage,
+      raw: errorText,
+    });
+
+    if (response.status === 403 && parsedReason === "LICENSE_UPGRADE_REQUIRED") {
+      throw new Error(
+        "Dotypos API niedostępne dla bieżącej licencji (LICENSE_UPGRADE_REQUIRED). " +
+          "Wymagany upgrade licencji w Dotypos i kontakt z supportem."
+      );
+    }
+
+    const details = [parsedReason, parsedMessage].filter(Boolean).join(" - ");
+    throw new Error(
+      details
+        ? `Token exchange failed: ${response.status} (${details})`
+        : `Token exchange failed: ${response.status}`
+    );
   }
   
   const data = await response.json();
@@ -505,16 +530,17 @@ interface ApiRequestOptions {
   method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   body?: Record<string, unknown> | Record<string, unknown>[];
   params?: Record<string, string | number | boolean>;
+  headers?: Record<string, string>;
 }
 
 /**
- * Make authenticated request to Dotypos API v2
+ * Make authenticated request to Dotypos API v2 and return response metadata.
  */
-export async function apiRequest<T = unknown>(
+export async function apiRequestWithMeta<T = unknown>(
   endpoint: string,
   options: ApiRequestOptions = {}
-): Promise<T> {
-  const { method = "GET", body, params } = options;
+): Promise<{ data: T; etag?: string; headers: Headers }> {
+  const { method = "GET", body, params, headers: extraHeaders } = options;
   
   const accessToken = await getAccessToken();
   
@@ -531,6 +557,7 @@ export async function apiRequest<T = unknown>(
   const headers: HeadersInit = {
     "Authorization": `Bearer ${accessToken}`,
     "Accept": "application/json",
+    ...(extraHeaders || {}),
   };
   
   if (body) {
@@ -567,9 +594,24 @@ export async function apiRequest<T = unknown>(
   
   // Handle empty responses
   const text = await response.text();
-  if (!text) return {} as T;
-  
-  return JSON.parse(text) as T;
+  const data = text ? JSON.parse(text) as T : {} as T;
+
+  return {
+    data,
+    etag: response.headers.get("etag") || undefined,
+    headers: response.headers,
+  };
+}
+
+/**
+ * Make authenticated request to Dotypos API v2
+ */
+export async function apiRequest<T = unknown>(
+  endpoint: string,
+  options: ApiRequestOptions = {}
+): Promise<T> {
+  const { data } = await apiRequestWithMeta<T>(endpoint, options);
+  return data;
 }
 
 /* ============================================================
@@ -663,6 +705,41 @@ export async function getAllProducts(): Promise<DotyposProduct[]> {
 export async function getProduct(productId: number): Promise<DotyposProduct> {
   const cloudId = await getCloudId();
   return apiRequest(`/clouds/${cloudId}/products/${productId}`);
+}
+
+/**
+ * Fetch a single product together with its ETag for safe updates.
+ */
+export async function getProductWithETag(productId: number): Promise<{ product: DotyposProduct; etag: string }> {
+  const cloudId = await getCloudId();
+  const { data, etag } = await apiRequestWithMeta<DotyposProduct>(`/clouds/${cloudId}/products/${productId}`);
+  if (!etag) {
+    throw new DotyposApiError("MISSING_ETAG", "Dotypos did not return an ETag for this product");
+  }
+  return { product: data, etag };
+}
+
+/**
+ * Partially update a Dotypos product. Dotypos requires If-Match, so we first
+ * load the current ETag and then PATCH the selected fields.
+ */
+export async function updateProductPartial(
+  productId: number,
+  patch: Record<string, unknown>
+): Promise<DotyposProduct> {
+  const cloudId = await getCloudId();
+  const { etag } = await getProductWithETag(productId);
+
+  return apiRequest<DotyposProduct>(`/clouds/${cloudId}/products/${productId}`, {
+    method: "PATCH",
+    body: {
+      id: productId,
+      ...patch,
+    },
+    headers: {
+      "If-Match": etag,
+    },
+  });
 }
 
 /* ============================================================
@@ -1243,6 +1320,8 @@ const dotypos = {
   getProducts,
   getAllProducts,
   getProduct,
+  getProductWithETag,
+  updateProductPartial,
   
   // Categories
   getCategories,

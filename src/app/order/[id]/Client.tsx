@@ -26,7 +26,7 @@ const fmtHM = (iso?: string | null) => {
 };
 
 const optionLabel = (opt?: S["option"]) =>
-  opt === "delivery" ? "DOSTAWA" : opt === "takeaway" ? "NA WYNOS" : opt === "local" ? "NA MIEJSCU" : "—";
+  opt === "delivery" ? "DOSTAWA" : opt === "takeaway" ? "ODBIÓR OSOBISTY" : opt === "local" ? "NA MIEJSCU" : "—";
 
 const statusLabel = (s: S["status"], eta?: string | null) => {
   if (s === "accepted") {

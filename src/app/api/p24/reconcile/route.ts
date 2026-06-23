@@ -6,6 +6,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { headers } from "next/headers";
 import { createClient } from "@supabase/supabase-js";
 import { hostFromEnv, p24SignVerifyMD5, parseP24Amount } from "@/lib/p24";
+import { dispatchOrderToOperations } from "@/lib/orderOperations";
 
 const { P24_MERCHANT_ID, P24_POS_ID, CRON_SECRET } = process.env;
 
@@ -39,7 +40,7 @@ export async function GET(req: NextRequest) {
 
   const { data: orders, error } = await supabase
     .from("orders")
-    .select("id,total_price,p24_session_id,p24_order_id,payment_status,payment_method")
+    .select("id,total_price,selected_option,p24_session_id,p24_order_id,payment_status,payment_method")
     .eq("payment_method", "Online")
     .eq("payment_status", "pending")
     .limit(50);
@@ -99,11 +100,18 @@ export async function GET(req: NextRequest) {
           .from("orders")
           .update({ payment_status: "paid", paid_at: new Date().toISOString() })
           .eq("id", o.id);
+        await dispatchOrderToOperations({
+          orderId: String(o.id),
+          totalPln: Number(o.total_price ?? 0),
+          selectedOption: o.selected_option,
+          appUrl: new URL(req.url).origin,
+          logPrefix: "[p24.reconcile]",
+        });
         results[o.id] = "paid";
       } else {
         results[o.id] = "no-change";
       }
-    } catch (e) {
+    } catch {
       results[o.id] = "verify-error";
     }
   }

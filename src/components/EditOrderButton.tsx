@@ -67,7 +67,7 @@ function normalizeName(str?: string): string {
 
 function getOptionLabel(option: "local" | "takeaway" | "delivery") {
   if (option === "local") return "NA MIEJSCU";
-  if (option === "takeaway") return "NA WYNOS";
+  if (option === "takeaway") return "ODBIÓR OSOBISTY";
   if (option === "delivery") return "DOSTAWA";
   return "";
 }
@@ -489,7 +489,7 @@ export default function EditOrderButton({
                     {option === "local"
                       ? "Na miejscu"
                       : option === "takeaway"
-                      ? "Na wynos"
+                      ? "Odbiór osobisty"
                       : "Dostawa"}
                   </button>
                 ))}

@@ -61,10 +61,7 @@ CREATE TABLE IF NOT EXISTS pos_products (
   category_id BIGINT,
   vat_rate DECIMAL(5, 2) DEFAULT 23,
   deleted BOOLEAN DEFAULT FALSE,
-  synced_at TIMESTAMPTZ DEFAULT NOW(),
-  
-  -- Indexes
-  CONSTRAINT pos_products_name_idx UNIQUE (name)
+  synced_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- Index for faster lookups

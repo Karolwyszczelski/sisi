@@ -40,7 +40,17 @@ interface Order {
 const APP_TZ = "Europe/Warsaw";
 
 const getOptionLabel = (opt?: Order["selected_option"]) =>
-  opt === "delivery" ? "DOSTAWA" : opt === "takeaway" ? "NA WYNOS" : opt === "local" ? "NA MIEJSCU" : "BRAK";
+  opt === "delivery" ? "DOSTAWA" : opt === "takeaway" ? "ODBIÓR OSOBISTY" : opt === "local" ? "NA MIEJSCU" : "BRAK";
+
+const getAcceptTimeOptions = (opt?: Order["selected_option"]) =>
+  opt === "delivery" ? [45, 60, 75, 90, 120] : [15, 25, 35, 45, 55, 60, 70, 80, 90];
+
+const formatMinutesLabel = (minutes: number) => {
+  if (minutes === 60) return "1 h";
+  if (minutes === 90) return "1,5 h";
+  if (minutes === 120) return "2 h";
+  return `${minutes} min`;
+};
 
 const statusTone = (s: Order["status"]) =>
   s === "accepted" ? "border-blue-500/30 bg-slate-800/80"
@@ -477,10 +487,10 @@ const AcceptButton: React.FC<{
   onAccept: (minutes: number) => Promise<void> | void;
   onAcceptAtTime?: (isoTime: string) => Promise<void> | void;
 }> = ({ order, onAccept, onAcceptAtTime }) => {
-  const isDelivery = order.selected_option === "delivery";
-  const options = isDelivery ? [30, 60, 90, 120] : [15, 30, 45, 60];
+  const options = getAcceptTimeOptions(order.selected_option);
   const [open, setOpen] = useState(false);
   const [minutes, setMinutes] = useState(options[0]);
+  const [customMinutes, setCustomMinutes] = useState("");
   const ref = useRef<HTMLDivElement | null>(null);
 
   const clientTimeLabel = getClientTimeLabel(order.clientDelivery);
@@ -509,10 +519,10 @@ const AcceptButton: React.FC<{
         className="h-10 rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white shadow-lg shadow-emerald-900/30 hover:bg-emerald-500 transition-colors"
         onClick={() => setOpen((o) => !o)}
       >
-        Akceptuj ({minutes >= 60 ? `${minutes / 60} h` : `${minutes} min`})
+        Akceptuj ({formatMinutesLabel(minutes)})
       </button>
       {open && (
-        <div className="absolute left-0 top-11 z-10 w-52 overflow-hidden rounded-lg border border-slate-700 bg-slate-800 shadow-xl">
+        <div className="absolute left-0 top-11 z-10 w-60 overflow-hidden rounded-lg border border-slate-700 bg-slate-800 shadow-xl">
           {hasScheduledTime && onAcceptAtTime && (
             <>
               <div className="px-3 pt-2 pb-1 text-xs text-slate-500 uppercase tracking-wider">Czas klienta</div>
@@ -533,10 +543,39 @@ const AcceptButton: React.FC<{
               onClick={async () => { setMinutes(m); setOpen(false); await onAccept(m); }}
               className="flex w-full items-center justify-between px-3 py-2.5 text-sm text-slate-300 hover:bg-slate-700 transition-colors"
             >
-              <span>{m >= 60 ? `${m / 60} h` : `${m} min`}</span>
+              <span>{formatMinutesLabel(m)}</span>
               {minutes === m && <span className="text-emerald-400">✓</span>}
             </button>
           ))}
+          <div className="border-t border-slate-700 p-3">
+            <div className="mb-2 text-xs text-slate-500 uppercase tracking-wider">Własny czas</div>
+            <form
+              className="flex gap-2"
+              onSubmit={async (event) => {
+                event.preventDefault();
+                const rawMinutes = Number(customMinutes);
+                if (!Number.isFinite(rawMinutes) || rawMinutes <= 0) return;
+                const parsed = Math.max(1, Math.min(240, Math.round(rawMinutes)));
+                setMinutes(parsed);
+                setOpen(false);
+                await onAccept(parsed);
+              }}
+            >
+              <input
+                type="number"
+                min={1}
+                max={240}
+                step={1}
+                value={customMinutes}
+                onChange={(event) => setCustomMinutes(event.target.value)}
+                placeholder="min"
+                className="h-9 min-w-0 flex-1 rounded-md border border-slate-700 bg-slate-900 px-2 text-sm text-slate-200 outline-none focus:border-emerald-500"
+              />
+              <button type="submit" className="h-9 rounded-md bg-emerald-600 px-3 text-xs font-semibold text-white hover:bg-emerald-500">
+                Ustaw
+              </button>
+            </form>
+          </div>
         </div>
       )}
     </div>
@@ -1385,7 +1424,7 @@ useEffect(() => {
                 >
                   <option value="all">Wszystkie typy</option>
                   <option value="local">🪑 Na miejscu</option>
-                  <option value="takeaway">🥡 Na wynos</option>
+                  <option value="takeaway">🥡 Odbiór osobisty</option>
                   <option value="delivery">🚗 Dostawa</option>
                 </select>
                 
@@ -1459,7 +1498,7 @@ useEffect(() => {
                         </button>
                       </div>
 
-                      {/* Na wynos */}
+                      {/* Odbiór osobisty */}
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
                           <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
@@ -1469,7 +1508,7 @@ useEffect(() => {
                           }`}>
                             <ShoppingBag className="w-4 h-4" />
                           </div>
-                          <span className={`text-sm ${t.text}`}>Na wynos</span>
+                          <span className={`text-sm ${t.text}`}>Odbiór osobisty</span>
                         </div>
                         <button
                           onClick={() => toggleSetting("takeaway_enabled")}

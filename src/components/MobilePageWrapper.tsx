@@ -1474,7 +1474,7 @@ export default function MobilePageWrapper() {
                                     {/* Order Type Badge */}
                                     <div className="flex items-center gap-2">
                                       <span className="text-xs px-2 py-0.5 bg-white/10 rounded-full text-white/70">
-                                        {o.selected_option === "delivery" ? "🚗 Dostawa" : o.selected_option === "takeaway" ? "🥡 Na wynos" : "🍽️ Na miejscu"}
+                                        {o.selected_option === "delivery" ? "🚗 Dostawa" : o.selected_option === "takeaway" ? "🥡 Odbiór osobisty" : "🍽️ Na miejscu"}
                                       </span>
                                       {o.payment_status === "paid" && (
                                         <span className="text-xs px-2 py-0.5 bg-green-500/20 text-green-400 rounded-full flex items-center gap-1">

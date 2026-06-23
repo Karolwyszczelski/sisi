@@ -4,6 +4,7 @@ export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { hostFromEnv, p24SignVerifyMD5, amountToGrosze } from "@/lib/p24";
+import { dispatchOrderToOperations } from "@/lib/orderOperations";
 
 const { P24_MERCHANT_ID, P24_POS_ID } = process.env;
 
@@ -33,7 +34,7 @@ export async function POST(req: NextRequest) {
 
     const { data: ord, error } = await supabase
       .from("orders")
-      .select("id,total_price,p24_session_id,p24_order_id,payment_status")
+      .select("id,total_price,selected_option,p24_session_id,p24_order_id,payment_status")
       .eq("id", id)
       .maybeSingle();
 
@@ -78,6 +79,15 @@ export async function POST(req: NextRequest) {
       await supabase.from("orders")
         .update({ payment_status: "paid", paid_at: new Date().toISOString() })
         .eq("id", id);
+      if (ord.payment_status !== "paid") {
+        await dispatchOrderToOperations({
+          orderId: String(ord.id),
+          totalPln: Number(ord.total_price ?? 0),
+          selectedOption: ord.selected_option,
+          appUrl: new URL(req.url).origin,
+          logPrefix: "[p24.refresh]",
+        });
+      }
       return NextResponse.json({ payment_status: "paid" });
     }
 

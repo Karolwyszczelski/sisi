@@ -374,7 +374,7 @@ const OrdersHistory: React.FC<{ supabaseClient: SupabaseClient; onRepeat: (o: an
   };
 
   const optionLabel = (opt?: string) => 
-    opt === "delivery" ? "🚗 Dostawa" : opt === "takeaway" ? "🥡 Na wynos" : "🍽️ Na miejscu";
+    opt === "delivery" ? "🚗 Dostawa" : opt === "takeaway" ? "🥡 Odbiór osobisty" : "🍽️ Na miejscu";
 
   const parseItems = (items: any) => {
     try {
