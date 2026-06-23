@@ -25,14 +25,33 @@ export function p24SignRegisterMD5(
 }
 
 // API v3.2 (legacy) verify – md5(sessionId|orderId|amount|currency|crc)
-export function p24SignVerifyMD5(args: {
-  sessionId: string;
-  orderId: string | number;
-  amount: number;
-  currency: string;
-}) {
+export function p24SignVerifyMD5(
+  args:
+    | {
+        sessionId: string;
+        orderId: string | number;
+        amount: number;
+        currency: string;
+      }
+    | string,
+  legacyOrderId?: string | number,
+  legacyAmount?: number,
+  legacyCurrency?: string,
+  crcOverride?: string
+) {
+  const data =
+    typeof args === "string"
+      ? {
+          sessionId: args,
+          orderId: legacyOrderId ?? "",
+          amount: legacyAmount ?? 0,
+          currency: legacyCurrency ?? "PLN",
+        }
+      : args;
+  const key = (crcOverride ?? CRC).trim();
+
   return md5(
-    `${String(args.sessionId)}|${String(args.orderId)}|${String(args.amount)}|${String(args.currency)}|${CRC}`
+    `${String(data.sessionId)}|${String(data.orderId)}|${String(data.amount)}|${String(data.currency)}|${key}`
   );
 }
 
@@ -52,7 +71,8 @@ export function extractOrderIdFromSession(sessionId: unknown) {
 }
 
 /** Zwraca kwotę w groszach. Jeśli string zawiera separator, traktuje wartość jako PLN. */
-export function parseP24Amount(value: unknown, _currency?: string): number | null {
+export function parseP24Amount(value: unknown, currency?: string): number | null {
+  void currency;
   if (value === null || value === undefined) return null;
   const raw = String(value).replace(",", ".").trim();
   if (!raw) return null;

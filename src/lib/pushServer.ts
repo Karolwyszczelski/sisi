@@ -102,7 +102,7 @@ export async function sendPushToAll(payload: PushPayload) {
 export async function sendNewOrderPush(input: { orderId: string; totalPln?: number; selectedOption?: string }) {
   const shortId = input.orderId?.toString().slice(-6) || input.orderId;
   const option = input.selectedOption === "delivery" ? "Dostawa"
-    : input.selectedOption === "takeaway" ? "Na wynos"
+    : input.selectedOption === "takeaway" ? "Odbiór osobisty"
     : input.selectedOption === "local" ? "Na miejscu"
     : (input.selectedOption || "Zamówienie");
 

@@ -31,7 +31,17 @@ interface Order {
 }
 
 const getOptionLabel = (opt?: Order["selected_option"]) =>
-  opt === "delivery" ? "DOSTAWA" : opt === "takeaway" ? "NA WYNOS" : opt === "local" ? "NA MIEJSCU" : "BRAK";
+  opt === "delivery" ? "DOSTAWA" : opt === "takeaway" ? "ODBIÓR OSOBISTY" : opt === "local" ? "NA MIEJSCU" : "BRAK";
+
+const getAcceptTimeOptions = (opt?: Order["selected_option"]) =>
+  opt === "delivery" ? [45, 60, 75, 90, 120] : [15, 25, 35, 45, 55, 60, 70, 80, 90];
+
+const formatMinutesLabel = (minutes: number) => {
+  if (minutes === 60) return "1 h";
+  if (minutes === 90) return "1,5 h";
+  if (minutes === 120) return "2 h";
+  return `${minutes} min`;
+};
 
 const statusTone = (s: Order["status"]) =>
   s === "accepted" ? "ring-blue-200 bg-blue-50"
@@ -377,10 +387,10 @@ const AcceptButton: React.FC<{
   order: Order;
   onAccept: (minutes: number) => Promise<void> | void;
 }> = ({ order, onAccept }) => {
-  const isDelivery = order.selected_option === "delivery";
-  const options = isDelivery ? [30, 60, 90, 120] : [15, 30, 45, 60];
+  const options = getAcceptTimeOptions(order.selected_option);
   const [open, setOpen] = useState(false);
   const [minutes, setMinutes] = useState(options[0]);
+  const [customMinutes, setCustomMinutes] = useState("");
   const ref = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -395,20 +405,49 @@ const AcceptButton: React.FC<{
         className="h-10 rounded-md bg-emerald-600 px-4 text-sm font-semibold text-white shadow hover:bg-emerald-500"
         onClick={() => setOpen((o) => !o)}
       >
-        Akceptuj ({minutes >= 60 ? `${minutes / 60} h` : `${minutes} min`})
+        Akceptuj ({formatMinutesLabel(minutes)})
       </button>
       {open && (
-        <div className="absolute left-0 top-11 z-10 w-44 overflow-hidden rounded-md border bg-white shadow-lg">
+        <div className="absolute left-0 top-11 z-10 w-56 overflow-hidden rounded-md border bg-white shadow-lg">
           {options.map((m) => (
             <button
               key={m}
               onClick={async () => { setMinutes(m); setOpen(false); await onAccept(m); }}
               className="flex w-full items-center justify-between px-3 py-2 text-sm hover:bg-slate-50"
             >
-              <span>{m >= 60 ? `${m / 60} h` : `${m} min`}</span>
+              <span>{formatMinutesLabel(m)}</span>
               {minutes === m && <span className="text-emerald-600">✓</span>}
             </button>
           ))}
+          <div className="border-t p-3">
+            <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Własny czas</div>
+            <form
+              className="flex gap-2"
+              onSubmit={async (event) => {
+                event.preventDefault();
+                const rawMinutes = Number(customMinutes);
+                if (!Number.isFinite(rawMinutes) || rawMinutes <= 0) return;
+                const parsed = Math.max(1, Math.min(240, Math.round(rawMinutes)));
+                setMinutes(parsed);
+                setOpen(false);
+                await onAccept(parsed);
+              }}
+            >
+              <input
+                type="number"
+                min={1}
+                max={240}
+                step={1}
+                value={customMinutes}
+                onChange={(event) => setCustomMinutes(event.target.value)}
+                placeholder="min"
+                className="h-8 min-w-0 flex-1 rounded border px-2 text-sm outline-none focus:border-emerald-500"
+              />
+              <button type="submit" className="h-8 rounded bg-emerald-600 px-3 text-xs font-semibold text-white hover:bg-emerald-500">
+                Ustaw
+              </button>
+            </form>
+          </div>
         </div>
       )}
     </div>
@@ -904,7 +943,7 @@ export default function PickupOrdersPage() {
           <select className="h-10 rounded-md border px-3 text-sm" value={filterOption} onChange={(e) => setFilterOption(e.target.value as any)}>
             <option value="all">Wszystkie opcje</option>
             <option value="local">Na miejscu</option>
-            <option value="takeaway">Na wynos</option>
+            <option value="takeaway">Odbiór osobisty</option>
             <option value="delivery">Dostawa</option>
           </select>
           <button className="h-10 rounded-md border px-3 text-sm" onClick={() => setSortOrder((o) => (o === "desc" ? "asc" : "desc"))}>

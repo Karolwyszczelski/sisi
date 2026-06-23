@@ -5,7 +5,7 @@ import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 import { useTheme } from "@/components/admin/ThemeContext";
 import {
-  Pencil, Trash2, Power, ChevronDown, RefreshCw, Search, Plus,
+  Pencil, Trash2, ChevronDown, RefreshCw, Search, Plus,
   Filter, ToggleLeft, ToggleRight, Package, Eye, Loader2,
   X, ImageIcon, Tag, Coins, FileText, List, Layers, Upload, Trash, Check
 } from "lucide-react";
@@ -16,7 +16,7 @@ import Image from "next/image";
 interface Product {
   id: string;
   name: string | null;
-  price: string | null;
+  price: string | number | null;
   description: string | null;
   category: string | null;
   subcategory: string | null;
@@ -35,6 +35,18 @@ interface Addon {
   category: "dodatek" | "sos" | "premium";
   available: boolean;
   display_order: number;
+}
+
+interface ProductMutationResponse {
+  product?: Product;
+  error?: string;
+  posSync?: {
+    requested: boolean;
+    success: boolean;
+    status: "synced" | "skipped" | "failed";
+    message: string;
+    posId?: number;
+  };
 }
 
 const supabase = createClientComponentClient();
@@ -218,7 +230,7 @@ function EditProductModal({
     image_url: product.image_url ?? "",
     selectedAddons: new Set<string>(product.available_addons ?? []),
   });
-  const [saving, setSaving] = useState(false);
+  const [saving, setSaving] = useState<false | "local" | "pos">(false);
   const [err, setErr] = useState<string | null>(null);
 
   const splitToArray = (txt: string) =>
@@ -254,9 +266,9 @@ function EditProductModal({
     });
   };
 
-  const save = async () => {
+  const save = async (syncPos: boolean) => {
     setErr(null);
-    setSaving(true);
+    setSaving(syncPos ? "pos" : "local");
     try {
       const payload = {
         name: form.name || null,
@@ -267,17 +279,25 @@ function EditProductModal({
         ingredients: splitToArray(form.ingredientsText),
         image_url: form.image_url || null,
         available_addons: Array.from(form.selectedAddons),
+        syncPos,
       };
 
-      const { data, error } = await supabase
-        .from("products")
-        .update(payload)
-        .eq("id", product.id)
-        .select("*")
-        .single();
+      const res = await fetch(`/api/admin/products/${product.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const result = await res.json().catch(() => ({})) as ProductMutationResponse;
 
-      if (error) throw error;
-      onSaved(data as Product);
+      if (!res.ok || !result.product) {
+        throw new Error(result.error || "Nie udało się zapisać zmian.");
+      }
+
+      if (result.posSync?.requested && !result.posSync.success) {
+        alert(`Menu na stronie zapisane. POS: ${result.posSync.message}`);
+      }
+
+      onSaved(result.product);
       onClose();
     } catch (e: unknown) {
       const error = e as Error;
@@ -515,19 +535,28 @@ function EditProductModal({
         <div className={`flex flex-col-reverse sm:flex-row justify-end gap-2 sm:gap-3 px-4 sm:px-6 py-3 sm:py-4 border-t ${isDark ? "border-slate-700 bg-slate-800/50" : "border-gray-200 bg-gray-50"}`}>
           <button
             onClick={onClose}
+            disabled={!!saving}
             className={`px-4 py-2.5 rounded-lg font-medium transition w-full sm:w-auto ${
               isDark ? "bg-slate-700 hover:bg-slate-600 text-slate-300" : "bg-gray-200 hover:bg-gray-300 text-gray-700"
-            }`}
+            } disabled:opacity-50`}
           >
             Anuluj
           </button>
           <button
-            onClick={save}
-            disabled={saving}
+            onClick={() => save(false)}
+            disabled={!!saving}
+            className="flex items-center justify-center gap-2 px-5 py-2.5 bg-slate-600 hover:bg-slate-500 text-white rounded-lg font-semibold transition disabled:opacity-50 w-full sm:w-auto"
+          >
+            {saving === "local" && <Loader2 className="h-4 w-4 animate-spin" />}
+            Zapisz tylko stronę
+          </button>
+          <button
+            onClick={() => save(true)}
+            disabled={!!saving}
             className="flex items-center justify-center gap-2 px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-semibold transition disabled:opacity-50 w-full sm:w-auto"
           >
-            {saving && <Loader2 className="h-4 w-4 animate-spin" />}
-            Zapisz zmiany
+            {saving === "pos" && <Loader2 className="h-4 w-4 animate-spin" />}
+            Zapisz + POS
           </button>
         </div>
       </div>
@@ -613,14 +642,17 @@ function AddProductModal({
         available: true,
       };
 
-      const { data, error } = await supabase
-        .from("products")
-        .insert(payload)
-        .select("*")
-        .single();
+      const res = await fetch("/api/admin/products", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const result = await res.json().catch(() => ({})) as ProductMutationResponse;
 
-      if (error) throw error;
-      onSaved(data as Product);
+      if (!res.ok || !result.product) {
+        throw new Error(result.error || "Nie udało się dodać produktu.");
+      }
+      onSaved(result.product);
       onClose();
     } catch (e: unknown) {
       const error = e as Error;
@@ -958,21 +990,16 @@ export default function AdminMenuPage() {
   const [editing, setEditing] = useState<Product | null>(null);
   const [adding, setAdding] = useState(false);
 
-  // Globalny status zamawiania
-  const [orderingOpen, setOrderingOpen] = useState<boolean | null>(null);
-  const [toggleOrderingBusy, setToggleOrderingBusy] = useState(false);
-
   const fetchProducts = useCallback(async () => {
     setLoading(true);
     try {
-      const [{ data }, ri, { data: addonsData }] = await Promise.all([
+      const [{ data }, { data: addonsData }] = await Promise.all([
         supabase
           .from("products")
           .select("*")
           .order("category", { ascending: true })
           .order("subcategory", { ascending: true })
           .order("name", { ascending: true }),
-        supabase.from("restaurant_info").select("ordering_open").eq("id", 1).maybeSingle(),
         supabase
           .from("addons")
           .select("*")
@@ -982,7 +1009,6 @@ export default function AdminMenuPage() {
 
       setProducts((data as Product[]) ?? []);
       setAllAddons((addonsData as Addon[]) ?? []);
-      if (!ri.error && ri.data) setOrderingOpen(Boolean((ri.data as { ordering_open: boolean }).ordering_open));
     } catch (e) {
       console.error("Błąd pobierania:", e);
     } finally {
@@ -998,19 +1024,8 @@ export default function AdminMenuPage() {
       .on("postgres_changes", { event: "*", schema: "public", table: "products" }, fetchProducts)
       .subscribe();
 
-    const chRestaurant = supabase
-      .channel("restaurant-info-realtime")
-      .on("postgres_changes", { event: "*", schema: "public", table: "restaurant_info", filter: "id=eq.1" }, (p) => {
-        const row = (p as { new?: { ordering_open?: boolean } }).new;
-        if (row && typeof row.ordering_open === "boolean") {
-          setOrderingOpen(row.ordering_open);
-        }
-      })
-      .subscribe();
-
     return () => {
       supabase.removeChannel(chProducts);
-      supabase.removeChannel(chRestaurant);
     };
   }, [fetchProducts]);
 
@@ -1018,9 +1033,17 @@ export default function AdminMenuPage() {
     setTogglingId(id);
     setProducts((prev) => prev.map((p) => (p.id === id ? { ...p, available: !current } : p)));
     try {
-      const { error } = await supabase.from("products").update({ available: !current }).eq("id", id);
-      if (error) {
+      const res = await fetch(`/api/admin/products/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ available: !current }),
+      });
+      const result = await res.json().catch(() => ({})) as ProductMutationResponse;
+      if (!res.ok || !result.product) {
         setProducts((prev) => prev.map((p) => (p.id === id ? { ...p, available: current } : p)));
+        alert(result.error || "Nie udało się zmienić dostępności produktu.");
+      } else {
+        setProducts((prev) => prev.map((p) => (p.id === id ? result.product! : p)));
       }
     } catch {
       setProducts((prev) => prev.map((p) => (p.id === id ? { ...p, available: current } : p)));
@@ -1032,25 +1055,16 @@ export default function AdminMenuPage() {
   const deleteProduct = async (id: string) => {
     if (!confirm("Na pewno usunąć ten produkt?")) return;
     try {
-      const { error } = await supabase.from("products").delete().eq("id", id);
-      if (!error) setProducts((p) => p.filter((x) => x.id !== id));
+      const res = await fetch(`/api/admin/products/${id}`, { method: "DELETE" });
+      const result = await res.json().catch(() => ({})) as { error?: string };
+      if (res.ok) {
+        setProducts((p) => p.filter((x) => x.id !== id));
+      } else {
+        alert(result.error || "Nie udało się usunąć produktu.");
+      }
     } catch (e) {
       console.error("Błąd usuwania:", e);
-    }
-  };
-
-  const flipOrdering = async () => {
-    if (orderingOpen == null) return;
-    setToggleOrderingBusy(true);
-    try {
-      const next = !orderingOpen;
-      setOrderingOpen(next);
-      const { error } = await supabase.from("restaurant_info").update({ ordering_open: next }).eq("id", 1);
-      if (error) setOrderingOpen(!next);
-    } catch {
-      setOrderingOpen((v) => !v);
-    } finally {
-      setToggleOrderingBusy(false);
+      alert("Nie udało się usunąć produktu.");
     }
   };
 

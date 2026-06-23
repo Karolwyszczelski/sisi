@@ -26,37 +26,41 @@ const { session, role } = await getSessionAndRole();
 
     // Widok admin/employee – prosto i szybko (bez joinów)
     if (role === "admin" || role === "employee") {
-      const { data, count, error } = await getSupabaseAdmin()
-  .from("orders")
-  .select(
-    [
-      "id",
-      "name",
-      "phone",
-      "total_price",
-      "delivery_cost",
-      "discount_amount",
-      "promo_code",
-      "created_at",
-      "status",
-      "client_delivery_time",
-      "delivery_time",
-      "address",
-      "street",
-      "flat_number",
-      "city",
-      "items",
-      "selected_option",
-      "payment_method",
-      "payment_status",
-      // === START INSERT: order_note ===
-      "order_note",
-      // === END INSERT: order_note ===
-    ].join(","),
-    { count: "exact" }
-  )
-  .order("created_at", { ascending: false })
-  .range(offset, offset + limit - 1);
+      const query = getSupabaseAdmin()
+        .from("orders")
+        .select(
+          [
+            "id",
+            "name",
+            "phone",
+            "total_price",
+            "delivery_cost",
+            "discount_amount",
+            "promo_code",
+            "created_at",
+            "status",
+            "client_delivery_time",
+            "delivery_time",
+            "address",
+            "street",
+            "flat_number",
+            "city",
+            "items",
+            "selected_option",
+            "payment_method",
+            "payment_status",
+            // === START INSERT: order_note ===
+            "order_note",
+            // === END INSERT: order_note ===
+          ].join(","),
+          { count: "exact" }
+        )
+        // Online orders reach the kitchen/admin board only after P24 is confirmed.
+        .or("payment_method.neq.Online,payment_method.is.null,payment_status.eq.paid")
+        .order("created_at", { ascending: false })
+        .range(offset, offset + limit - 1);
+
+      const { data, count, error } = await query;
 
 
       if (error) throw error;

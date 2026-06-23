@@ -52,7 +52,7 @@ export default function RegulaminPage() {
 
       <h2>§4. Składanie zamówień i zawarcie umowy</h2>
       <ol>
-        <li>Klient wybiera produkty, opcję odbioru (na miejscu/na wynos/dostawa), podaje dane kontaktowe i wybiera metodę płatności.</li>
+        <li>Klient wybiera produkty, opcję odbioru (na miejscu/odbiór osobisty/dostawa), podaje dane kontaktowe i wybiera metodę płatności.</li>
         <li>Po złożeniu zamówienia Klient otrzymuje potwierdzenie (e-mail) oraz – po akceptacji przez obsługę – informację o czasie realizacji.</li>
         <li>Umowa zostaje zawarta z chwilą akceptacji zamówienia przez obsługę (status &bdquo;accepted&rdquo;).</li>
         <li>W przypadku płatności online realizacja rozpoczyna się po potwierdzeniu przez operatora płatności.</li>

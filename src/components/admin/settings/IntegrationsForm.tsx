@@ -32,7 +32,7 @@ export default function IntegrationsForm() {
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<{ success: boolean; message: string } | null>(null);
   const [testingConnection, setTestingConnection] = useState(false);
-  const [connectionStatus, setConnectionStatus] = useState<{ ok: boolean; branches?: { id: number; name: string }[] } | null>(null);
+  const [connectionStatus, setConnectionStatus] = useState<{ ok: boolean; branches?: { id: number; name: string }[]; error?: string } | null>(null);
 
   const [connecting, setConnecting] = useState(false);
 
@@ -178,10 +178,16 @@ export default function IntegrationsForm() {
       if (data.connected) {
         setConnectionStatus({ ok: true, branches: data.branches });
       } else {
-        setConnectionStatus({ ok: false });
+        setConnectionStatus({
+          ok: false,
+          error: data.error || "Błąd połączenia - sprawdź konfigurację",
+        });
       }
-    } catch {
-      setConnectionStatus({ ok: false });
+    } catch (err) {
+      setConnectionStatus({
+        ok: false,
+        error: err instanceof Error ? err.message : "Nie udało się połączyć z API",
+      });
     } finally {
       setTestingConnection(false);
     }
@@ -206,10 +212,10 @@ export default function IntegrationsForm() {
       } else {
         setSyncResult({
           success: false,
-          message: data.error || "Błąd synchronizacji",
+          message: data.message || data.error || "Błąd synchronizacji",
         });
       }
-    } catch (err) {
+    } catch {
       setSyncResult({
         success: false,
         message: "Nie udało się połączyć z API",
@@ -306,7 +312,9 @@ export default function IntegrationsForm() {
                   ) : (
                     <>
                       <AlertCircle className="h-5 w-5 text-red-500" />
-                      <p className={`font-medium ${t.text}`}>Błąd połączenia - sprawdź konfigurację</p>
+                      <p className={`font-medium ${t.text}`}>
+                        {connectionStatus.error || "Błąd połączenia - sprawdź konfigurację"}
+                      </p>
                     </>
                   )}
                 </div>

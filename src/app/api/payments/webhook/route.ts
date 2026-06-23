@@ -8,6 +8,7 @@ import {
   p24SignVerifyMD5,
   parseP24Amount,
 } from "@/lib/p24";
+import { dispatchOrderToOperations } from "@/lib/orderOperations";
 
 const getSupabaseAdmin = () => {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -23,6 +24,12 @@ const supabaseAdmin = new Proxy({} as ReturnType<typeof getSupabaseAdmin>, {
     return (_supabaseAdmin as any)[prop];
   },
 });
+
+type UpdatedOrder = {
+  id: string;
+  total_price?: number | string | null;
+  selected_option?: string | null;
+};
 
 // P24 wysyła application/x-www-form-urlencoded
 async function readFormOrJson(req: Request) {
@@ -110,7 +117,7 @@ export async function POST(req: Request) {
     const updateOrderWithFallback = async (
       values: Record<string, unknown>,
       statusLabel: "paid" | "failed"
-    ): Promise<"success" | "not-found" | "error"> => {
+    ): Promise<{ status: "success"; order: UpdatedOrder } | { status: "not-found" | "error" }> => {
       const { data, error } = await supabaseAdmin
         .from("orders")
         .update(values)
@@ -123,11 +130,11 @@ export async function POST(req: Request) {
           `P24 webhook: ${statusLabel} status update by session id failed`,
           error
         );
-        return "error";
+        return { status: "error" };
       }
 
       if (data) {
-        return "success";
+        return { status: "success", order: data as UpdatedOrder };
       }
 
       console.warn(
@@ -136,7 +143,7 @@ export async function POST(req: Request) {
       );
 
       if (!orderIdFromSession) {
-        return "not-found";
+        return { status: "not-found" };
       }
 
       const { data: fallbackData, error: fallbackError } = await supabaseAdmin
@@ -151,18 +158,18 @@ export async function POST(req: Request) {
           `P24 webhook: ${statusLabel} status update by order id failed`,
           fallbackError
         );
-        return "error";
+        return { status: "error" };
       }
 
       if (fallbackData) {
-        return "success";
+        return { status: "success", order: fallbackData as UpdatedOrder };
       }
 
       console.warn(
         `P24 webhook: no order matched fallback order id for ${statusLabel} update`,
         { sessionId, orderIdFromSession }
       );
-      return "not-found";
+      return { status: "not-found" };
     };
 
      const baseValues: Record<string, unknown> = {
@@ -181,13 +188,21 @@ export async function POST(req: Request) {
         "paid"
       );
 
-      if (updateResult === "error") {
+      if (updateResult.status === "error") {
         return NextResponse.json({ error: "Update failed" }, { status: 500 });
       }
 
-      if (updateResult === "not-found") {
+      if (updateResult.status === "not-found") {
         return NextResponse.json({ error: "Order not found" }, { status: 400 });
       }
+
+      await dispatchOrderToOperations({
+        orderId: String(updateResult.order.id),
+        totalPln: Number(updateResult.order.total_price ?? 0),
+        selectedOption: updateResult.order.selected_option,
+        appUrl: new URL(req.url).origin,
+        logPrefix: "[payments.webhook]",
+      });
 
       return NextResponse.json({ ok: true });
     }
@@ -197,11 +212,11 @@ export async function POST(req: Request) {
       "failed"
     );
 
-    if (failedResult === "error") {
+    if (failedResult.status === "error") {
       return NextResponse.json({ error: "Update failed" }, { status: 500 });
     }
 
-    if (failedResult === "not-found") {
+    if (failedResult.status === "not-found") {
       return NextResponse.json(
         { ok: false, error: "Order not found" },
         { status: 400 }

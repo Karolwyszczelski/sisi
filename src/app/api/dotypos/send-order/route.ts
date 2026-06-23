@@ -26,6 +26,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import dotypos, { DotyposOrderItem } from "@/lib/dotypos";
+import { isOnlinePaymentPending } from "@/lib/orderOperations";
+import { DEFAULT_POS_PRODUCT_OVERRIDES } from "@/lib/posProductMappings";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -124,19 +126,11 @@ interface PosProduct {
   price?: number;
 }
 
-// Stable mappings for products whose website and POS names intentionally differ.
-// Database overrides take precedence, while these defaults keep ordering safe
-// before the pos_product_overrides migration is deployed.
-const DEFAULT_POS_PRODUCT_OVERRIDES: Readonly<Record<number, number>> = {
-  29: 4307445928075278, // Coca-Cola 0,25 l -> Coca-cola szklo
-  31: 2047713206299330, // Fanta 0,5l -> Fanta 0,25 l
-};
-
 // Verified active Dotypos tables for online orders (branch 175697700).
 // Environment variables can override them if the POS layout changes.
 const DEFAULT_ORDER_TYPE_TABLE_IDS: Readonly<Record<string, number>> = {
   delivery: 1595942776188800, // kierowca (type: DELIVERY)
-  takeaway: 1297326584999827, // wynos (type: DOOR)
+  takeaway: 1297326584999827, // odbior osobisty (type: DOOR)
 };
 
 /* ============================================================
@@ -359,7 +353,7 @@ function findPosProduct(
     }
   }
 
-  if (bestProduct && bestScore >= 1.0) {
+  if (bestProduct && bestScore >= 1.8) {
     console.log(
       `[POS Match] "${itemName}" → fuzzy (score ${bestScore.toFixed(2)}) → "${bestProduct.name}" (pos_id: ${bestProduct.pos_id})`
     );
@@ -411,6 +405,18 @@ export async function POST(req: NextRequest) {
     }
     
     const order: OrderData = orders[0];
+
+    if (isOnlinePaymentPending(order.payment_method, order.payment_status) && !isForceResend) {
+      console.warn(`[Dotypos Order] Online payment not confirmed; skipping POS send for order ${orderId}`);
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Online payment not confirmed",
+          message: "Zamowienie online nie jest jeszcze oplacone.",
+        },
+        { status: 409 }
+      );
+    }
     
     // Check if already sent to Dotypos (unless force resend was requested)
     if (order.dotypos_order_id && !isForceResend) {
@@ -616,6 +622,17 @@ export async function POST(req: NextRequest) {
       if (qty > 1) {
         console.log(`[Dotypos Order] Splitting "${item.name}" × ${qty} into individual units (each with own addons)`);
       }
+
+      const itemUnitPrice = typeof item.price === "number"
+        ? item.price
+        : Number(String(item.price ?? "").replace(",", "."));
+      const posUnitPrice = posProduct.price == null
+        ? null
+        : Number(String(posProduct.price).replace(",", "."));
+      const manualPrice = Number.isFinite(itemUnitPrice) &&
+        (posUnitPrice == null || !Number.isFinite(posUnitPrice) || Math.abs(posUnitPrice - itemUnitPrice) > 0.01)
+        ? itemUnitPrice
+        : undefined;
       
       // Każda sztuka → własna pozycja burgera + własne dodatki
       for (let unit = 0; unit < qty; unit++) {
@@ -623,6 +640,7 @@ export async function POST(req: NextRequest) {
         dotyposItems.push({
           id: posProduct.pos_id,
           qty: 1,
+          ...(manualPrice !== undefined ? { "manual-price": manualPrice } : {}),
           note: itemNote,
         });
         
@@ -716,7 +734,7 @@ export async function POST(req: NextRequest) {
     };
     
     // 6. Build order note (include customer info for POS visibility)
-    // NOTE: Order type (NA WYNOS / DOSTAWA) is NOT in the note — it's handled
+    // NOTE: Order type (ODBIOR OSOBISTY / DOSTAWA) is NOT in the note — it's handled
     // by the take-away flag which Dotypos displays below S-number on the bon.
     // This way it appears in the right place (under order number, not at the top).
     const orderNoteParts: string[] = [];

@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { toZonedTime, fromZonedTime } from "date-fns-tz";
-import { sendNewOrderPush } from "@/lib/pushServer";
+import { dispatchOrderToOperations, isOnlinePaymentPending } from "@/lib/orderOperations";
 
 /* === email + link śledzenia === */
 import { trackingUrl } from "@/lib/orderLink";
@@ -71,7 +71,7 @@ const money = (v: any): number => {
 };
 
 const optLabel = (v?: string) =>
-  v === "delivery" ? "DOSTAWA" : v === "takeaway" ? "NA WYNOS" : "NA MIEJSCU";
+  v === "delivery" ? "DOSTAWA" : v === "takeaway" ? "ODBIÓR OSOBISTY" : "NA MIEJSCU";
 
 /* twarda normalizacja do E.164 (+48500111222) */
 const normalizePhone = (phone?: string | null): string | null => {
@@ -933,7 +933,7 @@ if (TURNSTILE_SECRET_KEY) {
     }
     if (selectedOpt === "takeaway" && !orderSettings.takeaway_enabled) {
       return NextResponse.json(
-        { error: "Zamówienia na wynos są tymczasowo niedostępne." },
+        { error: "Odbiór osobisty jest tymczasowo niedostępny." },
         { status: 503 }
       );
     }
@@ -1356,40 +1356,18 @@ if (Array.isArray(n.itemsArray) && n.itemsArray.length > 0) {
   }
 }
 
-    // 6.9) Web Push do obsługi (ekran blokady / dymek systemowy)
-    try {
-      await sendNewOrderPush({
+    // 6.9) Dopiero gotowe do realizacji zamowienia ida do obslugi/POS.
+    // Online musi najpierw przejsc przez P24 i dostac payment_status=paid.
+    if (isOnlinePaymentPending(n.payment_method, n.payment_status)) {
+      console.log("[orders.create] Online order saved, waiting for payment before operations dispatch:", newOrderId);
+    } else {
+      await dispatchOrderToOperations({
         orderId: newOrderId,
         totalPln: currentTotal,
         selectedOption: n.selected_option,
+        appUrl: new URL(req.url).origin,
+        logPrefix: "[orders.create]",
       });
-    } catch (pushErr) {
-      console.error("[orders.create] push error:", pushErr);
-    }
-
-    // 6.95) Wyślij zamówienie do kasy Dotypos POS (fire-and-forget)
-    // Nie blokujemy odpowiedzi dla klienta — wysyłka na kasę idzie w tle.
-    // Jeśli się nie uda, zamówienie nadal jest w bazie i można ponowić ręcznie.
-    try {
-      const appUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.APP_BASE_URL || new URL(req.url).origin;
-      fetch(`${appUrl}/api/dotypos/send-order`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ orderId: newOrderId }),
-      }).then(async (res) => {
-        const data = await res.json().catch(() => null);
-        if (res.ok && data?.success) {
-          console.log(`[orders.create] Dotypos POS send OK:`, data?.dotypos?.status || "sent");
-        } else if (res.ok && !data?.success) {
-          console.error(`[orders.create] Dotypos POS rejected (code ${data?.dotypos?.code}):`, data?.dotypos?.status);
-        } else {
-          console.error(`[orders.create] Dotypos POS send failed (${res.status}):`, JSON.stringify(data).slice(0, 300));
-        }
-      }).catch((err) => {
-        console.error("[orders.create] Dotypos POS send error:", err?.message || err);
-      });
-    } catch (dotyposErr) {
-      console.error("[orders.create] Dotypos POS dispatch error:", dotyposErr);
     }
 
     // 6.1) e-mail

@@ -92,7 +92,7 @@ const getOptionIcon = (opt?: string) => {
 
 const getOptionLabel = (opt?: string) => {
   if (opt === "local") return "Na miejscu";
-  if (opt === "takeaway") return "Na wynos";
+  if (opt === "takeaway") return "Odbiór osobisty";
   return "Dostawa";
 };
 

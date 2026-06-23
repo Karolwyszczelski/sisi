@@ -8,6 +8,7 @@ import { createClient } from "@supabase/supabase-js";
 import { getSessionAndRole } from "@/lib/serverAuth";
 import { getTransport } from "@/lib/mailer";
 import { trackingUrl } from "@/lib/orderLink";
+import { dispatchOrderToOperations } from "@/lib/orderOperations";
 import type { Database } from "@/types/supabase";
 
 /* ====== Wersje/Linki regulaminów (dopisek w mailach) ====== */
@@ -49,7 +50,7 @@ const fmtTime = (iso?: string | null) =>
   iso && !Number.isNaN(Date.parse(iso)) ? timeFmt.format(new Date(iso)) : null;
 
 const optLabel = (v?: string) =>
-  v === "delivery" ? "DOSTAWA" : v === "takeaway" ? "NA WYNOS" : "NA MIEJSCU";
+  v === "delivery" ? "DOSTAWA" : v === "takeaway" ? "ODBIÓR OSOBISTY" : "NA MIEJSCU";
 
 export async function PATCH(
   request: Request,
@@ -211,6 +212,21 @@ const when: string | null = updated.delivery_time ?? updated.client_delivery_tim
     }
   } catch (e) {
     console.error("[orders.patch] email error:", e);
+  }
+
+  if (
+    body.payment_status === "paid" &&
+    updated.payment_method === "Online" &&
+    !updated.dotypos_order_id &&
+    !updated.dotypos_sent_at
+  ) {
+    await dispatchOrderToOperations({
+      orderId: String(orderId),
+      totalPln: Number(updated.total_price ?? 0),
+      selectedOption: updated.selected_option,
+      appUrl: request.headers.get("origin"),
+      logPrefix: "[orders.patch]",
+    });
   }
 
   return NextResponse.json(updated);

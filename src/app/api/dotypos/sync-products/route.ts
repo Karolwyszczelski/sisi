@@ -44,11 +44,40 @@ interface SyncedProduct {
   price: number;
   barcode: string | null;
   plu: string | null;
-  category_id: number;
-  vat_rate: number;
+  category_id: number | null;
+  vat_rate: number | null;
   deleted: boolean;
   synced_at: string;
 }
+
+type RawDotyposProduct = {
+  id: number | string;
+  name: string;
+  priceWithVat?: number | string | null;
+  price_with_vat?: number | string | null;
+  ean?: string[] | null;
+  plu?: string[] | null;
+  categoryId?: number | string | null;
+  _categoryId?: number | string | null;
+  vatRate?: number | string | null;
+  vat?: number | string | null;
+  deleted?: boolean | null;
+};
+
+type RawDotyposCategory = {
+  id: number | string;
+  name: string;
+  parentCategoryId?: number | string | null;
+  _parentCategoryId?: number | string | null;
+  sortOrder?: number | string | null;
+  deleted?: boolean | null;
+};
+
+const toNumberOrNull = (value: unknown): number | null => {
+  if (value == null || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
 
 /* ============================================================
    GET Handler - Sync Products
@@ -89,15 +118,15 @@ export async function GET(req: NextRequest) {
     }
     
     // 3. Transform products for local database
-    const syncedProducts: SyncedProduct[] = products.map((p) => ({
-      pos_id: p.id,
+    const syncedProducts: SyncedProduct[] = (products as RawDotyposProduct[]).map((p) => ({
+      pos_id: Number(p.id),
       name: p.name,
-      price: p.priceWithVat,
+      price: toNumberOrNull(p.priceWithVat ?? p.price_with_vat) ?? 0,
       barcode: p.ean?.[0] || null,
       plu: p.plu?.[0] || null,
-      category_id: p.categoryId,
-      vat_rate: p.vatRate,
-      deleted: p.deleted,
+      category_id: toNumberOrNull(p.categoryId ?? p._categoryId),
+      vat_rate: toNumberOrNull(p.vatRate ?? p.vat),
+      deleted: Boolean(p.deleted),
       synced_at: new Date().toISOString(),
     }));
     
@@ -135,12 +164,12 @@ export async function GET(req: NextRequest) {
       const categories = categoriesResponse.data || [];
       
       if (categories.length > 0) {
-        const categoryData = categories.map((c) => ({
-          pos_id: typeof c.id === 'string' ? parseInt(c.id as string, 10) : c.id,
+        const categoryData = (categories as RawDotyposCategory[]).map((c) => ({
+          pos_id: Number(c.id),
           name: c.name,
-          parent_id: c.parentCategoryId,
-          sort_order: c.sortOrder,
-          deleted: c.deleted,
+          parent_id: toNumberOrNull(c.parentCategoryId ?? c._parentCategoryId),
+          sort_order: toNumberOrNull(c.sortOrder) ?? 0,
+          deleted: Boolean(c.deleted),
           synced_at: new Date().toISOString(),
         }));
         

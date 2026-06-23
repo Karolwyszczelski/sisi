@@ -681,7 +681,7 @@ export default function SettingsPage() {
                           )}
                         </div>
 
-                        {/* Na wynos */}
+                        {/* Odbiór osobisty */}
                         <div
                           onClick={() => !orderSettingsLoading && orderSettings.orders_enabled && toggleOrderSetting("takeaway_enabled")}
                           className={`flex items-center justify-between p-4 rounded-xl transition ${
@@ -697,7 +697,7 @@ export default function SettingsPage() {
                               <Package className={`h-5 w-5 ${orderSettings.takeaway_enabled && orderSettings.orders_enabled ? "text-amber-400" : t.textMuted}`} />
                             </div>
                             <div>
-                              <p className={`font-medium ${t.text}`}>Na wynos</p>
+                              <p className={`font-medium ${t.text}`}>Odbiór osobisty</p>
                               <p className={`text-sm ${t.textMuted}`}>Odbiór osobisty w restauracji</p>
                             </div>
                           </div>
@@ -747,7 +747,7 @@ export default function SettingsPage() {
                         <div className="flex items-center gap-4 mb-3">
                           <div>
                             <p className={`font-medium ${t.text}`}>Koszt opakowania</p>
-                            <p className={`text-sm ${t.textMuted}`}>Doliczany do zamówień na wynos i z dostawą</p>
+                            <p className={`text-sm ${t.textMuted}`}>Doliczany do zamówień na odbiór osobisty i z dostawą</p>
                           </div>
                         </div>
                         <div className="flex items-center gap-3">

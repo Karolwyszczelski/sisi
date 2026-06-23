@@ -233,10 +233,18 @@ received_at TIMESTAMPTZ      -- Data odbioru
 ### "Token exchange failed"
 → Sprawdź czy `DOTYPOS_CLIENT_ID` i `DOTYPOS_CLIENT_SECRET` są poprawne
 → Nowy format tokenu (2026): Authorization: User $refreshToken + body: { "_cloudId": "..." }
+→ Jeśli błąd zawiera `LICENSE_UPGRADE_REQUIRED` (403), to nie jest błąd kodu:
+  aktywna licencja Dotypos nie obejmuje API v2 / connectora. Wymagany upgrade
+  planu licencji po stronie Dotypos i kontakt z ich supportem.
 
 ### Produkty nie są mapowane
 → Sprawdź czy nazwy produktów w Dotypos odpowiadają nazwom na stronie
 → Uruchom synchronizację produktów
+
+### "duplicate key value violates unique constraint \"pos_products_name_idx\""
+→ W Dotypos mogą istnieć różne produkty o tej samej nazwie (`name`) i innym `id`.
+→ W bazie usuń unikalność po `name` i trzymaj unikalność po `pos_id`.
+→ Uruchom migrację: `supabase/migrations/drop_pos_products_name_unique_constraint.sql`
 
 ### POS offline / timeout
 → Użyj `posHello()` do sprawdzenia czy kasa jest online
