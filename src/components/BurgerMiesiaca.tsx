@@ -130,6 +130,9 @@ export default function BurgerMiesiaca() {
 
   const addMonth = () => {
     addItem({
+      // Stały produkt wewnętrzny; jego dynamiczna nazwa pozostaje widoczna
+      // klientowi, a Dotypos mapuje id=12 na ogólny produkt "Burger Miesiąca".
+      product_id: 12,
       name: `Burger Miesiąca – ${burgerName || "—"}`,
       price: 34.9,
       quantity: 1,

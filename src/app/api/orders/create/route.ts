@@ -43,6 +43,7 @@ const PRIVACY_URL =
 type Any = Record<string, any>;
 
 type NormalizedItem = {
+  product_id?: string | number;
   name: string;
   quantity: number;
   price: number;
@@ -179,6 +180,7 @@ const ingredientsFromProductRow = (row?: ProductRow): string[] =>
 
 /* ----- Sklej DB + opcje klienta ----- */
 function buildItemFromDbAndOptions(dbRow: ProductRow | undefined, raw: Any): NormalizedItem {
+  const productId = dbRow?.id ?? raw.product_id ?? raw.productId ?? raw.id ?? undefined;
   const baseName =
     nameFromProductRow(dbRow) ||
     raw.name ||
@@ -228,6 +230,7 @@ function buildItemFromDbAndOptions(dbRow: ProductRow | undefined, raw: Any): Nor
     descFromProductRow(dbRow);
 
   return {
+    product_id: productId,
     name: String(baseName),
     quantity,
     price,
@@ -1318,8 +1321,8 @@ if (Array.isArray(n.itemsArray) && n.itemsArray.length > 0) {
       };
     });
 
-    // Wstaw WSZYSTKIE pozycje — product_id może być null
-    // (np. Burger Miesiąca dodawany bez product_id z frontendu)
+    // Wstaw WSZYSTKIE pozycje — product_id może być null dla pozycji legacy
+    // lub specjalnych, które nie mają jeszcze rekordu w products.
     if (shaped.length) {
       const { error: oiErr } = await supabaseAdmin
         .from("order_items")
