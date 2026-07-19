@@ -289,6 +289,26 @@ function findPosProduct(
     stripped: normalizeForMatching(p.name),
   }));
 
+  // Burger Miesiąca ma dynamiczną nazwę na stronie, ale w POS zawsze jest
+  // jednym ogólnym produktem. Ten fallback obsługuje również starsze
+  // zamówienia i klientów ze zcache'owanym frontendem bez product_id=12.
+  const burgerOfMonthName = normalizeForMatching("Burger Miesiąca");
+  if (
+    normItem === burgerOfMonthName ||
+    normItem.startsWith(`${burgerOfMonthName} `)
+  ) {
+    const burgerOfMonthPosId = DEFAULT_POS_PRODUCT_OVERRIDES[12];
+    const burgerOfMonthProduct = posProducts.find(
+      (product) => Number(product.pos_id) === burgerOfMonthPosId
+    );
+    if (burgerOfMonthProduct) {
+      console.log(
+        `[POS Alias] "${itemName}" → "${burgerOfMonthProduct.name}" (pos_id: ${burgerOfMonthProduct.pos_id})`
+      );
+      return burgerOfMonthProduct;
+    }
+  }
+
   // 1. Exact match
   const exact = candidates.find((c) => c.stripped === normItem);
   if (exact) {
