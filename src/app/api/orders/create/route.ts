@@ -6,6 +6,20 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { toZonedTime, fromZonedTime } from "date-fns-tz";
 import { dispatchOrderToOperations, isOnlinePaymentPending } from "@/lib/orderOperations";
+import {
+  normalizeProductNameForLookup,
+  requiresPackaging,
+} from "@/lib/packaging";
+import {
+  calculateDeliveryQuote,
+  type DeliveryZonePricing,
+  validateDeliveryZones,
+} from "@/lib/deliveryPricing";
+import {
+  getDeliveryPlace,
+  getDrivingDistanceKmToPlace,
+  isValidGooglePlaceId,
+} from "@/lib/googleDelivery";
 
 /* === email + link śledzenia === */
 import { trackingUrl } from "@/lib/orderLink";
@@ -47,6 +61,7 @@ type NormalizedItem = {
   name: string;
   quantity: number;
   price: number;
+  category?: string | null;
   addons: string[];
   ingredients: string[];
   note?: string;
@@ -251,48 +266,6 @@ function sanitizeOrderStatus(raw: unknown): AllowedOrderStatus {
     ? (value as AllowedOrderStatus)
     : "placed";
 }
-
-/* ===== Haversine ===== */
-const haversineKm = (a:{lat:number;lng:number}, b:{lat:number;lng:number}) => {
-  const R = 6371;
-  const dLat = (b.lat - a.lat) * Math.PI / 180;
-  const dLng = (b.lng - a.lng) * Math.PI / 180;
-  const s1 = Math.sin(dLat/2)**2 +
-             Math.cos(a.lat*Math.PI/180)*Math.cos(b.lat*Math.PI/180)*Math.sin(dLng/2)**2;
-  return 2 * R * Math.asin(Math.sqrt(s1));
-};
-
-// === START INSERT: Google driving distance (optional) ===
-const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY || "";
-
-async function getDrivingDistanceKm(
-  origin: { lat: number; lng: number },
-  dest: { lat: number; lng: number }
-): Promise<number | null> {
-  if (!GOOGLE_MAPS_API_KEY) return null;
-
-  const url =
-    `https://maps.googleapis.com/maps/api/distancematrix/json` +
-    `?origins=${encodeURIComponent(`${origin.lat},${origin.lng}`)}` +
-    `&destinations=${encodeURIComponent(`${dest.lat},${dest.lng}`)}` +
-    `&mode=driving&units=metric&key=${GOOGLE_MAPS_API_KEY}`;
-
-  const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) return null;
-
-  const data = await res.json().catch(() => null);
-  if (data?.status !== "OK") return null;
-
-  const el = data?.rows?.[0]?.elements?.[0];
-  if (!el || el.status !== "OK") return null;
-
-  const meters = Number(el.distance?.value);
-  if (!Number.isFinite(meters)) return null;
-
-  return meters / 1000;
-}
-// === END INSERT: Google driving distance (optional) ===
-
 
 // === START INSERT: TZ helpers (Europe/Warsaw) ===
 const APP_TZ = "Europe/Warsaw";
@@ -514,6 +487,12 @@ function normalizeBody(raw: any, req: Request) {
     promo_code: pickPromo(base) ?? pickPromo(raw),
     discount_amount: num(base?.discount_amount, 0) ?? 0,
     delivery_cost: num(base?.delivery_cost, null),
+    delivery_place_id:
+      base?.delivery_place_id ??
+      base?.deliveryPlaceId ??
+      raw?.delivery_place_id ??
+      raw?.deliveryPlaceId ??
+      null,
     delivery_lat: num(base?.delivery_lat ?? base?.lat, null),
     delivery_lng: num(base?.delivery_lng ?? base?.lng, null),
     status: sanitizeOrderStatus(base?.status),
@@ -568,24 +547,44 @@ function getAddonPriceFromMap(addonName: string, addonPriceMap: AddonPriceMap): 
 // Mapa kategorii produktów
 type ProductCategoryMap = Map<string, string>;
 
+function resolveProductCategory(it: Any, productCategoryMap: ProductCategoryMap): string {
+  const productId = it.product_id ?? it.productId ?? it.id ?? null;
+  if (productId != null) {
+    const categoryById = productCategoryMap.get(`id:${String(productId)}`);
+    if (categoryById) return categoryById;
+  }
+
+  const normalizedName = normalizeProductNameForLookup(it.name);
+  if (normalizedName) {
+    const categoryByName = productCategoryMap.get(`name:${normalizedName}`);
+    if (categoryByName) return categoryByName;
+  }
+
+  return typeof it.category === "string" ? it.category : "";
+}
+
 function calcSubtotalFromItems(selected_option: string, itemsArray: Any[], packagingCostSetting: number = 2, addonPriceMap: AddonPriceMap = new Map(), productCategoryMap: ProductCategoryMap = new Map()): number {
-  const packaging = (selected_option === "delivery" || selected_option === "takeaway") ? packagingCostSetting : 0;
   const itemsSum = itemsArray.reduce((acc, it) => {
-    const qty = Number(it.quantity ?? 1) || 1;
+    const qty = Number(it.quantity ?? 1);
     const basePrice = money(it.price ?? it.unit_price ?? 0);
     const addons = Array.isArray(it?.options?.addons) ? it.options.addons : (Array.isArray(it.addons) ? it.addons : []);
     const addonsCost = (addons ?? []).reduce((s: number, a: any) => s + getAddonPriceFromMap(String(a), addonPriceMap), 0);
     const extraMeat = Number(it?.options?.extraMeatCount ?? 0) || 0;
     const extraMeatCost = extraMeat * 15;
-    
-    // Kaucja za napoje (oprócz wody)
     const productName = String(it.name || "");
-    const productCategory = productCategoryMap.get(productName.toLowerCase()) || it.category || "";
+    const productCategory = resolveProductCategory(it, productCategoryMap);
+    const packagingCostPerUnit =
+      (selected_option === "delivery" || selected_option === "takeaway") &&
+      requiresPackaging(productCategory)
+        ? packagingCostSetting
+        : 0;
+
+    // Kaucja za napoje (oprócz wody)
     const depositCost = isDrinkWithDeposit(productCategory, productName) ? DEPOSIT_AMOUNT : 0;
     
-    return acc + (basePrice + addonsCost + extraMeatCost + depositCost) * qty;
+    return acc + (basePrice + addonsCost + extraMeatCost + depositCost + packagingCostPerUnit) * qty;
   }, 0);
-  return Math.max(0, Math.round((itemsSum + packaging) * 100) / 100);
+  return Math.max(0, Math.round(itemsSum * 100) / 100);
 }
 
 /* ===================== Handler ===================== */
@@ -619,7 +618,7 @@ export async function POST(req: Request) {
           .eq("available", true),
         supabaseAdmin
           .from("products")
-          .select("name, category"),
+          .select("id, name, category"),
         supabaseAdmin
           .from("order_settings")
           .select("*")
@@ -677,7 +676,11 @@ export async function POST(req: Request) {
       if (!productsErr && products) {
         for (const product of products) {
           if (product.name && product.category) {
-            productCategoryMap.set(product.name.toLowerCase(), product.category);
+            productCategoryMap.set(`id:${String(product.id)}`, product.category);
+            productCategoryMap.set(
+              `name:${normalizeProductNameForLookup(product.name)}`,
+              product.category,
+            );
           }
         }
       }
@@ -966,6 +969,16 @@ if (TURNSTILE_SECRET_KEY) {
     if (!Array.isArray(n.itemsArray) || n.itemsArray.length === 0) {
       return NextResponse.json({ error: "Koszyk jest pusty." }, { status: 400 });
     }
+    const hasInvalidQuantity = n.itemsArray.some((item) => {
+      const quantity = Number(item.quantity ?? 1);
+      return !Number.isSafeInteger(quantity) || quantity < 1 || quantity > 99;
+    });
+    if (hasInvalidQuantity) {
+      return NextResponse.json(
+        { error: "Ilość każdego produktu musi być liczbą całkowitą od 1 do 99." },
+        { status: 400 },
+      );
+    }
 
     // 2.1) Subtotal po stronie serwera
     const baseFromItems = calcSubtotalFromItems(n.selected_option, n.itemsArray, packagingCostSetting, addonPriceMap, productCategoryMap);
@@ -975,7 +988,7 @@ if (TURNSTILE_SECRET_KEY) {
 
     // 2.2) Dostawa
     if (n.selected_option === "delivery") {
-      if (n.delivery_lat == null || n.delivery_lng == null) {
+      if (!isValidGooglePlaceId(n.delivery_place_id)) {
         return NextResponse.json(
           { error: "Wybierz adres z listy, aby ustawić lokalizację dostawy." },
           { status: 400 }
@@ -991,70 +1004,87 @@ if (TURNSTILE_SECRET_KEY) {
         return NextResponse.json({ error: "Brak konfiguracji stref dostawy." }, { status: 500 });
       }
 
-            const originLL = { lat: Number(rest.lat), lng: Number(rest.lng) };
-const destLL = { lat: Number(n.delivery_lat), lng: Number(n.delivery_lng) };
-
-// 1) Google (dystans drogowy) → 2) fallback: Haversine (po prostej)
-const googleKm = await getDrivingDistanceKm(originLL, destLL).catch(() => null);
-const distance_km = googleKm ?? haversineKm(originLL, destLL);
-
-
-
-      const zone = (zones as any[])
-        .sort((a, b) => Number(a.min_distance_km) - Number(b.min_distance_km))
-        .find((z) => distance_km >= Number(z.min_distance_km) && distance_km <= Number(z.max_distance_km));
-
-      if (!zone) {
-        return NextResponse.json({ error: "Adres poza zasięgiem dostawy." }, { status: 400 });
+      const zoneValidationErrors = validateDeliveryZones(
+        zones as DeliveryZonePricing[],
+      );
+      if (zoneValidationErrors.length) {
+        console.error(
+          "[orders.create] Invalid delivery zones:",
+          zoneValidationErrors.join(" "),
+        );
+        return NextResponse.json(
+          { error: "Konfiguracja stref dostawy wymaga poprawy." },
+          { status: 503 },
+        );
       }
 
-      deliveryMinRequired = Number(zone.min_order_value || 0);
+      const origin = { lat: Number(rest.lat), lng: Number(rest.lng) };
+      if (!Number.isFinite(origin.lat) || !Number.isFinite(origin.lng)) {
+        return NextResponse.json(
+          { error: "Punkt startowy restauracji jest nieprawidłowy." },
+          { status: 503 },
+        );
+      }
 
-      // Porównuj z kwotą samych produktów (bez opakowania i dostawy)
+      let distanceKm: number;
+      let deliveryPlace: Awaited<ReturnType<typeof getDeliveryPlace>>;
+      try {
+        [distanceKm, deliveryPlace] = await Promise.all([
+          getDrivingDistanceKmToPlace(origin, n.delivery_place_id),
+          getDeliveryPlace(n.delivery_place_id),
+        ]);
+      } catch (error) {
+        console.error(
+          "[orders.create] Google delivery verification error:",
+          error instanceof Error ? error.message : error,
+        );
+        return NextResponse.json(
+          { error: "Nie udało się potwierdzić drogowej trasy dostawy. Spróbuj ponownie." },
+          { status: 503 },
+        );
+      }
+
       const productsOnlyTotal = calcSubtotalFromItems("local", n.itemsArray, 0, addonPriceMap, productCategoryMap);
-      if (productsOnlyTotal < deliveryMinRequired) {
+      const deliveryQuote = calculateDeliveryQuote(
+        distanceKm,
+        zones as DeliveryZonePricing[],
+        productsOnlyTotal,
+      );
+      if (!deliveryQuote) {
+        return NextResponse.json(
+          {
+            error: `Adres poza zasięgiem dostawy (${Math.round(distanceKm)} km).`,
+          },
+          { status: 400 },
+        );
+      }
+
+      deliveryMinRequired = deliveryQuote.minOrderValue;
+      if (!deliveryQuote.minOrderOk) {
         return NextResponse.json(
           { error: `Minimalna wartość zamówienia dla dostawy to ${deliveryMinRequired.toFixed(2)} zł (wartość produktów: ${productsOnlyTotal.toFixed(2)} zł).` },
           { status: 400 }
         );
       }
 
-            const pricingTypeRaw = String((zone as any).pricing_type ?? "").toLowerCase();
-const pricingType =
-  pricingTypeRaw === "per_km" || pricingTypeRaw === "flat"
-    ? pricingTypeRaw
-    : Number(zone.min_distance_km) === 0
-    ? "flat"
-    : "per_km";
-
-
-      // Twoje realne kolumny: cost (legacy), cost_fixed, cost_per_km
-      const costLegacy = Number((zone as any).cost ?? 0);
-      const costFixed = Number((zone as any).cost_fixed ?? 0);
-      const costPerKm = Number((zone as any).cost_per_km ?? 0);
-
-      let serverCost = 0;
-
-      if (pricingType === "per_km") {
-  const perKmRate = costPerKm > 0 ? costPerKm : costLegacy;
-
-  // mnożymy stawkę za km przez całą odległość
-  serverCost = Math.max(0, costFixed) + Math.max(0, perKmRate) * distance_km;
-} else {
-  // flat
-  serverCost = costFixed > 0 ? costFixed : costLegacy;
-}
-
-
-
-      if (zone.free_over != null && baseFromItems >= Number(zone.free_over)) {
-        serverCost = 0;
-      }
-
-      const rounded = Math.max(0, Math.round(serverCost * 100) / 100);
-
-      n.delivery_cost = rounded;
-      n.total_price = Math.max(0, Math.round((baseFromItems + rounded - Math.min(discount, baseFromItems + rounded)) * 100) / 100);
+      // Dane adresowe i współrzędne pochodzą z Google Place ID, a nie z pól
+      // możliwych do zmiany po stronie klienta.
+      n.street = deliveryPlace.street;
+      n.city = deliveryPlace.city;
+      n.postal_code = deliveryPlace.postalCode;
+      n.address = deliveryPlace.formattedAddress;
+      n.delivery_lat = deliveryPlace.lat;
+      n.delivery_lng = deliveryPlace.lng;
+      n.delivery_cost = deliveryQuote.cost;
+      n.total_price = Math.max(
+        0,
+        Math.round(
+          (baseFromItems +
+            deliveryQuote.cost -
+            Math.min(discount, baseFromItems + deliveryQuote.cost)) *
+            100,
+        ) / 100,
+      );
     } else {
       n.delivery_cost = 0;
       n.total_price = Math.max(0, Math.round((baseFromItems - Math.min(discount, baseFromItems)) * 100) / 100);
@@ -1071,7 +1101,10 @@ const pricingType =
     const normalizedItems: NormalizedItem[] = n.itemsArray.map((it) => {
       const key = String(it.product_id ?? it.productId ?? it.id ?? "");
       const db = productsMap.get(key);
-      return buildItemFromDbAndOptions(db, it);
+      return {
+        ...buildItemFromDbAndOptions(db, it),
+        category: resolveProductCategory(it, productCategoryMap) || null,
+      };
     });
 
     // >>> USTAW MINIMA (przed insertem do orders)

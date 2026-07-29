@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect } from "react";
 import { createClient } from "@supabase/supabase-js";
+import { countPackagingUnits } from "@/lib/packaging";
 
 const getSupabase = () => {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -20,9 +21,11 @@ const supabase = new Proxy({} as ReturnType<typeof getSupabase>, {
 
 // --- pomocnicze typy ---
 export interface Product {
+  product_id?: string | number;
   name: string;
   price: number;
   quantity: number;
+  category?: string | null;
   meatType?: "wołowina" | "kurczak";
   addons?: string[];
   extraMeatCount?: number;
@@ -39,8 +42,10 @@ interface EditOrderButtonProps {
 }
 
 interface MenuProduct {
+  id: string | number;
   name: string;
   price: number;
+  category: string | null;
   available_addons: string[] | null;
 }
 
@@ -107,12 +112,14 @@ export default function EditOrderButton({
     // Pobierz produkty z bazy
     supabase
       .from("products")
-      .select("name, price, available_addons")
+      .select("id, name, price, category, available_addons")
       .then((r) => {
         if (!r.error && r.data) {
           const parsed = r.data.map((p: any) => ({
+            id: p.id,
             name: p.name || "",
             price: typeof p.price === "number" ? p.price : parseFloat(String(p.price).replace(",", ".")) || 0,
+            category: p.category || null,
             available_addons: Array.isArray(p.available_addons) ? p.available_addons : null,
           }));
           setMenuProducts(parsed);
@@ -156,9 +163,11 @@ export default function EditOrderButton({
           console.warn("Nie znaleziono ceny dla produktu:", item.name);
         }
         return {
+          product_id: item.product_id ?? found?.id,
           name: item.name,
           price: found?.price ?? item.price ?? 0,
           quantity: item.quantity !== undefined ? item.quantity : 1,
+          category: item.category ?? found?.category ?? null,
           extraMeatCount: item.extraMeatCount !== undefined ? item.extraMeatCount : 0,
           addons: item.addons ? [...item.addons] : [],
           meatType: item.meatType || "wołowina",
@@ -231,21 +240,28 @@ export default function EditOrderButton({
     }, 0);
   };
 
+  const getPackagingUnits = () => {
+    if (selectedOption !== "takeaway" && selectedOption !== "delivery") return 0;
+    return countPackagingUnits(products);
+  };
+
   const getPackagingCost = () => {
-    return selectedOption === "takeaway" || selectedOption === "delivery" ? packagingCostSetting : 0;
+    return getPackagingUnits() * packagingCostSetting;
   };
 
   const calculateTotalWithPackaging = () => {
     return calculateBaseTotal() + getPackagingCost();
   };
 
-  const handleAddNewProduct = (productName: string, productPrice: number) => {
+  const handleAddNewProduct = (menuProduct: MenuProduct) => {
     setProducts((prev) => [
       ...prev,
       {
-        name: productName,
-        price: productPrice,
+        product_id: menuProduct.id,
+        name: menuProduct.name,
+        price: menuProduct.price,
         quantity: 1,
+        category: menuProduct.category,
         addons: [],
         extraMeatCount: 0,
         meatType: "wołowina",
@@ -517,12 +533,12 @@ export default function EditOrderButton({
                 <div className="border border-slate-700 bg-slate-900/60 p-4 rounded-lg">
                   <h4 className="font-bold mb-3 text-white">Wybierz produkt</h4>
                   <ul className="space-y-1 max-h-52 overflow-auto">
-                    {MENU_PRODUCTS.map((prod) => (
+                    {menuProducts.map((prod) => (
                       <li key={prod.name}>
                         <button
                           type="button"
                           onClick={() => {
-                            handleAddNewProduct(prod.name, prod.price);
+                            handleAddNewProduct(prod);
                             setShowAddProduct(false);
                           }}
                           className="block w-full text-left px-4 py-2.5 text-slate-300 hover:bg-slate-700 rounded-lg transition-colors"
@@ -550,7 +566,7 @@ export default function EditOrderButton({
                 {(selectedOption === "takeaway" ||
                   selectedOption === "delivery") && (
                   <div className="flex justify-between text-slate-400">
-                    <span>Opakowanie:</span>
+                    <span>Opakowania ({getPackagingUnits()} szt.):</span>
                     <span className="text-slate-300">{getPackagingCost().toFixed(2)} zł</span>
                   </div>
                 )}

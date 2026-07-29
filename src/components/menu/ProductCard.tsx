@@ -5,8 +5,10 @@ import { Plus, Check } from "lucide-react";
 import useCartStore from "@/store/cartStore";
 
 interface Product {
+  id?: string | number;
   name: string;
   price: number;
+  category?: string | null;
   description?: string;
   ingredients?: string[] | string | null;
 }
@@ -54,7 +56,12 @@ export default function ProductCard({ product, index }: ProductCardProps) {
   const isLongText = bodyText.length > 80;
 
   const handleAddToCart = () => {
-    addItem({ name: product.name, price: product.price });
+    addItem({
+      product_id: product.id,
+      name: product.name,
+      price: product.price,
+      category: product.category,
+    });
     setAdded(true);
     setTimeout(() => setAdded(false), 1500);
   };

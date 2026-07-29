@@ -14,8 +14,10 @@ export interface RawMenuCategory {
   subcategories?: {
     name: string;
     items: {
+      id?: string | number;
       name: string;
       price: number;
+      category?: string | null;
       description?: string;
       ingredients?: string[];
       imageUrl?: string;
@@ -23,8 +25,10 @@ export interface RawMenuCategory {
     }[];
   }[];
   items?: {
+    id?: string | number;
     name: string;
     price: number;
+    category?: string | null;
     description?: string;
     ingredients?: string[];
     imageUrl?: string;
@@ -86,8 +90,10 @@ function normalizeSupabaseData(data: SupabaseProduct[]): RawMenuCategory[] {
     if (!map[cat]) map[cat] = {};
 
     const itemObj = {
+      id: p.id,
       name: p.name,
       price: money(p.price),
+      category: cat,
       description: p.description || undefined,
       ingredients: parseIngredients(p.ingredients),
       imageUrl: p.image_url || undefined,
@@ -231,11 +237,23 @@ export default function MenuSection() {
     // Pokaż wszystkie produkty ze wszystkich kategorii
     sourceMenu.forEach((cat) => {
       if (cat.items) {
-        products = [...products, ...cat.items];
+        products = [
+          ...products,
+          ...cat.items.map((item) => ({
+            ...item,
+            category: item.category ?? cat.category,
+          })),
+        ];
       }
       if (cat.subcategories) {
         cat.subcategories.forEach((sub) => {
-          products = [...products, ...sub.items];
+          products = [
+            ...products,
+            ...sub.items.map((item) => ({
+              ...item,
+              category: item.category ?? cat.category,
+            })),
+          ];
         });
       }
     });
@@ -244,9 +262,15 @@ export default function MenuSection() {
       const subcat =
         categoryData.subcategories.find((s) => s.name === selectedSubcategory) ||
         categoryData.subcategories[0];
-      products = subcat?.items || [];
+      products = (subcat?.items || []).map((item) => ({
+        ...item,
+        category: item.category ?? categoryData.category,
+      }));
     } else {
-      products = categoryData.items || [];
+      products = (categoryData.items || []).map((item) => ({
+        ...item,
+        category: item.category ?? categoryData.category,
+      }));
     }
   }
 
@@ -436,7 +460,12 @@ function MobileProductCard({ product, isFirst }: { product: any; isFirst: boolea
     : product.description || "";
 
   const handleAdd = () => {
-    addItem({ name: product.name, price: product.price });
+    addItem({
+      product_id: product.id,
+      name: product.name,
+      price: product.price,
+      category: product.category,
+    });
     setAdded(true);
     setTimeout(() => setAdded(false), 1200);
   };
