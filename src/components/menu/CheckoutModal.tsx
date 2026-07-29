@@ -13,6 +13,7 @@ import { useSession } from "@supabase/auth-helpers-react";
 import { toZonedTime } from "date-fns-tz";
 import clsx from "clsx";
 import { createPortal } from "react-dom";
+import { countPackagingUnits } from "@/lib/packaging";
 
 declare global {
   interface Window {
@@ -67,21 +68,6 @@ const TERMS_VERSION = process.env.NEXT_PUBLIC_TERMS_VERSION || "2025-09-15";
 const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || "";
 const THANKS_QR_URL = process.env.NEXT_PUBLIC_REVIEW_QR_URL || "https://g.co/kgs/47NSDMH";
 
-
-type Zone = {
-  id: string;
-  min_distance_km: number;
-  max_distance_km: number;
-  min_order_value: number;
-  cost: number;
-  cost_fixed?: number;
-  cost_per_km?: number;
-  free_over: number | null;
-  eta_min_minutes: number;
-  eta_max_minutes: number;
-  pricing_type?: "per_km" | "flat";
-  active?: boolean;
-};
 
 type Addon = {
   id: string;
@@ -523,11 +509,14 @@ export default function CheckoutModal() {
   const [scheduledTime, setScheduledTime] = useState<string>("10:40");
 
   const [products, setProducts] = useState<Product[]>([]);
-  const [zones, setZones] = useState<Zone[]>([]);
   const [addonsFromDb, setAddonsFromDb] = useState<Addon[]>([]);
-  const [restLoc, setRestLoc] = useState<{ lat: number; lng: number } | null>(null);
   const [packagingCostSetting, setPackagingCostSetting] = useState<number>(2); // domyślnie 2zł, pobierany z bazy
-  const [deliveryInfo, setDeliveryInfo] = useState<{ cost: number; eta: string } | null>(null);
+  const [deliveryInfo, setDeliveryInfo] = useState<{
+    cost: number;
+    eta: string;
+    distanceKm: number;
+    billableDistanceKm: number;
+  } | null>(null);
 
   // Ustawienia zamówień (włącz/wyłącz typy zamówień)
   const [orderSettings, setOrderSettings] = useState<{
@@ -572,6 +561,7 @@ export default function CheckoutModal() {
   const [deliveryMinRequired, setDeliveryMinRequired] = useState(0);
   const [outOfRange, setOutOfRange] = useState(false);
   const [custCoords, setCustCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [deliveryPlaceId, setDeliveryPlaceId] = useState<string | null>(null);
 
   // email
   const sessionEmail = session?.user?.email || "";
@@ -624,13 +614,6 @@ export default function CheckoutModal() {
         if (!r.error && r.data) setProducts((r.data as Product[]) || []);
       });
 
-    supabase
-      .from("delivery_zones")
-      .select("*")
-      .eq("active", true)
-      .order("min_distance_km", { ascending: true })
-      .then((r) => { if (!r.error && r.data) setZones(r.data as Zone[]); });
-
     // Pobierz dodatki z tabeli addons
     supabase
       .from("addons")
@@ -648,12 +631,11 @@ export default function CheckoutModal() {
 
     supabase
       .from("restaurant_info")
-      .select("lat,lng,packaging_cost")
+      .select("packaging_cost")
       .eq("id", 1)
       .single()
       .then((r) => {
         if (!r.error && r.data) {
-          setRestLoc({ lat: r.data.lat, lng: r.data.lng });
           if (typeof r.data.packaging_cost === "number") {
             setPackagingCostSetting(r.data.packaging_cost);
           }
@@ -840,79 +822,86 @@ export default function CheckoutModal() {
     }, 0);
   }, [items, productByNorm, addonsFromDb, getAddonPrice]);
 
-  const packagingCost = selectedOption === "takeaway" || selectedOption === "delivery" ? packagingCostSetting : 0;
+  const packagingUnits =
+    selectedOption === "takeaway" || selectedOption === "delivery"
+      ? countPackagingUnits(items, (item) => {
+          const meta = productByNorm.get(normalizeName(item.name));
+          return item.category ?? meta?.category;
+        })
+      : 0;
+  const packagingCost = packagingUnits * packagingCostSetting;
   const subtotal = baseTotal + packagingCost;
 
-  const calcDelivery = async (custLat: number, custLng: number) => {
-    if (!restLoc) return;
+  const calcDelivery = async (destinationPlaceId: string) => {
+    setDeliveryInfo(null);
+    setOutOfRange(false);
     try {
-      const resp = await fetch(`/api/distance?origin=${restLoc.lat},${restLoc.lng}&destination=${custLat},${custLng}`);
-      const { distance_km, error } = await resp.json();
-      if (error) { console.error("Distance API:", error); return; }
+      const response = await fetch("/api/delivery/quote", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          destination_place_id: destinationPlaceId,
+          products_total: baseTotal,
+        }),
+        cache: "no-store",
+      });
+      const quote = await response.json().catch(() => ({}));
 
-      console.log("[calcDelivery] distance_km:", distance_km, "zones:", zones.map(z => ({
-        min: z.min_distance_km, max: z.max_distance_km, pricing_type: z.pricing_type, 
-        cost: z.cost, cost_fixed: z.cost_fixed, cost_per_km: z.cost_per_km
-      })));
-
-      // Konwersja na number + sortowanie dla pewności (Supabase może zwrócić stringi)
-      const sortedZones = zones
-        .filter(z => z.active !== false)
-        .sort((a, b) => Number(a.min_distance_km) - Number(b.min_distance_km));
-      
-      const zone = sortedZones.find(z => 
-        distance_km >= Number(z.min_distance_km) && distance_km <= Number(z.max_distance_km)
-      );
-
-      console.log("[calcDelivery] selected zone:", zone);
-
-      if (!zone) {
+      if (quote.out_of_range) {
         setOutOfRange(true);
         setDeliveryMinOk(false);
         setDeliveryMinRequired(0);
-        setDeliveryInfo({ cost: 0, eta: "Poza zasięgiem" });
+        setErrorMessage(
+          `Adres jest poza zasięgiem dostawy (${Number(quote.billable_distance_km || 0)} km).`,
+        );
         return;
+      }
+      if (!response.ok) {
+        throw new Error(quote.error || "Nie udało się obliczyć kosztu dostawy.");
       }
 
       setOutOfRange(false);
-
-      // Konwersja wszystkich wartości na number (Supabase może zwrócić stringi)
-      const pricingType = zone.pricing_type ?? (Number(zone.min_distance_km) === 0 ? "flat" : "per_km");
-      const perKm = pricingType === "per_km";
-      
-      let cost: number;
-      if (perKm) {
-        // Mnożymy stawkę za km przez całą odległość
-        const perKmRate = Number(zone.cost_per_km ?? zone.cost ?? 0);
-        const costFixed = Number(zone.cost_fixed ?? 0);
-        cost = costFixed + perKmRate * distance_km;
-        console.log("[calcDelivery] per_km calc:", { perKmRate, costFixed, distance_km, cost });
-      } else {
-        cost = Number(zone.cost_fixed ?? zone.cost ?? 0);
-        console.log("[calcDelivery] flat calc:", { cost });
-      }
-
-      const freeOver = zone.free_over != null ? Number(zone.free_over) : null;
-      if (freeOver != null && subtotal >= freeOver) cost = 0;
-
-      const minOrderValue = Number(zone.min_order_value || 0);
-      // Porównuj z samymi produktami (baseTotal), bez opakowania i dostawy
-      const minOk = baseTotal >= minOrderValue;
+      const minOrderValue = Number(quote.min_order_value || 0);
+      const minOk = Boolean(quote.min_order_ok);
       setDeliveryMinOk(minOk);
       setDeliveryMinRequired(minOrderValue);
 
-      const eta = `${zone.eta_min_minutes}-${zone.eta_max_minutes} min`;
-      console.log("[calcDelivery] final cost:", cost, "eta:", eta);
-      setDeliveryInfo({ cost: Math.max(0, Math.round(cost * 100) / 100), eta });
-    } catch (e) {
-      console.error("calcDelivery error:", e);
+      const eta = `${Number(quote.eta_min_minutes)}-${Number(quote.eta_max_minutes)} min`;
+      setDeliveryInfo({
+        cost: Number(quote.cost),
+        eta,
+        distanceKm: Number(quote.distance_km),
+        billableDistanceKm: Number(quote.billable_distance_km),
+      });
+      setErrorMessage(null);
+    } catch (error) {
+      console.error("calcDelivery error:", error);
+      setDeliveryInfo(null);
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Nie udało się obliczyć kosztu dostawy.",
+      );
     }
   };
 
-  const onAddressSelect = (address: string, lat: number, lng: number) => {
+  const onAddressSelect = (
+    address: string,
+    lat: number,
+    lng: number,
+    placeId: string,
+  ) => {
     setStreet(address);
     setCustCoords({ lat, lng });
-    calcDelivery(lat, lng);
+    setDeliveryPlaceId(placeId);
+    void calcDelivery(placeId);
+  };
+
+  const resetSelectedAddress = () => {
+    setCustCoords(null);
+    setDeliveryPlaceId(null);
+    setDeliveryInfo(null);
+    setOutOfRange(false);
   };
 
   // Re-check min order value reactively when baseTotal changes (e.g. item added/removed after address set)
@@ -1054,6 +1043,7 @@ export default function CheckoutModal() {
       payload.postal_code = postalCode || null;
       payload.city = city || null;
       payload.flat_number = flatNumber || null;
+      payload.delivery_place_id = deliveryPlaceId;
       if (custCoords) {
         payload.delivery_lat = custCoords.lat;
         payload.delivery_lng = custCoords.lng;
@@ -1066,10 +1056,9 @@ export default function CheckoutModal() {
 
   const buildItemsPayload = () =>
     items.map((item: any, index: number) => {
-      // jeżeli w koszyku mamy już id, użyjemy go; w przeciwnym razie dopasujemy po nazwie
-      const meta = item.product_id ? { id: item.product_id } as Product : findMetaByName(item.name);
+      const meta = findMetaByName(item.name);
       const inferred = inferDefaultMeat(meta, item.name);
-            const burger = isBurger(meta, item.name);
+      const burger = isBurger(meta, item.name);
       const fries = isFries(meta, item.name);
 
       const sanitizedAddons: string[] = burger
@@ -1079,10 +1068,11 @@ export default function CheckoutModal() {
           : [];
 
       return {
-        product_id: (meta as any)?.id ?? null,
+        product_id: item.product_id ?? meta?.id ?? null,
         name: item.name,
         quantity: item.quantity || 1,
         unit_price: toPrice(item.price),
+        category: item.category ?? meta?.category ?? null,
         options: {
           meatType: burger ? (item.meatType ?? inferred) : null,
           extraMeatCount: burger ? item.extraMeatCount : 0,
@@ -1200,7 +1190,7 @@ export default function CheckoutModal() {
       if (selectedOption === "delivery") {
         if (outOfRange) throw new Error("Adres jest poza zasięgiem dostawy.");
         if (!deliveryMinOk) throw new Error(`Minimalna wartość zamówienia dla tej strefy to ${deliveryMinRequired.toFixed(2)} zł.`);
-        if (!custCoords) throw new Error("Wybierz adres z listy, aby ustawić lokalizację dostawy.");
+        if (!custCoords || !deliveryPlaceId) throw new Error("Wybierz adres z listy, aby ustawić lokalizację dostawy.");
         if (!deliveryInfo) throw new Error("Poczekaj na przeliczenie kosztu dostawy.");
       }
 
@@ -1235,7 +1225,7 @@ export default function CheckoutModal() {
       if (selectedOption === "delivery") {
         if (outOfRange) throw new Error("Adres jest poza zasięgiem dostawy.");
         if (!deliveryMinOk) throw new Error(`Minimalna wartość zamówienia dla tej strefy to ${deliveryMinRequired.toFixed(2)} zł.`);
-        if (!custCoords) throw new Error("Wybierz adres z listy, aby ustawić lokalizację dostawy.");
+        if (!custCoords || !deliveryPlaceId) throw new Error("Wybierz adres z listy, aby ustawić lokalizację dostawy.");
         if (!deliveryInfo) throw new Error("Poczekaj na przeliczenie kosztu dostawy.");
       }
 
@@ -1305,7 +1295,7 @@ export default function CheckoutModal() {
     !paymentMethod ||
     !legalAccepted ||
     (TURNSTILE_SITE_KEY && !turnstileToken) ||
-    (selectedOption === "delivery" && (!!outOfRange || !deliveryMinOk || !custCoords || !deliveryInfo)) ||
+    (selectedOption === "delivery" && (!!outOfRange || !deliveryMinOk || !custCoords || !deliveryPlaceId || !deliveryInfo)) ||
     submitting;
 
   // === PORTAL ===
@@ -1499,22 +1489,22 @@ export default function CheckoutModal() {
                     <h2 className="text-2xl font-bold text-center text-white">Dane kontaktowe</h2>
                     {selectedOption === "delivery" && (
                       <div className="space-y-3">
-                        <AddressAutocomplete onAddressSelect={onAddressSelect} setCity={setCity} setPostalCode={setPostalCode} setFlatNumber={setFlatNumber} />
+                        <AddressAutocomplete onAddressSelect={onAddressSelect} onAddressReset={resetSelectedAddress} setCity={setCity} setPostalCode={setPostalCode} setFlatNumber={setFlatNumber} />
 
                         {!custCoords ? <p className="text-xs text-red-400">Najpierw wyszukaj i wybierz adres z listy powyżej.</p> : null}
 
                         <div className={clsx("grid grid-cols-1 gap-2", !custCoords && "opacity-50 pointer-events-none")}>
-                          <input type="text" placeholder="Adres" className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/40 focus:border-yellow-400/50 focus:outline-none" value={street} onChange={(e) => setStreet(e.target.value)} disabled={!custCoords || submitting} />
+                          <input type="text" placeholder="Adres" className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white/80 placeholder-white/40 focus:outline-none" value={street} readOnly disabled={!custCoords || submitting} />
                           <div className="flex gap-2">
                             <input type="text" placeholder="Nr mieszkania" className="flex-1 px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/40 focus:border-yellow-400/50 focus:outline-none" value={flatNumber} onChange={(e) => setFlatNumber(e.target.value)} disabled={!custCoords || submitting} />
-                            <input type="text" placeholder="Kod pocztowy" className="flex-1 px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/40 focus:border-yellow-400/50 focus:outline-none" value={postalCode} onChange={(e) => setPostalCode(e.target.value)} disabled={!custCoords || submitting} />
+                            <input type="text" placeholder="Kod pocztowy" className="flex-1 px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white/80 placeholder-white/40 focus:outline-none" value={postalCode} readOnly disabled={!custCoords || submitting} />
                           </div>
-                          <input type="text" placeholder="Miasto" className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/40 focus:border-yellow-400/50 focus:outline-none" value={city} onChange={(e) => setCity(e.target.value)} disabled={!custCoords || submitting} />
+                          <input type="text" placeholder="Miasto" className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white/80 placeholder-white/40 focus:outline-none" value={city} readOnly disabled={!custCoords || submitting} />
                         </div>
 
                         {deliveryInfo && (
                           <p className="text-xs text-white/60">
-                            Koszt dostawy: {deliveryInfo.cost.toFixed(2)} zł • ETA {deliveryInfo.eta}
+                            Trasa: {deliveryInfo.billableDistanceKm} km • Koszt dostawy: {deliveryInfo.cost.toFixed(2)} zł • ETA {deliveryInfo.eta}
                           </p>
                         )}
                       </div>
@@ -1582,7 +1572,7 @@ export default function CheckoutModal() {
 
                         <div className="border-t border-white/10 pt-3 space-y-2">
                           <div className="flex justify-between text-sm"><span className="text-white/60">Produkty:</span><span className="text-white font-medium">{baseTotal.toFixed(2)} zł</span></div>
-                          {(selectedOption === "takeaway" || selectedOption === "delivery") && <div className="flex justify-between text-sm"><span className="text-white/60">Opakowanie:</span><span className="text-white font-medium">{packagingCost.toFixed(2)} zł</span></div>}
+                          {(selectedOption === "takeaway" || selectedOption === "delivery") && <div className="flex justify-between text-sm"><span className="text-white/60">Opakowania ({packagingUnits} szt.):</span><span className="text-white font-medium">{packagingCost.toFixed(2)} zł</span></div>}
                           {deliveryInfo && <div className="flex justify-between text-sm"><span className="text-white/60">Dostawa:</span><span className="text-white font-medium">{deliveryInfo.cost.toFixed(2)} zł</span></div>}
                           {discount > 0 && <div className="flex justify-between text-sm"><span className="text-white/60">Rabat:</span><span className="text-white font-medium">-{discount.toFixed(2)} zł</span></div>}
                         </div>
@@ -1663,9 +1653,9 @@ export default function CheckoutModal() {
                               }
                               setShowConfirmation(true);
                             }}
-                            disabled={!name || !phone || !validEmail || (selectedOption === "delivery" && (!custCoords || !deliveryInfo)) || submitting || (!!TURNSTILE_SITE_KEY && !turnstileToken)}
+                            disabled={!name || !phone || !validEmail || (selectedOption === "delivery" && (!custCoords || !deliveryPlaceId || !deliveryInfo)) || submitting || (!!TURNSTILE_SITE_KEY && !turnstileToken)}
                             aria-busy={submitting}
-                            className="flex-1 py-3 bg-white text-black rounded-xl font-bold disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation inline-flex items-center justify-center gap-2 hover:bg-white/90 transition-all text-sm"
+                            className="flex-1 py-3 bg-white text-black rounded-xl font-bold disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation inline-flex items-center justify-center gap-2 hover:bg-white/90 transition-all"
                           >
                             {submitting ? <Spinner /> : null}
                             {submitting ? "Przetwarzanie…" : `Zamawiam • ${totalWithDelivery.toFixed(2)} zł`}
@@ -1673,7 +1663,7 @@ export default function CheckoutModal() {
                         ) : (
                           <button
                             onClick={paymentMethod === "Online" ? handleOnlinePayment : handleSubmitOrder}
-                            disabled={confirmDisabled || !name || !phone || !validEmail || (selectedOption === "delivery" && (!custCoords || !deliveryInfo))}
+                            disabled={confirmDisabled || !name || !phone || !validEmail || (selectedOption === "delivery" && (!custCoords || !deliveryPlaceId || !deliveryInfo))}
                             aria-busy={submitting}
                             className="flex-1 py-3 bg-green-500 text-white rounded-xl font-bold hover:bg-green-400 touch-manipulation inline-flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed transition text-sm"
                           >
@@ -1790,7 +1780,7 @@ export default function CheckoutModal() {
               <div className="sticky top-4 bg-zinc-900 border border-white/10 rounded-2xl shadow-xl p-5 space-y-3">
                 <h2 className="text-lg font-semibold text-white">Podsumowanie</h2>
                 <div className="flex justify-between text-sm text-white/70"><span>Produkty:</span><span className="text-white">{baseTotal.toFixed(2)} zł</span></div>
-                {(selectedOption === "takeaway" || selectedOption === "delivery") && <div className="flex justify-between text-sm text-white/70"><span>Opakowanie:</span><span className="text-white">{packagingCost.toFixed(2)} zł</span></div>}
+                {(selectedOption === "takeaway" || selectedOption === "delivery") && <div className="flex justify-between text-sm text-white/70"><span>Opakowania ({packagingUnits} szt.):</span><span className="text-white">{packagingCost.toFixed(2)} zł</span></div>}
                 {deliveryInfo && <div className="flex justify-between text-sm text-white/70"><span>Dostawa:</span><span className="text-white">{deliveryInfo.cost.toFixed(2)} zł</span></div>}
 
                 {selectedOption === "delivery" && outOfRange && (

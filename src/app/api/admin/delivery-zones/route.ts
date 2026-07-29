@@ -5,6 +5,10 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { getSessionAndRole } from "@/lib/serverAuth";
+import {
+  type DeliveryZonePricing,
+  validateDeliveryZones,
+} from "@/lib/deliveryPricing";
 
 const getSupabaseAdmin = () => {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -16,15 +20,20 @@ const getSupabaseAdmin = () => {
 // Schemat zgodny z formularzem DeliveryZonesForm
 const Zone = z.object({
   id: z.string().uuid().optional(),
-  min_distance_km: z.number(),
-  max_distance_km: z.number(),
-  min_order_value: z.number(),
-  cost: z.number(),
-  free_over: z.number().nullable().optional(),
-  eta_min_minutes: z.number(),
-  eta_max_minutes: z.number(),
-  cost_fixed: z.number(),
-  cost_per_km: z.number(),
+  min_distance_km: z.number().int().nonnegative(),
+  max_distance_km: z.number().int().nonnegative(),
+  min_order_value: z.number().nonnegative(),
+  cost: z.number().nonnegative(),
+  free_over: z.number().nonnegative().nullable().optional(),
+  eta_min_minutes: z.number().int().nonnegative(),
+  eta_max_minutes: z.number().int().nonnegative(),
+  cost_fixed: z.number().nonnegative(),
+  cost_per_km: z.number().nonnegative(),
+  pricing_type: z.enum(["flat", "per_km"]).default("per_km"),
+  active: z.boolean().default(true),
+}).refine((zone) => zone.max_distance_km >= zone.min_distance_km, {
+  message: "Maksymalny kilometr nie może być mniejszy od minimalnego.",
+  path: ["max_distance_km"],
 });
 
 export async function GET() {
@@ -58,11 +67,31 @@ export async function POST(req: Request) {
     eta_max_minutes: Number(json.eta_max_minutes),
     cost_fixed: Number(json.cost_fixed),
     cost_per_km: Number(json.cost_per_km),
+    pricing_type: json.pricing_type ?? "per_km",
+    active: json.active ?? true,
   });
   if (!parsed.success)
     return NextResponse.json({ error: "Validation", details: parsed.error.format() }, { status: 400 });
 
-  const { data, error } = await getSupabaseAdmin()
+  const supabase = getSupabaseAdmin();
+  const { data: existing, error: existingError } = await supabase
+    .from("delivery_zones")
+    .select("*");
+  if (existingError) {
+    return NextResponse.json({ error: existingError.message }, { status: 500 });
+  }
+  const zoneValidationErrors = validateDeliveryZones([
+    ...((existing ?? []) as DeliveryZonePricing[]),
+    parsed.data,
+  ]);
+  if (zoneValidationErrors.length) {
+    return NextResponse.json(
+      { error: zoneValidationErrors.join(" ") },
+      { status: 400 },
+    );
+  }
+
+  const { data, error } = await supabase
     .from("delivery_zones")
     .insert(parsed.data)
     .select()

@@ -9,13 +9,19 @@ declare global {
   }
 }
 
-const libraries = ["places"];
+const libraries: ["places"] = ["places"];
 
 type AddressAutocompleteProps = {
-  onAddressSelect: (address: string, lat: number, lng: number) => void;
+  onAddressSelect: (
+    address: string,
+    lat: number,
+    lng: number,
+    placeId: string,
+  ) => void;
   setCity: (value: string) => void;
   setPostalCode: (value: string) => void;
   setFlatNumber?: (value: string) => void;
+  onAddressReset?: () => void;
 };
 
 export default function AddressAutocomplete({
@@ -23,6 +29,7 @@ export default function AddressAutocomplete({
   setCity,
   setPostalCode,
   setFlatNumber,
+  onAddressReset,
 }: AddressAutocompleteProps) {
   const [address, setAddress] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -77,8 +84,13 @@ export default function AddressAutocomplete({
       // wywołujemy callback z CheckoutModal
       const lat = place.geometry?.location.lat();
       const lng = place.geometry?.location.lng();
-      if (typeof lat === "number" && typeof lng === "number") {
-        onAddressSelect(finalStreet, lat, lng);
+      const placeId = place.place_id;
+      if (
+        typeof lat === "number" &&
+        typeof lng === "number" &&
+        typeof placeId === "string"
+      ) {
+        onAddressSelect(finalStreet, lat, lng, placeId);
       }
 
       // uzupełniamy City / PostalCode / FlatNumber
@@ -97,7 +109,10 @@ export default function AddressAutocomplete({
         ref={inputRef}
         type="text"
         value={address}
-        onChange={(e) => setAddress(e.target.value)}
+        onChange={(e) => {
+          setAddress(e.target.value);
+          onAddressReset?.();
+        }}
         placeholder="Wpisz swój adres"
         className="w-full px-3 py-2 border rounded-md"
       />
