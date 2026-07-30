@@ -7,6 +7,7 @@ import {
   validateDeliveryZones,
 } from "@/lib/deliveryPricing";
 import {
+  getDeliveryPlace,
   getDrivingDistanceKmToPlace,
   isValidGooglePlaceId,
 } from "@/lib/googleDelivery";
@@ -80,11 +81,15 @@ export async function POST(request: Request) {
   }
 
   let distanceKm: number;
+  let deliveryPlace: Awaited<ReturnType<typeof getDeliveryPlace>>;
   try {
-    distanceKm = await getDrivingDistanceKmToPlace(
-      origin,
-      parsed.data.destination_place_id,
-    );
+    [distanceKm, deliveryPlace] = await Promise.all([
+      getDrivingDistanceKmToPlace(
+        origin,
+        parsed.data.destination_place_id,
+      ),
+      getDeliveryPlace(parsed.data.destination_place_id),
+    ]);
   } catch (error) {
     console.error(
       "[delivery.quote] Google route error:",
@@ -100,6 +105,7 @@ export async function POST(request: Request) {
     distanceKm,
     zones as DeliveryZonePricing[],
     parsed.data.products_total,
+    deliveryPlace.city,
   );
   if (!quote) {
     return NextResponse.json(
@@ -124,6 +130,12 @@ export async function POST(request: Request) {
       min_order_ok: quote.minOrderOk,
       eta_min_minutes: quote.etaMinMinutes,
       eta_max_minutes: quote.etaMaxMinutes,
+      pricing_city: quote.zone.destination_city ?? null,
+      pricing_type:
+        String(quote.zone.pricing_type ?? "").toLowerCase() === "flat"
+          ? "flat"
+          : "per_km",
+      cost_per_km: Number(quote.zone.cost_per_km ?? quote.zone.cost ?? 0),
     },
     {
       headers: {

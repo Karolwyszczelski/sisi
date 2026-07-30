@@ -1049,6 +1049,7 @@ if (TURNSTILE_SECRET_KEY) {
         distanceKm,
         zones as DeliveryZonePricing[],
         productsOnlyTotal,
+        deliveryPlace.city,
       );
       if (!deliveryQuote) {
         return NextResponse.json(
