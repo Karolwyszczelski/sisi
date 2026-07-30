@@ -6,6 +6,7 @@ export interface CartItem {
   name: string;
   price: number;
   quantity?: number;
+  category?: string | null;
 
   // Nowe pola
   meatType?: "wołowina" | "kurczak";

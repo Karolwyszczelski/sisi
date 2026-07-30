@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTheme } from "@/components/admin/ThemeContext";
 import { Plus, Save, Loader2, MapPin, AlertCircle } from "lucide-react";
+import { validateDeliveryZones } from "@/lib/deliveryPricing";
 
 type Zone = {
   id: string;
@@ -15,6 +16,9 @@ type Zone = {
   eta_max_minutes: number;
   cost_fixed: number;
   cost_per_km: number;
+  pricing_type: "flat" | "per_km";
+  destination_city: string | null;
+  active: boolean;
 };
 
 const emptyZone: Omit<Zone, "id"> = {
@@ -26,7 +30,10 @@ const emptyZone: Omit<Zone, "id"> = {
   eta_min_minutes: 30,
   eta_max_minutes: 60,
   cost_fixed: 0,
-  cost_per_km: 0,
+  cost_per_km: 2,
+  pricing_type: "per_km",
+  destination_city: null,
+  active: true,
 };
 
 const coerceZones = (j: unknown): Zone[] => {
@@ -45,7 +52,15 @@ export default function DeliveryZonesForm() {
   const [error, setError] = useState<string | null>(null);
 
   const sorted = useMemo(
-    () => [...zones].sort((a, b) => a.min_distance_km - b.min_distance_km || a.max_distance_km - b.max_distance_km),
+    () => [...zones].sort(
+      (a, b) =>
+        String(a.destination_city ?? "").localeCompare(
+          String(b.destination_city ?? ""),
+          "pl",
+        ) ||
+        a.min_distance_km - b.min_distance_km ||
+        a.max_distance_km - b.max_distance_km,
+    ),
     [zones]
   );
 
@@ -82,6 +97,11 @@ export default function DeliveryZonesForm() {
   }, []);
 
   async function create() {
+    const validationErrors = validateDeliveryZones([...zones, draft]);
+    if (validationErrors.length) {
+      setError(validationErrors.join(" "));
+      return;
+    }
     setCreating(true);
     setError(null);
     const r = await fetch("/api/admin/delivery-zones", {
@@ -100,6 +120,14 @@ export default function DeliveryZonesForm() {
   }
 
   async function save(z: Zone) {
+    const candidateZones = zones.map((current) =>
+      current.id === z.id ? z : current,
+    );
+    const validationErrors = validateDeliveryZones(candidateZones);
+    if (validationErrors.length) {
+      setError(validationErrors.join(" "));
+      return;
+    }
     setSavingId(z.id);
     setError(null);
     const { id, ...payload } = z;
@@ -133,7 +161,14 @@ export default function DeliveryZonesForm() {
   }
 
   // Column definitions
-  const columns: { key: keyof Omit<Zone, "id" | "cost">; label: string; w: string; nullable?: boolean }[] = [
+  const columns: {
+    key: keyof Omit<Zone, "id" | "cost" | "pricing_type" | "active">;
+    label: string;
+    w: string;
+    nullable?: boolean;
+    input?: "number" | "text";
+  }[] = [
+    { key: "destination_city", label: "Tylko miasto", w: "w-28", nullable: true, input: "text" },
     { key: "min_distance_km", label: "Min km", w: "w-20" },
     { key: "max_distance_km", label: "Max km", w: "w-20" },
     { key: "min_order_value", label: "Min zam. (zł)", w: "w-24" },
@@ -150,6 +185,12 @@ export default function DeliveryZonesForm() {
       <div className="flex items-center gap-3">
         <h3 className={`text-lg font-bold ${t.text}`}>Strefy dostawy</h3>
       </div>
+      <p className={`text-sm ${t.textMuted}`}>
+        Odległość drogowa Google jest zaokrąglana do pełnych kilometrów. Cena
+        strefy „za km” to: stała + pełne km × zł/km. Strefy nie mogą się
+        nakładać ani mieć luk w tym samym obszarze. Puste „Tylko miasto”
+        oznacza cennik ogólny; wpisane miasto ma przed nim pierwszeństwo.
+      </p>
 
       {/* Error */}
       {error && (
@@ -190,7 +231,18 @@ export default function DeliveryZonesForm() {
               >
                 {columns.map((c) => (
                   <div key={c.key}>
-                    {c.nullable ? (
+                    {c.input === "text" ? (
+                      <input
+                        type="text"
+                        className={t.input}
+                        value={String(z[c.key] ?? "")}
+                        placeholder="— wszystkie"
+                        onChange={(e) => {
+                          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                          editLocal(z.id, c.key, (e.target.value || null) as any);
+                        }}
+                      />
+                    ) : c.nullable ? (
                       <input
                         type="number"
                         className={t.input}
@@ -256,11 +308,24 @@ export default function DeliveryZonesForm() {
           {/* Inputs */}
           {columns.map((c) => (
             <div key={c.key}>
-              {c.nullable ? (
+              {c.input === "text" ? (
+                <input
+                  type="text"
+                  className={t.input}
+                  value={String(draft[c.key] ?? "")}
+                  placeholder="— wszystkie"
+                  onChange={(e) =>
+                    setDraft({
+                      ...draft,
+                      [c.key]: e.target.value || null,
+                    })
+                  }
+                />
+              ) : c.nullable ? (
                 <input
                   type="number"
                   className={t.input}
-                  value={draft[c.key as keyof typeof draft] ?? ""}
+                  value={(draft[c.key] as number | null) ?? ""}
                   placeholder="—"
                   onChange={(e) => {
                     const raw = e.target.value;
