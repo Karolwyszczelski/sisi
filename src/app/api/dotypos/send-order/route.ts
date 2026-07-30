@@ -28,6 +28,10 @@ import { createClient } from "@supabase/supabase-js";
 import dotypos, { DotyposOrderItem } from "@/lib/dotypos";
 import { isOnlinePaymentPending } from "@/lib/orderOperations";
 import { DEFAULT_POS_PRODUCT_OVERRIDES } from "@/lib/posProductMappings";
+import {
+  normalizeProductNameForLookup,
+  requiresPackaging,
+} from "@/lib/packaging";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -85,6 +89,7 @@ interface OrderItem {
   price: number;
   addons?: string[];
   note?: string;
+  category?: string | null;
   product_id?: number | string;
   _src?: {
     product_id?: number | string;
@@ -503,6 +508,26 @@ export async function POST(req: NextRequest) {
         addonCategoryMap.set((a.name as string).toLowerCase(), a.category as string);
       }
     }
+
+    // Categories saved on new orders are server-derived. These maps keep
+    // compatibility with older/admin-edited orders that do not contain one.
+    const { data: productCategoriesData, error: productCategoriesError } = await supabase
+      .from("products")
+      .select("id, name, category");
+    const productCategoryById = new Map<string, string>();
+    const productCategoryByName = new Map<string, string>();
+    if (productCategoriesError) {
+      console.warn("[Dotypos Order] Failed to load product categories:", productCategoriesError.message);
+    } else if (productCategoriesData) {
+      for (const product of productCategoriesData) {
+        if (!product.category) continue;
+        productCategoryById.set(String(product.id), product.category);
+        productCategoryByName.set(
+          normalizeProductNameForLookup(product.name),
+          product.category,
+        );
+      }
+    }
     
     // 3.6. Load manual overrides (internal product_id -> pos_id)
     const { data: overridesData, error: overridesError } = await supabase
@@ -542,6 +567,15 @@ export async function POST(req: NextRequest) {
       return undefined;
     };
     const packagingProduct = findSpecialProduct(["pakowanie na wynos", "pakowanie", "opakowanie", "packaging"]);
+    const { data: packagingSettings, error: packagingSettingsError } = await supabase
+      .from("restaurant_info")
+      .select("packaging_cost")
+      .eq("id", 1)
+      .single();
+    const packagingUnitPrice =
+      !packagingSettingsError && Number.isFinite(Number(packagingSettings?.packaging_cost))
+        ? Number(packagingSettings?.packaging_cost)
+        : undefined;
 
     // Smart delivery product selection:
     // - "Dowóz na terenie Ciechanowa" for Ciechanów addresses
@@ -568,7 +602,10 @@ export async function POST(req: NextRequest) {
     const extraSauceProduct = findSpecialProduct(["dodatkowy sos"]);
     const extraFluidCheeseProduct = findSpecialProduct(["dodatkowy płynny ser", "dodatkowy plynny ser"]);
     console.log(`[Dotypos Order] Addon POS products — mięso: ${extraMeatProduct?.pos_id ?? "brak"}, składnik: ${extraIngredientProduct?.pos_id ?? "brak"}, sos: ${extraSauceProduct?.pos_id ?? "brak"}, płynny ser: ${extraFluidCheeseProduct?.pos_id ?? "brak"}`);
-    
+
+    const selectedOpt = order.selected_option || order.order_type || "local";
+    const needsPackaging = selectedOpt === "delivery" || selectedOpt === "takeaway";
+
     // 4. Map order items to Dotypos items
     // Każda sztuka produktu jest osobną pozycją z własnym blokiem dodatków.
     // Dzięki temu kucharz widzi dokładnie które dodatki należą do którego burgera.
@@ -585,6 +622,14 @@ export async function POST(req: NextRequest) {
       const overriddenPosId = internalProductId != null
         ? overrideMap.get(internalProductId)
         : undefined;
+      const itemCategory =
+        item.category ||
+        (rawInternalProductId != null
+          ? productCategoryById.get(String(rawInternalProductId))
+          : undefined) ||
+        productCategoryByName.get(normalizeProductNameForLookup(item.name)) ||
+        "";
+      const itemRequiresPackaging = requiresPackaging(itemCategory);
 
       if (overriddenPosId !== undefined) {
         posProduct = posProducts.find((p) => Number(p.pos_id) === overriddenPosId);
@@ -664,6 +709,18 @@ export async function POST(req: NextRequest) {
           note: itemNote,
         });
         
+        // Opakowanie dla każdej sztuki produktu
+        if (needsPackaging && itemRequiresPackaging && packagingProduct) {
+          dotyposItems.push({
+            id: packagingProduct.pos_id,
+            qty: 1,
+            ...(packagingUnitPrice !== undefined
+              ? { "manual-price": packagingUnitPrice }
+              : {}),
+            note: `Opakowanie do: ${item.name}`,
+          });
+        }
+
         // Dodatkowe mięso dla tej sztuki
         if (extraMeatCount > 0) {
           if (extraMeatProduct) {
@@ -714,18 +771,7 @@ export async function POST(req: NextRequest) {
     }
     
     // 4.5. Add packaging cost as order item
-    const selectedOpt = order.selected_option || order.order_type || "local";
-    const needsPackaging = selectedOpt === "delivery" || selectedOpt === "takeaway";
-    
-    if (needsPackaging && packagingProduct) {
-      dotyposItems.push({
-        id: packagingProduct.pos_id,
-        qty: 1,
-        note: "Opakowanie",
-        // Use POS price (set in Dotypos for the packaging product)
-      });
-      console.log(`[Dotypos Order] Added packaging: POS product "${packagingProduct.name}" (id: ${packagingProduct.pos_id})`);
-    } else if (needsPackaging && !packagingProduct) {
+    if (needsPackaging && !packagingProduct) {
       console.warn('[Dotypos Order] No "Opakowanie" product found in POS. Create it in Dotypos to include packaging cost.');
     }
     
