@@ -36,6 +36,21 @@ const zones: DeliveryZonePricing[] = [
   },
 ];
 
+const ciechanowZone: DeliveryZonePricing = {
+  destination_city: "Ciechanów",
+  min_distance_km: 0,
+  max_distance_km: 22,
+  min_order_value: 38,
+  cost: 5,
+  cost_fixed: 5,
+  cost_per_km: 0,
+  free_over: 120,
+  eta_min_minutes: 60,
+  eta_max_minutes: 90,
+  pricing_type: "flat",
+  active: true,
+};
+
 test("rounds Google road distance to the nearest whole billable kilometre", () => {
   assert.equal(toBillableDistanceKm(3.01), 3);
   assert.equal(toBillableDistanceKm(5.5), 6);
@@ -84,6 +99,27 @@ test("reads the rate and fixed amount from the selected database zone", () => {
   );
 });
 
+test("uses the fixed database override for addresses inside Ciechanów", () => {
+  const configuredZones = [...zones, ciechanowZone];
+
+  assert.equal(
+    calculateDeliveryQuote(0.23, configuredZones, 50, "Ciechanów")?.cost,
+    5,
+  );
+  assert.equal(
+    calculateDeliveryQuote(6.8, configuredZones, 50, "ciechanow")?.cost,
+    5,
+  );
+  assert.equal(
+    calculateDeliveryQuote(6.8, configuredZones, 50, "Chruszczewo")?.cost,
+    14,
+  );
+  assert.equal(
+    calculateDeliveryQuote(6.8, configuredZones, 120, "Ciechanów")?.cost,
+    0,
+  );
+});
+
 test("rejects an address beyond the configured 22 km range", () => {
   assert.equal(calculateDeliveryQuote(22.5, zones, 100), null);
 });
@@ -94,7 +130,7 @@ test("checks minimum order against products only", () => {
 });
 
 test("detects overlapping zones and gaps", () => {
-  assert.deepEqual(validateDeliveryZones(zones), []);
+  assert.deepEqual(validateDeliveryZones([...zones, ciechanowZone]), []);
   assert.ok(validateDeliveryZones([]).some((message) => message.includes("Brak")));
   assert.ok(
     validateDeliveryZones([{ ...zones[0], min_distance_km: 1 }]).some(
@@ -112,5 +148,12 @@ test("detects overlapping zones and gaps", () => {
       zones[0],
       { ...zones[1], min_distance_km: 9 },
     ]).some((message) => message.includes("luka")),
+  );
+  assert.ok(
+    validateDeliveryZones([
+      ...zones,
+      ciechanowZone,
+      { ...ciechanowZone, min_distance_km: 10 },
+    ]).some((message) => message.includes("nakładają")),
   );
 });

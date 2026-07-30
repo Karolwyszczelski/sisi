@@ -516,6 +516,8 @@ export default function CheckoutModal() {
     eta: string;
     distanceKm: number;
     billableDistanceKm: number;
+    pricingCity: string | null;
+    costPerKm: number;
   } | null>(null);
 
   // Ustawienia zamówień (włącz/wyłącz typy zamówień)
@@ -872,6 +874,9 @@ export default function CheckoutModal() {
         eta,
         distanceKm: Number(quote.distance_km),
         billableDistanceKm: Number(quote.billable_distance_km),
+        pricingCity:
+          typeof quote.pricing_city === "string" ? quote.pricing_city : null,
+        costPerKm: Number(quote.cost_per_km || 0),
       });
       setErrorMessage(null);
     } catch (error) {
@@ -1504,7 +1509,11 @@ export default function CheckoutModal() {
 
                         {deliveryInfo && (
                           <p className="text-xs text-white/60">
-                            Trasa: {deliveryInfo.billableDistanceKm} km • Koszt dostawy: {deliveryInfo.cost.toFixed(2)} zł • ETA {deliveryInfo.eta}
+                            {deliveryInfo.pricingCity
+                              ? `${deliveryInfo.pricingCity}: opłata stała`
+                              : `Trasa: ${deliveryInfo.billableDistanceKm} km × ${deliveryInfo.costPerKm.toFixed(2)} zł/km`}
+                            {" • "}Koszt dostawy: {deliveryInfo.cost.toFixed(2)} zł
+                            {" • "}ETA {deliveryInfo.eta}
                           </p>
                         )}
                       </div>

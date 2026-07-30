@@ -28,6 +28,7 @@ const Patch = z.object({
   cost_fixed: z.number().nonnegative().optional(),
   cost_per_km: z.number().nonnegative().optional(),
   pricing_type: z.enum(["flat", "per_km"]).optional(),
+  destination_city: z.string().trim().min(1).max(100).nullable().optional(),
   active: z.boolean().optional(),
 });
 
@@ -43,6 +44,14 @@ export async function PATCH(req: Request, { params }: RouteContext) {
   const prepared = Object.fromEntries(
     Object.entries(json).map(([key, value]) => {
       if (key === "pricing_type" || key === "active") return [key, value];
+      if (key === "destination_city") {
+        return [
+          key,
+          value == null || String(value).trim() === ""
+            ? null
+            : String(value).trim(),
+        ];
+      }
       return [
         key,
         value === ""

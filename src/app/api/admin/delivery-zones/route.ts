@@ -30,6 +30,7 @@ const Zone = z.object({
   cost_fixed: z.number().nonnegative(),
   cost_per_km: z.number().nonnegative(),
   pricing_type: z.enum(["flat", "per_km"]).default("per_km"),
+  destination_city: z.string().trim().min(1).max(100).nullable().optional(),
   active: z.boolean().default(true),
 }).refine((zone) => zone.max_distance_km >= zone.min_distance_km, {
   message: "Maksymalny kilometr nie może być mniejszy od minimalnego.",
@@ -68,6 +69,11 @@ export async function POST(req: Request) {
     cost_fixed: Number(json.cost_fixed),
     cost_per_km: Number(json.cost_per_km),
     pricing_type: json.pricing_type ?? "per_km",
+    destination_city:
+      json.destination_city == null ||
+      String(json.destination_city).trim() === ""
+        ? null
+        : String(json.destination_city).trim(),
     active: json.active ?? true,
   });
   if (!parsed.success)
