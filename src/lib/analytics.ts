@@ -61,20 +61,6 @@ export function ensureGoogleDataLayer() {
   };
 }
 
-export function loadGoogleTagManager() {
-  if (!isBrowser() || !hasAnalyticsConsent()) return;
-  if (document.querySelector(`script[data-gtm-id="${GTM_CONTAINER_ID}"]`)) return;
-
-  ensureGoogleDataLayer();
-  window.dataLayer?.push({ "gtm.start": Date.now(), event: "gtm.js" });
-
-  const script = document.createElement("script");
-  script.async = true;
-  script.src = `https://www.googletagmanager.com/gtm.js?id=${GTM_CONTAINER_ID}`;
-  script.dataset.gtmId = GTM_CONTAINER_ID;
-  document.head.appendChild(script);
-}
-
 export function applyGoogleConsent(consent: CookieConsent) {
   if (!isBrowser()) return;
   ensureGoogleDataLayer();
@@ -86,14 +72,12 @@ export function applyGoogleConsent(consent: CookieConsent) {
     ad_personalization: consent.marketing ? "granted" : "denied",
   });
 
-  if (consent.analytics) loadGoogleTagManager();
   window.dispatchEvent(new CustomEvent("sisi:consent-updated", { detail: consent }));
 }
 
 export function trackEvent(eventName: string, parameters: Record<string, unknown> = {}) {
   if (!isBrowser() || !hasAnalyticsConsent()) return;
   ensureGoogleDataLayer();
-  loadGoogleTagManager();
   window.gtag?.("event", eventName, parameters);
 }
 

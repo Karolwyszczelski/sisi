@@ -5,7 +5,6 @@ import { usePathname } from "next/navigation";
 import {
   applyGoogleConsent,
   ensureGoogleDataLayer,
-  loadGoogleTagManager,
   readCookieConsent,
   trackEvent,
 } from "@/lib/analytics";
@@ -18,7 +17,6 @@ export default function GoogleTagManager() {
     ensureGoogleDataLayer();
     const consent = readCookieConsent();
     if (consent) applyGoogleConsent(consent);
-    if (consent?.analytics) loadGoogleTagManager();
 
     const trackContactClick = (event: MouseEvent) => {
       const target = event.target as Element | null;
@@ -48,7 +46,7 @@ export default function GoogleTagManager() {
     }
     trackEvent("page_view", {
       page_path: pathname,
-      page_location: window.location.href,
+      page_location: window.location.origin + pathname,
       page_title: document.title,
     });
   }, [pathname]);

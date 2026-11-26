@@ -3,14 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Bell, BellOff, BellRing, Check, X, AlertTriangle, Send, Loader2 } from "lucide-react";
 
-function urlBase64ToUint8Array(base64String: string) {
-  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
-  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
-  const rawData = atob(base64);
-  const outputArray = new Uint8Array(rawData.length);
-  for (let i = 0; i < rawData.length; ++i) outputArray[i] = rawData.charCodeAt(i);
-  return outputArray;
-}
+import { matchesPushKey, urlBase64ToUint8Array } from "@/lib/pushKey";
 
 function isStandaloneMode() {
   return (typeof navigator !== "undefined" && (navigator as { standalone?: boolean }).standalone === true)
@@ -79,11 +72,11 @@ export default function PushNotificationControl({ className, compact = false, sh
         return;
       }
       const sub = await reg.pushManager.getSubscription();
-      setSubscribed(!!sub);
+      setSubscribed(matchesPushKey(sub, vapidPublicKey));
     } catch {
       setSubscribed(false);
     }
-  }, []);
+  }, [vapidPublicKey]);
 
   useEffect(() => {
     void refreshState();
@@ -143,7 +136,13 @@ export default function PushNotificationControl({ className, compact = false, sh
         throw new Error("Nie udzielono zgody na powiadomienia");
       }
 
-      const existingSub = await reg.pushManager.getSubscription();
+      let existingSub = await reg.pushManager.getSubscription();
+      if (existingSub && !matchesPushKey(existingSub, vapidPublicKey)) {
+        if (!(await existingSub.unsubscribe())) {
+          throw new Error("Nie udało się odnowić powiadomień. Spróbuj ponownie.");
+        }
+        existingSub = null;
+      }
       if (existingSub) {
         const res = await fetch("/api/push/subscribe", {
           method: "POST",

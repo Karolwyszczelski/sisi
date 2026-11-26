@@ -1,31 +1,42 @@
-import crypto from "crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
 
-const secret = process.env.ORDER_LINK_SECRET!;
+const secret = process.env.ORDER_LINK_SECRET;
+const TRACKING_TTL = 7 * 24 * 60 * 60;
+const PAYMENT_TTL = 2 * 60 * 60;
 
-export function sign(id: string) {
-  return crypto.createHmac("sha256", secret).update(id).digest("hex").slice(0, 32);
+function digest(scope: string, id: string, expires: number) {
+  if (!secret) throw new Error("ORDER_LINK_SECRET is not configured");
+  return createHmac("sha256", secret).update(JSON.stringify([scope, id, expires])).digest("hex");
+}
+
+function issue(scope: string, id: string, ttl: number) {
+  const expires = Math.floor(Date.now() / 1000) + ttl;
+  return `${expires}.${digest(scope, id, expires)}`;
+}
+
+function matches(scope: string, id: string, token: unknown) {
+  if (!secret || typeof token !== "string") return false;
+  const match = /^(\d{1,12})\.([a-f0-9]{64})$/.exec(token);
+  if (!match) return false;
+  const expires = Number(match[1]);
+  if (expires <= Math.floor(Date.now() / 1000)) return false;
+  return timingSafeEqual(Buffer.from(digest(scope, id, expires), "hex"), Buffer.from(match[2], "hex"));
 }
 
 export function verify(id: string, token?: string | null) {
-  if (!token) return false;
-  const exp = sign(id);
-  try {
-    return crypto.timingSafeEqual(Buffer.from(exp), Buffer.from(token));
-  } catch {
-    return false;
-  }
+  return matches("tracking", id, token);
 }
 
 export function trackingUrl(origin: string, id: string) {
-  const t = sign(String(id));
-  return `${origin.replace(/\/+$/,"")}/order/${id}?t=${t}`;
+  const url = new URL(`/order/${encodeURIComponent(id)}`, origin);
+  url.searchParams.set("t", issue("tracking", id, TRACKING_TTL));
+  return url.href;
 }
 
-
-export function signPayment(orderId: string): string {
-  return sign(`payment:${orderId}`);
+export function signPayment(orderId: string) {
+  return issue("payment", orderId, PAYMENT_TTL);
 }
 
-export function verifyPayment(orderId: string, token: unknown): boolean {
-  return Boolean(secret) && typeof token === "string" && verify(`payment:${orderId}`, token);
+export function verifyPayment(orderId: string, token: unknown) {
+  return matches("payment", orderId, token);
 }
