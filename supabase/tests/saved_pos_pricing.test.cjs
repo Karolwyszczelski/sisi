@@ -85,12 +85,14 @@ const order = (discount = 1234, mode = "delivery") => {
 let current;
 let catalog;
 let claims;
+let allowDispatch;
 let updates;
 let provider;
 function reset(value = order()) {
   current = value;
   catalog = fullCatalog;
   claims = 0;
+  allowDispatch = true;
   updates = [];
   provider = async () => assert.fail("Dotypos must not receive a partial request");
 }
@@ -99,7 +101,7 @@ function mockDatabase() {
     rpc: async (name) => {
       assert.equal(name, "sisi_begin_pos_dispatch");
       claims += 1;
-      return { data: true };
+      return { data: allowDispatch };
     },
     from(table) {
       const data = table === "orders" ? [current] : table === "pos_products" ? catalog : [];
@@ -222,4 +224,13 @@ test("an item rejection from POS cannot confirm even when the reported total mat
   const response = await receivePos(webhook(fromGrosze(gross), "PLN", [{ code: 10, description: "Synthetic item rejection" }]));
   assert.equal(response.status, 200);
   assert.equal(updates[0].dotypos_status, "items_rejected");
+});
+
+test("the POS route makes no provider call when the database pause rejects a complete order", async () => {
+  reset();
+  allowDispatch = false;
+  const response = await sendToPos(request());
+  assert.equal(response.status, 409);
+  assert.equal(claims, 1);
+  assert.equal(updates.length, 0);
 });

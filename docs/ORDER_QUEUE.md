@@ -18,7 +18,14 @@ Cron zwraca liczby `processed` i `needsReview`. Wynik `needsReview > 0` oznacza 
 - Resend dostaje ten sam klucz i treść przy każdym ponowieniu. Automatyczne próby są blokowane po 23 godzinach od pierwszej wysyłki, zanim wygaśnie okno deduplikacji operatora.
 - Uzgadnianie płatności korzysta z sesji P24 i sprawdza kwotę oraz walutę. Po siedmiu dniach bez śladu płatności kończy odpytywanie. Późniejszy zweryfikowany callback pozostaje obsługiwany.
 
-Przy wycofaniu wersji wstrzymaj przyjmowanie zamówień i zatrzymaj worker przed uruchomieniem starej ścieżki wysyłki. Zachowaj wpisy kolejki oraz identyfikatory sesji. Odzyskanie wysyłki wymaga uzgodnienia u operatorów wszystkich niejednoznacznych prób.
+## Blokada POS na czas rollbacku
+
+Migracja tworzy wyłącznik `public.pos_dispatch_control` z wartością `enabled = false`. Jest niezależny od dostępności checkoutu i obowiązuje przed rezerwacją zarówno zwykłej wysyłki, jak i ponownego wydruku. Worker pomija zadania POS podczas pauzy, zachowując ich liczbę prób. Callbacki i uzgadnianie płatności P24 oraz zadania mailowe mogą działać podczas pauzy.
+
+1. Zamknij przyjmowanie nowych zamówień. Jako właściciel bazy ustaw `UPDATE public.pos_dispatch_control SET enabled = false WHERE id = true;` i potwierdź zatwierdzenie zmiany. Aplikacyjna rola `service_role` ma tylko odczyt tego ustawienia.
+2. Uzgodnij z terminalem wysyłki, które uzyskały rezerwację przed zatwierdzeniem blokady. Blokada nie odwołuje zlecenia będącego w toku u dostawcy.
+3. Wycofaj aplikację, zachowując migrację i dane kolejki. PR 3–5 korzystają ze wspólnej funkcji rezerwacji, więc blokada działa też w tych starszych wersjach. Wersje sprzed PR 3 nie korzystają z tej funkcji.
+4. Po powrocie do wersji z poprawną wyceną POS i uzgodnieniu otwartych prób ustaw `enabled = true`. Otwarcie POS i ponowne otwarcie sprzedaży to osobne operacje.
 
 ## Próby lokalne
 

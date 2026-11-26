@@ -51,3 +51,30 @@ test "$(run "SELECT count(*) FROM public.sisi_claim_order_job('p24_register:$ord
 wait "$worker"
 test "$(run "SELECT count(*) FROM public.order_jobs WHERE job_key='p24_register:$order_id';")" = 1
 echo 'Passed atomic job enqueue, retention of payload on retry, fencing, deduplication, and concurrent registration.'
+
+"$psql" -Xq -v ON_ERROR_STOP=1 \
+  -f supabase/migrations/20261126005000_pos_rollback_pause.sql \
+  -f supabase/tests/pos_rollback_pause.sql
+echo 'Passed POS rollback pause, continued P24, and exact resumption.'
+
+# The pause transaction wins even if a stale worker already reached the SQL gate.
+run "INSERT INTO public.orders (id,status,payment_method,total_price)
+ VALUES ('fa000000-0000-4000-8000-000000000010','placed','Gotówka',20);"
+"$psql" -Xq -v ON_ERROR_STOP=1 -c "UPDATE public.pos_dispatch_control SET enabled=true;"
+"$psql" -XAtq -v ON_ERROR_STOP=1 > "$tmp/pause.out" <<SQL &
+BEGIN;
+UPDATE public.pos_dispatch_control SET enabled=false;
+\! touch '$tmp/pause'
+SELECT pg_sleep(1);
+COMMIT;
+SQL
+worker=$!
+i=0
+while [ ! -f "$tmp/pause" ]; do
+  i=$((i+1))
+  if [ "$i" -gt 50 ] || ! kill -0 "$worker" 2>/dev/null; then cat "$tmp/pause.out"; exit 1; fi
+  sleep .05
+done
+test "$(run "SELECT public.sisi_begin_pos_dispatch('fa000000-0000-4000-8000-000000000010');")" = f
+wait "$worker"
+echo 'Passed concurrent pause against a stale POS worker.'
