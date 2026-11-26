@@ -1,37 +1,10 @@
-import { buildOrderContract } from "@/lib/orderContract";
+import { kickOrderJobs } from "@/lib/kickOrderJobs";
 // src/app/api/orders/[orderId]/route.ts
 export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
 import { getSessionAndRole } from "@/lib/serverAuth";
-import { getTransport } from "@/lib/mailer";
-import { trackingUrl } from "@/lib/orderLink";
 import { changeOrder, orderChangeError, orderIdSchema, orderServiceClient, staffOrderStatus } from "@/lib/orderLifecycle";
-
-/* ====== Wersje/Linki regulaminów (dopisek w mailach) ====== */
-const TERMS_VERSION = process.env.TERMS_VERSION || "2025-01";
-const PRIVACY_VERSION = process.env.PRIVACY_VERSION || "2025-01";
-const TERMS_URL = process.env.TERMS_URL || "https://www.sisiciechanow.pl/regulamin";
-const PRIVACY_URL = process.env.PRIVACY_URL || "https://www.sisiciechanow.pl/polityka-prywatnosci";
-
-/** Bezpieczny nadawca dla Resend/SMTP (usuwa przypadkowe cudzysłowy/spacje) */
-const EMAIL_FROM =
-  (process.env.EMAIL_FROM || process.env.RESEND_FROM || "SISI Burger <no-reply@sisiciechanow.pl>")
-    .replace(/^['"\s]+|['"\s]+$/g, "");
-
-/** Wymuszona strefa czasowa – żeby maile miały lokalną godzinę */
-const APP_TZ = process.env.APP_TIMEZONE || "Europe/Warsaw";
-const timeFmt = new Intl.DateTimeFormat("pl-PL", {
-  hour: "2-digit",
-  minute: "2-digit",
-  hour12: false,
-  timeZone: APP_TZ,
-});
-const fmtTime = (iso?: string | null) =>
-  iso && !Number.isNaN(Date.parse(iso)) ? timeFmt.format(new Date(iso)) : null;
-
-const optLabel = (v?: string) =>
-  v === "delivery" ? "DOSTAWA" : v === "takeaway" ? "ODBIÓR OSOBISTY" : "NA MIEJSCU";
 
 export async function PATCH(
   request: Request,
@@ -91,104 +64,6 @@ if (clientTime) updateData.client_delivery_time = clientTime;
   const failure = orderChangeError(error, data?.outcome === "ok");
   if (failure) return failure;
 
-  const updated = data.order;
-  if (!data.stateChanged && !data.timeChanged) return NextResponse.json(updated);
-  const when = updated.delivery_time ?? updated.client_delivery_time ?? null;
-  const onlyTimeUpdate = data.timeChanged && !data.stateChanged && updated.status === "accepted";
-
-  // ===== E-MAIL =====
-  try {
-    // 1) weź e-mail z zamówienia…
-    let toEmail: string | undefined =
-      updated.contact_email || updated.email || undefined;
-
-    // 2) …albo dociągnij z auth (admin) po user_id
-    const userId: string | undefined =
-      updated.user_id || updated.user || updated.userId || undefined;
-
-    if (!toEmail && userId) {
-      try {
-        const { data: userRes } = await admin.auth.admin.getUserById(userId);
-        toEmail = userRes?.user?.email || toEmail;
-      } catch (e) {
-        console.warn("[orders.patch] getUserById failed:", e);
-      }
-    }
-
-    if (toEmail) {
-      const tr = getTransport();
-      const origin =
-        request.headers.get("origin") ||
-        process.env.APP_BASE_URL ||
-        process.env.NEXT_PUBLIC_BASE_URL ||
-        "";
-      const trackUrl = origin ? trackingUrl(origin, String(orderId)) : null;
-
-      const timeStr = fmtTime(when);
-      const optionTxt = optLabel(updated.selected_option);
-
-      let subject = `SISI • Zamówienie #${orderId}`;
-      let headline = "";
-      let extra = "";
-
-      if (onlyTimeUpdate) {
-        subject += " — zaktualizowany czas";
-        headline = "Zaktualizowaliśmy czas realizacji";
-        extra = timeStr ? `Nowy czas: <b>${timeStr}</b>` : "";
-      } else if (["accepted", "completed", "cancelled"].includes(updated.status)) {
-        switch (updated.status) {
-          case "accepted":
-            subject += " przyjęte";
-            headline = "Przyjęliśmy Twoje zamówienie";
-            extra = timeStr ? `Szacowany czas: <b>${timeStr}</b>` : "";
-            break;
-          case "completed":
-            subject += " zrealizowane";
-            headline = "Zamówienie zrealizowane";
-            break;
-          case "cancelled":
-            subject += " anulowane";
-            headline = "Zamówienie zostało anulowane";
-            break;
-        }
-      }
-
-      const la = (updated.legal_accept ?? {}) as any;
-      const termsV = la.terms_version || TERMS_VERSION;
-      const privV = la.privacy_version || PRIVACY_VERSION;
-
-      if (data.stateChanged && updated.status === "accepted") {
-        const contract = buildOrderContract({ ...updated, packaging_total: la.packaging_total }, timeStr);
-        await tr.sendMail({ from: EMAIL_FROM, to: toEmail, ...contract });
-      } else if (headline) {
-        await tr.sendMail({
-          from: EMAIL_FROM,
-          to: toEmail,
-          subject,
-          html: `
-            <div style="font-family:Inter,Arial,sans-serif;line-height:1.6;color:#111">
-              <h2 style="margin:0 0 8px">${headline}</h2>
-              <p style="margin:0 0 6px">Numer: <b>#${orderId}</b></p>
-              <p style="margin:0 0 6px">Opcja: <b>${optionTxt}</b></p>
-              ${extra ? `<p style="margin:0 0 10px">${extra}</p>` : ""}
-              ${trackUrl ? `<p style="margin:14px 0">
-                <a href="${trackUrl}" style="display:inline-block;padding:12px 18px;background:#111;color:#fff;border-radius:8px;text-decoration:none">
-                  Sprawdź status zamówienia
-                </a>
-              </p>` : ""}
-              <hr style="margin:20px 0;border:none;border-top:1px solid #eee" />
-              <p style="font-size:12px;color:#555;margin:0">
-                Akceptacja: Regulamin v${termsV} (<a href="${TERMS_URL}">link</a>),
-                Polityka prywatności v${privV} (<a href="${PRIVACY_URL}">link</a>)
-              </p>
-            </div>
-          `,
-        });
-      }
-    }
-  } catch (e) {
-    console.error("[orders.patch] Customer email failed");
-  }
-
-  return NextResponse.json(updated);
+  if (data.stateChanged) kickOrderJobs(`mail:${orderId}:${data.order.status}`);
+  return NextResponse.json(data.order);
 }

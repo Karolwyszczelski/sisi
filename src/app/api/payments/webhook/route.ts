@@ -7,6 +7,7 @@ import {
   p24SignVerifyMD5,
   parseP24Amount,
 } from "@/lib/p24";
+import { kickOrderJobs } from "@/lib/kickOrderJobs";
 import { confirmVerifiedP24 } from "@/lib/orderLifecycle";
 
 const getSupabaseAdmin = () => {
@@ -105,9 +106,10 @@ export async function POST(req: Request) {
 
     if (!ok) return NextResponse.json({ ok: false }, { status: 400 });
 
-    const outcome = await confirmVerifiedP24(supabaseAdmin, {
+    const { outcome, dispatchOrderId } = await confirmVerifiedP24(supabaseAdmin, {
       sessionId: String(sessionId), gatewayOrderId: String(orderIdFromGateway), amountGrosze: amountGr,
-    }, new URL(req.url).origin);
+    });
+    if (dispatchOrderId) kickOrderJobs(`pos:${dispatchOrderId}`);
     return NextResponse.json({ ok: outcome !== "mismatch" }, { status: outcome === "mismatch" ? 409 : 200 });
   } catch (e: any) {
     console.error("[P24_WEBHOOK_ERROR]", e);

@@ -1297,18 +1297,19 @@ export default function CheckoutModal() {
           ? data.total
           : totalWithDelivery;
 
-      const pay = await safeFetch("/api/payments/create-transaction", {
+      const registration = {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          orderId: newOrderId,
-          paymentToken: data.paymentToken,
-          email: effectiveEmail,
-          customerName: name,
-        }),
-      });
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderId: newOrderId, paymentToken: data.paymentToken }),
+      };
+      let pay = await safeFetch("/api/payments/create-transaction", registration);
+      for (let attempt = 0; pay.state === "pending" && attempt < 4; attempt += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 3000));
+        pay = await safeFetch("/api/payments/create-transaction", registration);
+      }
+      if (pay.state === "pending") {
+        throw new Error("Płatność jest przygotowywana. Za chwilę ponów próbę dla tego samego zamówienia.");
+      }
 
       if (pay.paymentUrl) {
         const purchase = buildAnalyticsPurchase(newOrderId, amountFromServer, itemsPayload);

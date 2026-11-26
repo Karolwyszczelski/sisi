@@ -6,6 +6,7 @@ import { verifyPayment } from "@/lib/orderLink";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { hostFromEnv, p24SignVerifyMD5, amountToGrosze } from "@/lib/p24";
+import { kickOrderJobs } from "@/lib/kickOrderJobs";
 import { confirmVerifiedP24 } from "@/lib/orderLifecycle";
 
 const { P24_MERCHANT_ID, P24_POS_ID } = process.env;
@@ -88,9 +89,10 @@ export async function POST(req: NextRequest) {
     const ok = (r.ok && new URLSearchParams(t).get("error") === "0") || (r.ok && (() => { try { return JSON.parse(t)?.data?.status === "success"; } catch { return false; } })());
 
     if (ok) {
-      const outcome = await confirmVerifiedP24(supabase, {
+      const { outcome, dispatchOrderId } = await confirmVerifiedP24(supabase, {
         sessionId: String(ord.p24_session_id), gatewayOrderId: String(ord.p24_order_id), amountGrosze: amountGr,
-      }, url.origin);
+      });
+      if (dispatchOrderId) kickOrderJobs(`pos:${dispatchOrderId}`);
       if (outcome !== "mismatch") {
         const { data: latest, error } = await supabase.from("orders").select("status").eq("id", id).single();
         if (error) return NextResponse.json({ error: "Nie udało się sprawdzić zamówienia." }, { status: 500 });

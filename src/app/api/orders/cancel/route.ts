@@ -1,3 +1,4 @@
+import { kickOrderJobs } from "@/lib/kickOrderJobs";
 import { NextResponse } from "next/server";
 import { getSessionAndRole } from "@/lib/serverAuth";
 import { changeOrder, orderChangeError, orderIdSchema, orderServiceClient } from "@/lib/orderLifecycle";
@@ -13,5 +14,6 @@ export async function POST(request: Request) {
 
   const { data, error } = await changeOrder(orderServiceClient(), id.data, { status: "cancelled" }, session.user.id);
   const failure = orderChangeError(error, data?.outcome === "ok");
+  if (!failure && data.stateChanged) kickOrderJobs(`mail:${id.data}:cancelled`);
   return failure ?? NextResponse.json({ success: true, data: data?.order });
 }

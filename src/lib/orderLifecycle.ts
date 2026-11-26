@@ -1,7 +1,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { dispatchOrderToOperations } from "./orderOperations";
 
 export const orderIdSchema = z.string().uuid();
 export const staffOrderStatus = z.enum(["accepted", "completed", "cancelled"]);
@@ -37,20 +36,11 @@ export function orderChangeError(error: { code?: string } | null, found: boolean
 export async function confirmVerifiedP24(
   db: SupabaseClient,
   payment: { sessionId: string; gatewayOrderId: string; amountGrosze: number },
-  appUrl: string,
 ) {
   const { data, error } = await db.rpc("sisi_confirm_p24_payment", {
     session_id: payment.sessionId, gateway_order_id: payment.gatewayOrderId, amount_grosze: payment.amountGrosze,
   });
   if (error) throw new Error("Could not record verified P24 payment");
-  if (data.dispatch) {
-    await dispatchOrderToOperations({
-      orderId: String(data.orderId),
-      totalPln: Number(data.total),
-      selectedOption: data.selectedOption,
-      appUrl,
-      logPrefix: "[p24]",
-    });
-  }
-  return data.outcome as "paid" | "refund_pending" | "already_paid" | "mismatch";
+  const outcome = data.outcome as "paid" | "refund_pending" | "already_paid" | "mismatch";
+  return { outcome, dispatchOrderId: data.dispatch ? String(data.orderId) : null };
 }

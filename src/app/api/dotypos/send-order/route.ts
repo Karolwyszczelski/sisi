@@ -116,6 +116,7 @@ interface OrderData {
   payment_method?: string;
   payment_status?: string;
   status?: string;
+  dotypos_status?: string;
   total_price?: number;
   base_before_discount?: number;
   discount_amount?: number;
@@ -460,11 +461,12 @@ export async function POST(req: NextRequest) {
     }
     
     // Check if already sent to Dotypos (unless force resend was requested)
-    if (order.dotypos_order_id && !isForceResend) {
+    if (order.dotypos_order_id && ["sent", "confirmed"].includes(order.dotypos_status ?? "") && !isForceResend) {
       console.log(`[Dotypos Order] Order already sent: ${order.dotypos_order_id}`);
       return NextResponse.json({
         success: true,
         already_sent: true,
+        posRecorded: true,
         dotypos_order_id: order.dotypos_order_id,
       });
     }
@@ -893,7 +895,7 @@ export async function POST(req: NextRequest) {
       ? `${orderId}:reprint:${Date.now()}`
       : orderId;
 
-    const { data: mayDispatch, error: dispatchError } = await supabase.rpc("sisi_begin_pos_dispatch", { order_id: orderId });
+    const { data: mayDispatch, error: dispatchError } = await supabase.rpc("sisi_begin_pos_dispatch", { order_id: orderId, reprint: isForceResend });
     if (dispatchError) return NextResponse.json({ error: "Nie udało się rozpocząć wysyłki zamówienia." }, { status: 500 });
     if (!mayDispatch) return NextResponse.json({ error: "Stan zamówienia blokuje wysyłkę do POS." }, { status: 409 });
 
@@ -913,10 +915,11 @@ export async function POST(req: NextRequest) {
     // 9. Update order with Dotypos reference
     const dotyposOrderId = response.order?.id || response.orderId;
     const dotyposReceiptId = response.receiptId;
-    const dotyposStatus = response.code === 0 ? "sent" : (response.status || "unknown");
+    const dotyposStatus = response.code === 0 || response.status === "ok" ? "sent" : (response.status || "unknown");
     
-    if (dotyposOrderId && (!isForceResend || !order.dotypos_order_id)) {
-      await supabase
+    let posRecorded = false;
+    if ((response.code === 0 || response.status === "ok") && dotyposOrderId && (!isForceResend || !order.dotypos_order_id)) {
+      const { data: recorded } = await supabase
         .from("orders")
         .update({
           dotypos_order_id: dotyposOrderId,
@@ -925,7 +928,8 @@ export async function POST(req: NextRequest) {
           dotypos_status: dotyposStatus,
         })
         .eq("id", orderId)
-        .or("dotypos_status.is.null,dotypos_status.neq.confirmed");
+        .or("dotypos_status.is.null,dotypos_status.neq.confirmed").select("id").maybeSingle();
+      posRecorded = Boolean(recorded);
     }
     
     const duration = Date.now() - startTime;
@@ -934,6 +938,7 @@ export async function POST(req: NextRequest) {
       success: response.code === 0 || response.status === "ok",
       orderId,
       forceResend: isForceResend,
+      posRecorded,
       dotypos: {
         orderId: dotyposOrderId,
         receiptId: dotyposReceiptId,

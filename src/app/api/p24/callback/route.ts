@@ -4,6 +4,7 @@ export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { hostFromEnv, p24SignVerifyMD5, parseP24Amount } from "@/lib/p24";
+import { kickOrderJobs } from "@/lib/kickOrderJobs";
 import { confirmVerifiedP24 } from "@/lib/orderLifecycle";
 
 const { P24_MERCHANT_ID, P24_POS_ID, DEBUG_P24 } = process.env;
@@ -111,9 +112,10 @@ async function handle(req: NextRequest) {
   if (!ok) return NextResponse.json({ ok: false }, { status: 400 });
 
   try {
-    const outcome = await confirmVerifiedP24(supabase, {
+    const { outcome, dispatchOrderId } = await confirmVerifiedP24(supabase, {
       sessionId, gatewayOrderId: orderIdFromGateway, amountGrosze: amountGr,
-    }, new URL(req.url).origin);
+    });
+    if (dispatchOrderId) kickOrderJobs(`pos:${dispatchOrderId}`);
     return NextResponse.json({ ok: outcome !== "mismatch" }, { status: outcome === "mismatch" ? 409 : 200 });
   } catch {
     return NextResponse.json({ error: "Update failed" }, { status: 500 });

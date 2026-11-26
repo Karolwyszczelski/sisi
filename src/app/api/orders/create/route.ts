@@ -1,3 +1,4 @@
+import { kickOrderJobs } from "@/lib/kickOrderJobs";
 import { createHash } from "node:crypto";
 import { parseDepositGrosze } from "@/lib/containerDeposit";
 import { EXTRA_MEAT_GROSZE, fromGrosze, productLineGrosze, quoteInPln, toGrosze } from "@/lib/orderPricing";
@@ -12,7 +13,6 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { toZonedTime, fromZonedTime } from "date-fns-tz";
-import { dispatchOrderToOperations, isOnlinePaymentPending } from "@/lib/orderOperations";
 import {
   requiresPackaging,
 } from "@/lib/packaging";
@@ -28,8 +28,7 @@ import {
 } from "@/lib/googleDelivery";
 
 /* === email + link śledzenia === */
-import { signPayment, trackingUrl } from "@/lib/orderLink";
-import { sendEmail } from "@/lib/mailer";
+import { signPayment } from "@/lib/orderLink";
 
 /* ============== Supabase admin ============== */
 const getSupabaseAdmin = () => {
@@ -53,11 +52,6 @@ const TURNSTILE_SECRET_KEY = process.env.TURNSTILE_SECRET_KEY || "";
 
 /* ====== Wersje/Linki regulaminów (do maili) ====== */
 const PRIVACY_VERSION = process.env.PRIVACY_VERSION || "2025-01";
-const TERMS_URL =
-  process.env.TERMS_URL || "https://www.sisiciechanow.pl/regulamin";
-const PRIVACY_URL =
-  process.env.PRIVACY_URL || "https://www.sisiciechanow.pl/polityka-prywatnosci";
-
 /* ============== Typy i utils =============== */
 type Any = Record<string, any>;
 
@@ -90,9 +84,6 @@ const money = (v: any): number => {
   }
   return 0;
 };
-
-const optLabel = (v?: string) =>
-  v === "delivery" ? "DOSTAWA" : v === "takeaway" ? "ODBIÓR OSOBISTY" : "NA MIEJSCU";
 
 /* twarda normalizacja do E.164 (+48500111222) */
 const normalizePhone = (phone?: string | null): string | null => {
@@ -877,94 +868,9 @@ if (TURNSTILE_SECRET_KEY) {
 
     const saved = result as SavedCheckout;
     if (result.replayed) return checkoutResponse(saved, true);
-    const newOrderId = saved.orderId;
-    const quote = quoteInPln(saved.price);
-    const currentTotal = quote.total;
-
-    // 6.9) Dopiero gotowe do realizacji zamowienia ida do obslugi/POS.
-    // Online musi najpierw przejsc przez P24 i dostac payment_status=paid.
-    if (isOnlinePaymentPending(n.payment_method, n.payment_status)) {
-      console.log("[orders.create] Online order saved, waiting for payment before operations dispatch:", newOrderId);
-    } else {
-      await dispatchOrderToOperations({
-        orderId: newOrderId,
-        totalPln: currentTotal,
-        selectedOption: n.selected_option,
-        appUrl: new URL(req.url).origin,
-        logPrefix: "[orders.create]",
-      });
-    }
-
-    // 6.1) e-mail
-    try {
-      if (n.contact_email) {
-        const origin = process.env.APP_BASE_URL || new URL(req.url).origin;
-        const url = trackingUrl(origin, String(newOrderId));
-        const total =
-          typeof currentTotal === "number"
-            ? currentTotal.toFixed(2).replace(".", ",")
-            : String(currentTotal ?? "0");
-
-        // Czytelny czas klienta
-        const clientTimeRaw = n.client_delivery_time;
-        let clientTimeDisplay = "";
-        if (clientTimeRaw && clientTimeRaw.toLowerCase() !== "asap") {
-          clientTimeDisplay = `<p style="margin:8px 0">Wybrany czas: <strong>${clientTimeRaw}</strong></p>`;
-        } else if (clientTimeRaw && clientTimeRaw.toLowerCase() === "asap") {
-          clientTimeDisplay = `<p style="margin:8px 0">Wybrany czas: <strong>Jak najszybciej</strong></p>`;
-        }
-
-        const escape = (value: unknown) => String(value ?? "").replace(/[&<>"']/g, (char) =>
-          ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!
-        );
-        const formatMoney = (value: number) => `${value.toFixed(2).replace(".", ",")} zł`;
-        const lineItems = normalizedItems.map((item) => {
-          const options = [...item.addons];
-          for (const swap of item._src?.options?.swaps ?? []) {
-            options.push(`Zamiana: ${swap.from} → ${swap.to}`);
-          }
-          return `<li>${escape(item.name)} × ${item.quantity} · ${formatMoney(item.price)}/szt.${options.length ? `<br>${options.map(escape).join(", ")}` : ""}</li>`;
-        }).join("");
-        const paymentLabel = n.payment_method === "Online"
-          ? "Przelewy24 — oczekuje na płatność"
-          : n.payment_method === "Terminal" ? "Karta przy realizacji" : "Gotówka przy realizacji";
-        const subject = n.payment_method === "Online"
-          ? `SISI • Zamówienie #${newOrderId} oczekuje na płatność`
-          : `SISI • Otrzymaliśmy zamówienie #${newOrderId}`;
-
-        const html = `
-          <div style="font-family:Inter,Arial,sans-serif;line-height:1.5;color:#111">
-            <h2 style="margin:0 0 8px">${escape(subject)}</h2>
-            <p style="margin:0 0 16px">Otrzymaliśmy zamówienie. Potwierdzenie zawarcia umowy wyślemy po przyjęciu zamówienia przez obsługę.</p>
-            <p style="margin:16px 0">
-              <a href="${url}" style="display:inline-block;padding:12px 18px;background:#111;color:#fff;border-radius:8px;text-decoration:none">
-                Sprawdź status i czas dostawy
-              </a>
-            </p>
-            <ul>${lineItems}</ul>
-            <p>Produkty i dodatki: ${formatMoney(quote.products)}<br>
-            Opakowania: ${formatMoney(quote.packaging)}<br>
-            Dostawa: ${formatMoney(quote.delivery)}<br>
-            Kaucja: ${formatMoney(quote.deposit)}<br>
-            Rabat: ${formatMoney(quote.discount)}</p>
-            <p>Płatność: ${escape(paymentLabel)}</p>
-            <p style="margin:8px 0">Do zapłaty: <strong>${total} zł</strong></p>
-            <p style="margin:8px 0">Opcja: <strong>${optLabel(n.selected_option)}</strong></p>
-            ${clientTimeDisplay}
-            <hr style="margin:20px 0;border:none;border-top:1px solid #eee" />
-            <p style="font-size:12px;color:#555;margin:0">
-              Akceptacja: Regulamin v${escape(n.legal_accept.terms_version)} (<a href="${escape(TERMS_URL)}">link</a>),
-              Polityka prywatności v${PRIVACY_VERSION} (<a href="${PRIVACY_URL}">link</a>)
-            </p>
-          </div>
-        `;
-
-        await sendEmail({ to: n.contact_email, subject, html });
-      }
-    } catch {
-      console.error("[orders.create] Customer email failed");
-    }
-
+    const jobs = [`mail:${saved.orderId}:received`];
+    if (saved.paymentMethod !== "Online") jobs.push(`pos:${saved.orderId}`);
+    kickOrderJobs(...jobs);
     return checkoutResponse(saved, false);
   } catch (e: any) {
     console.error("[orders.create] unexpected error", e?.code ?? "internal");

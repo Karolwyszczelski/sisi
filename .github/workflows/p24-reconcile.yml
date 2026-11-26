@@ -1,18 +1,21 @@
-name: P24 Reconcile
+name: Order integrations queue
 on:
   schedule:
-    - cron: "*/5 * * * *"   # co 5 min
+    - cron: "*/5 * * * *"
   workflow_dispatch:
 jobs:
-  call:
+  process:
     runs-on: ubuntu-latest
     steps:
-      - name: Ping reconcile endpoint
+      - name: Process due order jobs
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
-          curl -fsS \
-            --retry 3 \
-            --retry-delay 5 \
-            --retry-connrefused \
-            --max-time 30 \
-            --connect-timeout 10 \
-            "https://www.sisiciechanow.pl/api/p24/reconcile?token=${{ secrets.CRON_SECRET }}"
+          response=$(curl -fsS --retry 2 --retry-delay 5 --retry-connrefused --max-time 55 --connect-timeout 10 \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "https://www.sisiciechanow.pl/api/p24/reconcile")
+          printf '%s\n' "$response"
+          if ! printf '%s\n' "$response" | jq -e '.needsReview == 0' >/dev/null; then
+            echo "::error::Zadania zamówień wymagają weryfikacji w kolejce order_jobs."
+            exit 1
+          fi
