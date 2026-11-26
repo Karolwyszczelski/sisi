@@ -685,9 +685,10 @@ if (TURNSTILE_SECRET_KEY) {
     const takeout = n.selected_option === "takeaway" || n.selected_option === "delivery";
     const lineDetails = n.itemsArray.map((item) => {
       const unitPrice = toGrosze(item.price);
-      const addons = item.options.addons.map((name: string) => ({
-        name, unitPrice: toGrosze(addonPriceMap.get(name.toLowerCase())!.price),
-      })) as { name: string; unitPrice: number }[];
+      const addons = (item.options.addons as string[]).map((name) => {
+        const addon = addonPriceMap.get(name.toLowerCase())!;
+        return { name, unitPrice: toGrosze(addon.price), category: addon.category };
+      });
       const extraMeatCount = item.options.extraMeatCount;
       const quantity = item.quantity;
       return {

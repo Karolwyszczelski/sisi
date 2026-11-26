@@ -24,3 +24,13 @@ Przy wycofaniu wersji wstrzymaj przyjmowanie zamówień i zatrzymaj worker przed
 
 - `node --test supabase/tests/order_queue_worker.test.cjs`
 - `sh supabase/tests/run_order_queue.sh`
+
+## Zgodność wyceny z POS i mailem
+
+Kwoty produktów, dodatków, mięsa, opakowań, dostawy i kaucji pochodzą z zapisanego rozbicia w groszach. POS dostaje ceny jednostkowe po rozdzieleniu zapisanego rabatu, z zachowaniem pełnej kaucji. Potwierdzenia e-mail pokazują te same pozycje i kwotę końcową oraz rabat osobno.
+
+Brak lub niejednoznaczność mapowania zatrzymuje całe zlecenie przed wywołaniem Dotypos. Produkty mapują się przez `pos_product_overrides` lub jednoznaczną nazwę. Osobne SKU dla opakowania, dostawy, kaucji, mięsa i rodzajów dodatków można wskazać przez `DOTYPOS_PACKAGING_PRODUCT_ID`, `DOTYPOS_DELIVERY_PRODUCT_ID`, `DOTYPOS_DEPOSIT_PRODUCT_ID`, `DOTYPOS_EXTRA_MEAT_PRODUCT_ID`, `DOTYPOS_ADDON_PRODUCT_ID`, `DOTYPOS_SAUCE_PRODUCT_ID` oraz `DOTYPOS_PREMIUM_ADDON_PRODUCT_ID`. Skonfigurowane ID musi istnieć w aktywnym katalogu POS. Zamówienie bez kompletnej wyceny trafia do ręcznej weryfikacji. W przypadku historycznego maila bez wyceny pozostają dotychczasowe zapisane pola.
+
+Kody `pos_mapping_incomplete`, `pos_quote_invalid`, `pos_price_mismatch` i `pos_items_rejected` w `order_jobs` pozwalają rozpoznać przyczynę. Po poprawieniu mapowania worker może ponowić zadanie przed rozpoczęciem wysyłki. Różnica zgłoszona przez terminal wymaga sprawdzenia istniejącego zlecenia przed fiskalizacją. Przed wznowieniem sprzedaży sprawdź na docelowym terminalu ceny ręczne, w tym wartości zerowe, walutę PLN, mapowanie SKU kaucji oraz kwotę w callbacku. Odbiór lokalny korzysta z atrap.
+
+Test zgodności kwot, brakujących mapowań i odpowiedzi Dotypos można uruchomić przez `node --test supabase/tests/saved_pos_pricing.test.cjs`.

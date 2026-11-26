@@ -27,15 +27,11 @@ import { getSessionAndRole } from "@/lib/serverAuth";
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import dotypos, { DotyposOrderItem } from "@/lib/dotypos";
-import { compactPosItems, parsePosItemOptions, type PosItemOptions, type PosLine, type PosVariant } from "@/lib/posOrderItems";
+import dotypos from "@/lib/dotypos";
+import { assessPosTotal, buildSavedPosItems, createPosCatalogMappings, PosMappingError } from "@/lib/savedPosOrder";
+import { formatGrosze, readSavedOrderPricing, SavedPricingError } from "@/lib/savedOrderPricing";
 import { isOnlinePaymentPending } from "@/lib/orderOperations";
 import { DEFAULT_POS_PRODUCT_OVERRIDES } from "@/lib/posProductMappings";
-import {
-  normalizeProductNameForLookup,
-  requiresPackaging,
-} from "@/lib/packaging";
-
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -54,56 +50,20 @@ function getSupabase() {
   return createClient(url, key, { auth: { persistSession: false } });
 }
 
-/**
- * Get webhook URL for POS action responses (ASYNC mode).
- * 
- * IMPORTANT: When webhook URL is provided in POS action request:
- * - The HTTP response from API is minimal (just acknowledgment)
- * - Full response comes later via webhook callback
- * - This means we can't read order data from the direct response
- * 
- * When webhook is NOT provided (SYNC mode / "default webhook"):
- * - API waits up to 21 seconds for POS to respond
- * - Full response is returned in HTTP body
- * - Rate limited to 1 concurrent request per userId/clientId/cloudId/branchId
- * 
- * For a burger restaurant, SYNC mode is preferred — we get immediate
- * feedback and the rate limit is not a problem.
- * The /api/dotypos/webhook endpoint still works for entity change
- * notifications (PRODUCT, ORDERBEAN, etc.) registered via webhooks API.
- */
 function getWebhookUrl(externalId: string): string | undefined {
-  // Return undefined to use SYNC mode (default webhook)
-  // Set DOTYPOS_USE_ASYNC_WEBHOOK=true to use async webhook mode
-  if (process.env.DOTYPOS_USE_ASYNC_WEBHOOK === "true") {
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://sisiciechanow.pl";
-    const token = orderDispatchToken(`pos-callback:${externalId}`);
-    if (!token) return undefined;
-    return `${appUrl.replace(/\/$/, "")}/api/dotypos/webhook?${new URLSearchParams({ t: token })}`;
+  const base = process.env.APP_BASE_URL || process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_BASE_URL;
+  const token = orderDispatchToken(`pos-callback:${externalId}`);
+  if (base && token) {
+    const url = new URL("/api/dotypos/webhook", base);
+    url.searchParams.set("t", token);
+    return url.href;
   }
-  return undefined;
-}
-
-/* ============================================================
-   Types
-   ============================================================ */
-
-interface OrderItem extends PosItemOptions {
-  name: string;
-  quantity: number;
-  price: number;
-  addons?: string[];
-  note?: string;
-  category?: string | null;
-  product_id?: number | string;
-  _src?: NonNullable<PosItemOptions["_src"]> & {
-    product_id?: number | string;
-  };
 }
 
 interface OrderData {
   id: string;
-  items: string | OrderItem[];
+  items: unknown;
+  checkout_price_grosze?: unknown;
   customer_name?: string;
   name?: string;
   phone?: string;
@@ -118,10 +78,6 @@ interface OrderData {
   status?: string;
   dotypos_status?: string;
   total_price?: number;
-  base_before_discount?: number;
-  discount_amount?: number;
-  delivery_cost?: number;
-  promo_code?: string;
   client_delivery_time?: string | null;
   delivery_time?: string | null;
   address?: string;
@@ -130,12 +86,6 @@ interface OrderData {
   flat_number?: string;
   dotypos_order_id?: number;
   dotypos_receipt_id?: number;
-}
-
-interface PosProduct {
-  pos_id: number;
-  name: string;
-  price?: number;
 }
 
 // Verified active Dotypos tables for online orders (branch 175697700).
@@ -148,18 +98,6 @@ const DEFAULT_ORDER_TYPE_TABLE_IDS: Readonly<Record<string, number>> = {
 /* ============================================================
    Helper Functions
    ============================================================ */
-
-/**
- * Normalize product name for matching (basic — used by findSpecialProduct)
- * Removes extra spaces, converts to lowercase, keeps Unicode letters (Polish chars)
- */
-function normalizeProductName(name: string): string {
-  return name
-    .toLowerCase()
-    .trim()
-    .replace(/\s+/g, " ")
-    .replace(/[^\p{L}\p{N}\s]/gu, ""); // keep letters (incl. Polish), digits, spaces
-}
 
 const APP_TZ = "Europe/Warsaw";
 
@@ -202,200 +140,6 @@ function parseRequestedClientTime(raw?: string | null): string | null {
   } catch {
     return null;
   }
-}
-
-/** Strip Polish diacritics → ASCII equivalents for fuzzy comparison */
-function stripDiacritics(s: string): string {
-  return s
-    .replace(/[ąĄ]/g, (c) => (c === "ą" ? "a" : "A"))
-    .replace(/[ćĆ]/g, (c) => (c === "ć" ? "c" : "C"))
-    .replace(/[ęĘ]/g, (c) => (c === "ę" ? "e" : "E"))
-    .replace(/[łŁ]/g, (c) => (c === "ł" ? "l" : "L"))
-    .replace(/[ńŃ]/g, (c) => (c === "ń" ? "n" : "N"))
-    .replace(/[óÓ]/g, (c) => (c === "ó" ? "o" : "O"))
-    .replace(/[śŚ]/g, (c) => (c === "ś" ? "s" : "S"))
-    .replace(/[źŹ]/g, (c) => (c === "ź" ? "z" : "Z"))
-    .replace(/[żŻ]/g, (c) => (c === "ż" ? "z" : "Z"));
-}
-
-/** Strip leading number prefix like "1. ", "11. " from POS product names */
-function stripNumberPrefix(name: string): string {
-  return name.replace(/^\d+\.\s*/, "");
-}
-
-/** Full normalization for matching: strip prefix → lowercase → remove punctuation → strip diacritics */
-function normalizeForMatching(name: string): string {
-  return stripDiacritics(normalizeProductName(stripNumberPrefix(name)));
-}
-
-/** Levenshtein distance between two strings */
-function levenshtein(a: string, b: string): number {
-  const m = a.length, n = b.length;
-  if (m === 0) return n;
-  if (n === 0) return m;
-  const dp: number[][] = Array.from({ length: m + 1 }, (_, i) => {
-    const row = new Array(n + 1).fill(0);
-    row[0] = i;
-    return row;
-  });
-  for (let j = 1; j <= n; j++) dp[0][j] = j;
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      dp[i][j] =
-        a[i - 1] === b[j - 1]
-          ? dp[i - 1][j - 1]
-          : 1 + Math.min(dp[i - 1][j - 1], dp[i - 1][j], dp[i][j - 1]);
-    }
-  }
-  return dp[m][n];
-}
-
-/**
- * Check if two words are a "fuzzy match".
- *   1. Exact equality
- *   2. Substring — only when shorter word is ≥75 % of longer word length
- *      (avoids "gazowana" ⊂ "niegazowana" false positive)
- *   3. Levenshtein distance ≤ ceil(longerLen × 0.25), max 2
- *      (catches typos like "cheesburger" ≈ "cheeseburger")
- */
-function wordsMatch(a: string, b: string): boolean {
-  if (a === b) return true;
-  const longer = a.length >= b.length ? a : b;
-  const shorter = a.length < b.length ? a : b;
-  // Substring with length ratio guard
-  if (shorter.length >= 3 && longer.includes(shorter) && shorter.length / longer.length >= 0.75) {
-    return true;
-  }
-  // Levenshtein for words ≥ 4 chars
-  if (a.length >= 4 && b.length >= 4) {
-    const maxDist = Math.min(2, Math.ceil(Math.max(a.length, b.length) * 0.25));
-    if (levenshtein(a, b) <= maxDist) return true;
-  }
-  return false;
-}
-
-/**
- * Find best matching POS product for an order item.
- *
- * Strategy (ordered by precision):
- * 1. Exact match after full normalization (strip prefix + diacritics).
- * 2. Exact match with all spaces removed (catches "Red Bull" → "RedBull").
- * 3. Bidirectional word-overlap scoring with fuzzy word matching:
- *    - itemCoverage = matched item words / total item words
- *    - posCoverage  = matched POS words / total POS words
- *    - score = itemCoverage + posCoverage  (max 2.0)
- *    - +0.5 bonus when prices match (strong disambiguation signal)
- *    - Tie-break: prefer shorter POS name (= more specific / less extra words)
- *    - Minimum score: 1.0
- */
-function findPosProduct(
-  itemName: string,
-  posProducts: PosProduct[],
-  itemPrice?: number
-): PosProduct | undefined {
-  const normItem = normalizeForMatching(itemName);
-
-  // Pre-compute stripped POS names
-  const candidates = posProducts.map((p) => ({
-    product: p,
-    stripped: normalizeForMatching(p.name),
-  }));
-
-  // Burger Miesiąca ma dynamiczną nazwę na stronie, ale w POS zawsze jest
-  // jednym ogólnym produktem. Ten fallback obsługuje również starsze
-  // zamówienia i klientów ze zcache'owanym frontendem bez product_id=12.
-  const burgerOfMonthName = normalizeForMatching("Burger Miesiąca");
-  if (
-    normItem === burgerOfMonthName ||
-    normItem.startsWith(`${burgerOfMonthName} `)
-  ) {
-    const burgerOfMonthPosId = DEFAULT_POS_PRODUCT_OVERRIDES[12];
-    const burgerOfMonthProduct = posProducts.find(
-      (product) => Number(product.pos_id) === burgerOfMonthPosId
-    );
-    if (burgerOfMonthProduct) {
-      console.log(
-        `[POS Alias] "${itemName}" → "${burgerOfMonthProduct.name}" (pos_id: ${burgerOfMonthProduct.pos_id})`
-      );
-      return burgerOfMonthProduct;
-    }
-  }
-
-  // 1. Exact match
-  const exact = candidates.find((c) => c.stripped === normItem);
-  if (exact) {
-    console.log(`[POS Match] "${itemName}" → exact → "${exact.product.name}" (pos_id: ${exact.product.pos_id})`);
-    return exact.product;
-  }
-
-  // 1.5. Exact match ignoring all spaces (handles compound words like RedBull)
-  const itemNoSpaces = normItem.replace(/ /g, "");
-  if (itemNoSpaces.length >= 4) {
-    const exactNS = candidates.find((c) => c.stripped.replace(/ /g, "") === itemNoSpaces);
-    if (exactNS) {
-      console.log(`[POS Match] "${itemName}" → exact-no-spaces → "${exactNS.product.name}" (pos_id: ${exactNS.product.pos_id})`);
-      return exactNS.product;
-    }
-  }
-
-  // 2. Bidirectional word-overlap scoring with fuzzy matching
-  const itemWords = normItem.split(" ").filter((w) => w.length >= 3);
-  if (itemWords.length === 0) return undefined;
-
-  let bestProduct: PosProduct | undefined;
-  let bestScore = 0;
-  let bestStrippedLen = Infinity;
-
-  for (const c of candidates) {
-    const posWords = c.stripped.split(" ").filter((w) => w.length >= 3);
-    if (posWords.length === 0) continue;
-
-    // How many item words fuzzy-match some POS word
-    const matchedItemWords = itemWords.filter((iw) =>
-      posWords.some((pw) => wordsMatch(iw, pw))
-    ).length;
-    if (matchedItemWords === 0) continue;
-
-    // How many POS words fuzzy-match some item word (bidirectional!)
-    const matchedPosWords = posWords.filter((pw) =>
-      itemWords.some((iw) => wordsMatch(iw, pw))
-    ).length;
-
-    const itemCoverage = matchedItemWords / itemWords.length;
-    const posCoverage = matchedPosWords / posWords.length;
-    let score = itemCoverage + posCoverage;
-
-    // Price match bonus — strong disambiguation signal
-    if (
-      itemPrice != null &&
-      c.product.price != null &&
-      Math.abs(Number(c.product.price) - itemPrice) < 0.01
-    ) {
-      score += 0.5;
-    }
-
-    const isBetter =
-      score > bestScore ||
-      (score === bestScore && c.stripped.length < bestStrippedLen);
-
-    if (isBetter) {
-      bestScore = score;
-      bestProduct = c.product;
-      bestStrippedLen = c.stripped.length;
-    }
-  }
-
-  if (bestProduct && bestScore >= 1.8) {
-    console.log(
-      `[POS Match] "${itemName}" → fuzzy (score ${bestScore.toFixed(2)}) → "${bestProduct.name}" (pos_id: ${bestProduct.pos_id})`
-    );
-    return bestProduct;
-  }
-
-  console.warn(
-    `[POS Match] "${itemName}" → NO MATCH (best score: ${bestScore.toFixed(2)}, candidate: "${bestProduct?.name ?? "none"}")`
-  );
-  return undefined;
 }
 
 /* ============================================================
@@ -475,287 +219,39 @@ export async function POST(req: NextRequest) {
       console.log(`[Dotypos Order] Force resend requested for order ${orderId} (existing Dotypos ID: ${order.dotypos_order_id})`);
     }
     
-    // 2. Parse items
-    let items: OrderItem[];
-    if (typeof order.items === "string") {
-      try {
-        items = JSON.parse(order.items);
-      } catch {
-        console.error("[Dotypos Order] Failed to parse items JSON");
-        return NextResponse.json(
-          { error: "Invalid items format" },
-          { status: 400 }
-        );
-      }
-    } else {
-      items = order.items;
-    }
-    
-    if (!Array.isArray(items) || items.length === 0) {
-      return NextResponse.json(
-        { error: "No items in order" },
-        { status: 400 }
-      );
-    }
-    
-    // 3. Fetch POS product mappings
-    const { data: posProducts } = await supabase
-      .from("pos_products")
-      .select("pos_id, name, price")
-      .eq("deleted", false);
-    
-    if (!posProducts || posProducts.length === 0) {
-      console.error("[Dotypos Order] No POS products found. Run sync first.");
-      return NextResponse.json(
-        { 
-          error: "No POS products available",
-          message: "Please run product sync first: POST /api/dotypos/sync-products",
-        },
-        { status: 503 }
-      );
-    }
-    
-    // 3.4. Fetch addon categories from database for proper POS product mapping
-    const { data: addonCategoriesData } = await supabase
-      .from("addons")
-      .select("name, category")
-      .eq("available", true);
-    const addonCategoryMap = new Map<string, string>();
-    if (addonCategoriesData) {
-      for (const a of addonCategoriesData) {
-        addonCategoryMap.set((a.name as string).toLowerCase(), a.category as string);
-      }
+    if (["price_mismatch", "items_rejected"].includes(order.dotypos_status ?? "")) {
+      return NextResponse.json({ code: "POS_PRICE_MISMATCH", error: "Kwota zgłoszona przez POS różni się od wyceny." }, { status: 409 });
     }
 
-    // Categories saved on new orders are server-derived. These maps keep
-    // compatibility with older/admin-edited orders that do not contain one.
-    const { data: productCategoriesData, error: productCategoriesError } = await supabase
-      .from("products")
-      .select("id, name, category");
-    const productCategoryById = new Map<string, string>();
-    const productCategoryByName = new Map<string, string>();
-    if (productCategoriesError) {
-      console.warn("[Dotypos Order] Failed to load product categories:", productCategoriesError.message);
-    } else if (productCategoriesData) {
-      for (const product of productCategoriesData) {
-        if (!product.category) continue;
-        productCategoryById.set(String(product.id), product.category);
-        productCategoryByName.set(
-          normalizeProductNameForLookup(product.name),
-          product.category,
-        );
-      }
-    }
-    
-    // 3.6. Load manual overrides (internal product_id -> pos_id)
-    const { data: overridesData, error: overridesError } = await supabase
-      .from("pos_product_overrides")
-      .select("internal_product_id, pos_id");
-
-    const overrideMap = new Map<number, number>(
-      Object.entries(DEFAULT_POS_PRODUCT_OVERRIDES).map(([productId, posId]) => [
-        Number(productId),
-        posId,
-      ])
-    );
-
-    if (overridesError && overridesError.code !== "42P01") {
-      console.warn("[Dotypos Order] Failed to load POS overrides:", overridesError.message);
+    const pricing = readSavedOrderPricing(order);
+    const { quote } = pricing;
+    const needLegacyCategories = pricing.pricedItems.some(({ price }) => price.addons.some((addon) => addon.category == null));
+    const [catalog, overrides, legacyAddons] = await Promise.all([
+      supabase.from("pos_products").select("pos_id,name").eq("deleted", false),
+      supabase.from("pos_product_overrides").select("internal_product_id,pos_id"),
+      needLegacyCategories ? supabase.from("addons").select("name,category") : Promise.resolve({ data: [], error: null }),
+    ]);
+    if (catalog.error || !catalog.data?.length || overrides.error || legacyAddons.error) {
+      return NextResponse.json({ error: "Katalog mapowań POS jest niedostępny." }, { status: 503 });
     }
 
-    if (overridesData) {
-      for (const o of overridesData) {
-        const internalProductId = Number(o.internal_product_id);
-        const posId = Number(o.pos_id);
-        if (Number.isSafeInteger(internalProductId) && Number.isSafeInteger(posId)) {
-          overrideMap.set(internalProductId, posId);
-        }
-      }
+    const overrideMap = new Map(Object.entries(DEFAULT_POS_PRODUCT_OVERRIDES));
+    for (const row of overrides.data ?? []) {
+      overrideMap.set(String(row.internal_product_id), Number(row.pos_id));
     }
-    console.log(`[Dotypos Order] Loaded ${overrideMap.size} manual pos overrides`);
-
-    // 3.5. Find special POS products for packaging and delivery
-    const findSpecialProduct = (keywords: string[]): PosProduct | undefined => {
-      for (const kw of keywords) {
-        const found = posProducts.find(p => 
-          normalizeProductName(p.name).includes(kw)
-        );
-        if (found) return found;
-      }
-      return undefined;
-    };
-    const packagingProduct = findSpecialProduct(["pakowanie na wynos", "pakowanie", "opakowanie", "packaging"]);
-    const { data: packagingSettings, error: packagingSettingsError } = await supabase
-      .from("restaurant_info")
-      .select("packaging_cost")
-      .eq("id", 1)
-      .single();
-    const packagingUnitPrice =
-      !packagingSettingsError && Number.isFinite(Number(packagingSettings?.packaging_cost))
-        ? Number(packagingSettings?.packaging_cost)
-        : undefined;
-
-    // Smart delivery product selection:
-    // - "Dowóz na terenie Ciechanowa" for Ciechanów addresses
-    // - "Dowóz poza Ciechanów" for out-of-city addresses
-    const orderCity = (order.city || "").toLowerCase().trim();
-    const isCiechanow = orderCity.includes("ciechan");
-    let deliveryProduct: PosProduct | undefined;
-    if (isCiechanow) {
-      deliveryProduct = findSpecialProduct(["dowóz na terenie", "dowoz na terenie", "na terenie ciechan"]);
-    } else {
-      deliveryProduct = findSpecialProduct(["poza ciechan", "dowóz poza", "dowoz poza"]);
-    }
-    // Fallback: any delivery product if specific one not found
-    if (!deliveryProduct) {
-      deliveryProduct = findSpecialProduct(["dowóz", "dowoz", "dostawa", "transport", "delivery"]);
-    }
-    if (deliveryProduct) {
-      console.log(`[Dotypos Order] Delivery product: "${deliveryProduct.name}" (city: ${order.city || "?"}, isCiechanow: ${isCiechanow})`);
-    }
-    
-    // Find special POS products for addon mapping
-    const extraMeatProduct = findSpecialProduct(["dodatkowe mięso", "dodatkowe mieso"]);
-    const extraIngredientProduct = findSpecialProduct(["dodatkowy składnik", "dodatkowy skladnik"]);
-    const extraSauceProduct = findSpecialProduct(["dodatkowy sos"]);
-    const extraFluidCheeseProduct = findSpecialProduct(["dodatkowy płynny ser", "dodatkowy plynny ser"]);
-    console.log(`[Dotypos Order] Addon POS products — mięso: ${extraMeatProduct?.pos_id ?? "brak"}, składnik: ${extraIngredientProduct?.pos_id ?? "brak"}, sos: ${extraSauceProduct?.pos_id ?? "brak"}, płynny ser: ${extraFluidCheeseProduct?.pos_id ?? "brak"}`);
-
+    const addonCategories = new Map((legacyAddons.data ?? []).map(({ name, category }) => [name.trim().toLowerCase(), category]));
+    const mappings = createPosCatalogMappings(catalog.data, overrideMap, addonCategories, {
+      packaging: process.env.DOTYPOS_PACKAGING_PRODUCT_ID,
+      delivery: process.env.DOTYPOS_DELIVERY_PRODUCT_ID,
+      deposit: process.env.DOTYPOS_DEPOSIT_PRODUCT_ID,
+      extraMeat: process.env.DOTYPOS_EXTRA_MEAT_PRODUCT_ID,
+      ingredient: process.env.DOTYPOS_ADDON_PRODUCT_ID,
+      sauce: process.env.DOTYPOS_SAUCE_PRODUCT_ID,
+      premium: process.env.DOTYPOS_PREMIUM_ADDON_PRODUCT_ID,
+    }, order.city);
+    const dotyposItems = buildSavedPosItems(pricing, mappings);
     const selectedOpt = order.selected_option || order.order_type || "local";
-    const needsPackaging = selectedOpt === "delivery" || selectedOpt === "takeaway";
 
-    // 4. Map order items to Dotypos items
-    // Build per-unit preparations first, then merge identical variants.
-    const variants: PosVariant[] = [];
-    const unmappedItems: string[] = [];
-    
-    for (const item of items) {
-      // Prefer manual override by internal product id (if available in order payload)
-      let posProduct: PosProduct | undefined;
-      const rawInternalProductId = item._src?.product_id ?? item.product_id;
-      const internalProductId = rawInternalProductId == null
-        ? null
-        : Number(rawInternalProductId);
-      const overriddenPosId = internalProductId != null
-        ? overrideMap.get(internalProductId)
-        : undefined;
-      const itemCategory =
-        item.category ||
-        (rawInternalProductId != null
-          ? productCategoryById.get(String(rawInternalProductId))
-          : undefined) ||
-        productCategoryByName.get(normalizeProductNameForLookup(item.name)) ||
-        "";
-      const itemRequiresPackaging = requiresPackaging(itemCategory);
-
-      if (overriddenPosId !== undefined) {
-        posProduct = posProducts.find((p) => Number(p.pos_id) === overriddenPosId);
-        if (posProduct) {
-          console.log(`[POS Override] Item "${item.name}" internal_id=${internalProductId} -> forced pos_id=${overriddenPosId} (${posProduct.name})`);
-        } else {
-          console.error(`[POS Override] Override pos_id=${overriddenPosId} for internal_id=${internalProductId} not found in active pos_products`);
-          unmappedItems.push(`${item.name} (brak produktu z jawnego mapowania POS)`);
-          continue;
-        }
-      }
-
-      // Fallback to fuzzy matching
-      if (!posProduct) {
-        posProduct = findPosProduct(item.name, posProducts, item.price);
-      }
-
-      if (!posProduct) {
-        unmappedItems.push(item.name);
-        console.warn(`[Dotypos Order] Unmapped product: ${item.name}`);
-        continue;
-      }
-      
-      const { regularAddons, extraMeatCount, note: itemNote } = parsePosItemOptions(item);
-      const qty = item.quantity ?? 1;
-
-      const itemUnitPrice = typeof item.price === "number"
-        ? item.price
-        : Number(String(item.price ?? "").replace(",", "."));
-      const posUnitPrice = posProduct.price == null
-        ? null
-        : Number(String(posProduct.price).replace(",", "."));
-      const manualPrice = Number.isFinite(itemUnitPrice) &&
-        (posUnitPrice == null || !Number.isFinite(posUnitPrice) || Math.abs(posUnitPrice - itemUnitPrice) > 0.01)
-        ? itemUnitPrice
-        : undefined;
-      
-      const addons: PosLine[] = [];
-      if (extraMeatCount > 0) {
-        if (extraMeatProduct) {
-          addons.push({ id: extraMeatProduct.pos_id, qty: extraMeatCount });
-        } else {
-          unmappedItems.push(`Dodatkowe mięso: ${item.name}`);
-          console.warn('[Dotypos Order] Brak produktu "Dodatkowe mięso" w POS');
-        }
-      }
-      for (const addonName of regularAddons) {
-        const category = addonCategoryMap.get(addonName.toLowerCase()) || "dodatek";
-        const addonPosProduct = category === "sos" ? extraSauceProduct
-          : category === "premium" ? extraFluidCheeseProduct : extraIngredientProduct;
-        if (addonPosProduct) {
-          addons.push({ id: addonPosProduct.pos_id, qty: 1, note: addonName });
-        } else {
-          console.warn(`[Dotypos Order] Brak produktu POS dla dodatku "${addonName}" (kategoria: ${category})`);
-          unmappedItems.push(`Dodatek: ${addonName}`);
-        }
-      }
-      variants.push({
-        product: {
-          id: posProduct.pos_id,
-          qty,
-          ...(manualPrice !== undefined ? { "manual-price": manualPrice } : {}),
-          note: itemNote,
-        },
-        addons,
-        requiresPackaging: needsPackaging && itemRequiresPackaging,
-      });
-    }
-
-    const dotyposItems: DotyposOrderItem[] = compactPosItems(
-      variants,
-      needsPackaging && packagingProduct ? {
-        id: packagingProduct.pos_id,
-        ...(packagingUnitPrice !== undefined ? { "manual-price": packagingUnitPrice } : {}),
-      } : undefined,
-    );
-
-    // If all items are unmapped, fail
-    if (dotyposItems.length === 0) {
-      return NextResponse.json(
-        {
-          error: "No products could be mapped to POS",
-          unmapped: unmappedItems,
-          message: "Please sync products or add manual mappings",
-        },
-        { status: 400 }
-      );
-    }
-    
-    // 4.5. Add packaging cost as order item
-    if (needsPackaging && !packagingProduct) {
-      console.warn('[Dotypos Order] No "Opakowanie" product found in POS. Create it in Dotypos to include packaging cost.');
-    }
-    
-    // 4.6. Add delivery cost as order item
-    if (selectedOpt === "delivery" && order.delivery_cost && order.delivery_cost > 0) {
-      if (deliveryProduct) {
-        dotyposItems.push({
-          id: deliveryProduct.pos_id,
-          qty: 1,
-          "manual-price": order.delivery_cost, // Override with actual calculated delivery cost
-          note: "Dostawa",
-        });
-        console.log(`[Dotypos Order] Added delivery: ${order.delivery_cost} zł (POS product "${deliveryProduct.name}", id: ${deliveryProduct.pos_id})`);
-      } else {
-        console.warn(`[Dotypos Order] No "Dostawa" product found in POS. Create it in Dotypos to include delivery cost. Delivery: ${order.delivery_cost} zł`);
-      }
-    }
-    
     // 5. Build customer info
     const customerName = order.customer_name || order.name || undefined;
     const customerEmail = order.email || order.contact_email || undefined;
@@ -799,55 +295,14 @@ export async function POST(req: NextRequest) {
       if (addrParts.length) {
         orderNoteParts.push(`Adres: ${addrParts.join(", ")}`);
       }
-      if (order.delivery_cost) {
-        orderNoteParts.push(`Dostawa: ${order.delivery_cost.toFixed(2)} zł`);
-      }
+      if (quote.delivery) orderNoteParts.push(`Dostawa: ${formatGrosze(quote.delivery)}`);
     }
     if (order.order_note) {
       orderNoteParts.push(`Uwagi: ${order.order_note}`);
     }
-    if (unmappedItems.length > 0) {
-      orderNoteParts.push(`Niezmapowane: ${unmappedItems.join(", ")}`);
-    }
-    
-    // 7. Determine if order is paid online
-    const isPaid = order.payment_status === "paid" || 
-                   order.payment_status === "completed";
-    
-    // 7.5. Calculate discount percent for Dotypos
-    // Dotypos supports discount-percent (e.g. 20 = 20%) on the whole order.
-    // Look up the ACTUAL percentage from discount_codes table for accuracy.
-    let discountPercent = 0;
-    if (order.discount_amount && order.discount_amount > 0) {
-      // Try to get the exact discount percentage from the promo code definition
-      if (order.promo_code) {
-        try {
-          const { data: dc } = await supabase
-            .from("discount_codes")
-            .select("type, value")
-            .ilike("code", order.promo_code)
-            .maybeSingle();
-          if (dc && dc.type === "percent") {
-            discountPercent = Number(dc.value);
-            console.log(`[Dotypos Order] Discount: ${discountPercent}% from code "${order.promo_code}" (type: percent, saved: ${order.discount_amount} zł)`);
-          } else if (dc && dc.type === "amount") {
-            // Fixed amount discount — calculate % from total POS items value
-            // Don't send discount-percent, the amounts already reflect the discount
-            console.log(`[Dotypos Order] Discount: fixed ${dc.value} zł from code "${order.promo_code}" — not sent as % to POS`);
-            discountPercent = 0; // Don't apply % discount for fixed-amount codes
-          }
-        } catch (e) {
-          console.warn("[Dotypos Order] Could not look up discount code:", e);
-        }
-      }
-      // Fallback: calculate from amounts if code lookup didn't work
-      if (discountPercent === 0 && order.base_before_discount && order.base_before_discount > 0) {
-        const totalBase = order.base_before_discount + (order.delivery_cost || 0);
-        discountPercent = Math.round((order.discount_amount / totalBase) * 100);
-        console.log(`[Dotypos Order] Discount (calculated): ${order.discount_amount} zł / ${totalBase} zł = ${discountPercent}% (code: ${order.promo_code || "auto"})`);
-      }
-    }
-    
+    if (quote.discount) orderNoteParts.push(`Rabat: ${formatGrosze(quote.discount)}`);
+    const isPaid = order.payment_method === "Online" && order.payment_status === "paid";
+
     // Determine takeaway flag from selected_option (more reliable than order_type)
     const isTakeAway = (order.selected_option || order.order_type) !== "local" &&
                        (order.selected_option || order.order_type) !== "dine-in";
@@ -885,7 +340,7 @@ export async function POST(req: NextRequest) {
       console.warn(`[Dotypos Order] Invalid tableId: ${tableId}, resetting`);
       tableId = undefined;
     }
-    console.log(`[Dotypos Order] Sending ${dotyposItems.length} items, paid=${isPaid}, discount=${discountPercent}%, tableId=${tableId ?? "none"} (type: ${typeof tableId})`);
+    console.log(`[Dotypos Order] Sending ${dotyposItems.length} items, paid=${isPaid}, tableId=${tableId ?? "none"} (type: ${typeof tableId})`);
     
     if (isPaid) {
       orderNoteParts.push("OPLACONE ONLINE");
@@ -894,6 +349,9 @@ export async function POST(req: NextRequest) {
     const externalId = isForceResend
       ? `${orderId}:reprint:${Date.now()}`
       : orderId;
+
+    const webhookUrl = getWebhookUrl(String(externalId));
+    if (!webhookUrl) return NextResponse.json({ error: "Brak konfiguracji potwierdzeń POS." }, { status: 503 });
 
     const { data: mayDispatch, error: dispatchError } = await supabase.rpc("sisi_begin_pos_dispatch", { order_id: orderId, reprint: isForceResend });
     if (dispatchError) return NextResponse.json({ error: "Nie udało się rozpocząć wysyłki zamówienia." }, { status: 500 });
@@ -905,9 +363,8 @@ export async function POST(req: NextRequest) {
       customer,
       note: orderNoteParts.join(" | "),
       takeAway: isTakeAway,
-      discountPercent: discountPercent > 0 ? discountPercent : undefined,
       tableId,
-      webhookUrl: getWebhookUrl(String(externalId)),
+      webhookUrl,
     });
     
     console.log("[Dotypos Order] Response code:", response.code);
@@ -915,10 +372,15 @@ export async function POST(req: NextRequest) {
     // 9. Update order with Dotypos reference
     const dotyposOrderId = response.order?.id || response.orderId;
     const dotyposReceiptId = response.receiptId;
-    const dotyposStatus = response.code === 0 || response.status === "ok" ? "sent" : (response.status || "unknown");
+    const accepted = response.code === 0 || response.status === "ok";
+    const dotyposStatus = accepted
+      ? assessPosTotal(quote.total, response.order?.["price-total"], response.order?.currency, response["pass-through-errors"])
+      : "awaiting_price";
     
+    const rejection = dotyposStatus === "price_mismatch" ? "Kwota POS różni się od zapisanej wyceny."
+      : dotyposStatus === "items_rejected" ? "Dotypos zgłosił błąd przetwarzania pozycji." : null;
     let posRecorded = false;
-    if ((response.code === 0 || response.status === "ok") && dotyposOrderId && (!isForceResend || !order.dotypos_order_id)) {
+    if (accepted && dotyposOrderId && (!isForceResend || !order.dotypos_order_id)) {
       const { data: recorded } = await supabase
         .from("orders")
         .update({
@@ -926,16 +388,19 @@ export async function POST(req: NextRequest) {
           dotypos_receipt_id: dotyposReceiptId,
           dotypos_sent_at: new Date().toISOString(),
           dotypos_status: dotyposStatus,
+          dotypos_error: rejection,
         })
         .eq("id", orderId)
-        .or("dotypos_status.is.null,dotypos_status.neq.confirmed").select("id").maybeSingle();
-      posRecorded = Boolean(recorded);
+        .or("dotypos_status.is.null,dotypos_status.not.in.(confirmed,price_mismatch,items_rejected)").select("id").maybeSingle();
+      posRecorded = Boolean(recorded) && dotyposStatus === "confirmed";
     }
     
     const duration = Date.now() - startTime;
     
     return NextResponse.json({
-      success: response.code === 0 || response.status === "ok",
+      success: accepted || response.code == null,
+      ...(rejection && { success: false, error: rejection,
+        code: dotyposStatus === "price_mismatch" ? "POS_PRICE_MISMATCH" : "POS_ITEMS_REJECTED" }),
       orderId,
       forceResend: isForceResend,
       posRecorded,
@@ -947,11 +412,16 @@ export async function POST(req: NextRequest) {
         passThruErrors: response["pass-through-errors"],
       },
       itemsCount: dotyposItems.length,
-      unmappedItems: unmappedItems.length > 0 ? unmappedItems : undefined,
       duration,
     });
     
   } catch (error) {
+    if (error instanceof PosMappingError) {
+      return NextResponse.json({ code: "POS_MAPPING_INCOMPLETE", error: `Brak mapowania POS: ${error.missing.join(", ")}.`, missing: error.missing }, { status: 409 });
+    }
+    if (error instanceof SavedPricingError) {
+      return NextResponse.json({ code: "POS_QUOTE_INVALID", error: "Brak kompletnej lub spójnej wyceny zamówienia." }, { status: 409 });
+    }
     console.error("[Dotypos Order] POS dispatch failed");
     
     // Handle specific POS errors

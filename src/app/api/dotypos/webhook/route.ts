@@ -1,3 +1,5 @@
+import { assessPosTotal } from "@/lib/savedPosOrder";
+import { readSavedOrderPricing, SavedPricingError } from "@/lib/savedOrderPricing";
 // src/app/api/dotypos/webhook/route.ts
 // =============================================
 // Dotypos Webhook Receiver
@@ -43,7 +45,7 @@ export async function POST(req: NextRequest) {
     const timestamp = new Date().toISOString();
     
     // Determine webhook type based on payload structure
-    if (body.code !== undefined && (body.order || body.items)) {
+    if (body.code !== undefined && (body.order || body.items || body["external-id"])) {
       // POS Action response webhook (from "webhook" param in POS actions)
       const externalId = body["external-id"] || body.order?.["external-id"];
       if (typeof externalId !== "string" || !isOrderDispatchAuthorized(
@@ -79,7 +81,7 @@ export async function POST(req: NextRequest) {
 async function handlePOSActionResponse(
   body: {
     code: number;
-    order?: { id: number; "external-id"?: string; "price-total"?: number; paid?: boolean };
+    order?: { id: number; "external-id"?: string; "price-total"?: number; currency?: string; paid?: boolean };
     items?: unknown[];
     deviceTimestamp?: number;
     "external-id"?: string;
@@ -95,40 +97,44 @@ async function handlePOSActionResponse(
     `[Dotypos Webhook] POS Action response: code=${body.code}, orderId=${orderId}, externalId=${externalId}`
   );
   
-  // If we have an external-id, update the order in our database
-  if (externalId) {
-    try {
-      const supabase = getSupabase();
-      
-      const updateData: Record<string, unknown> = {
-        dotypos_webhook_received_at: timestamp,
-        dotypos_pos_response_code: body.code,
-      };
-      
-      if (orderId) {
-        updateData.dotypos_order_id = orderId;
+  // Explicit reprints have their own external ID. Their callbacks must not
+  // overwrite the reference and verified amount of the original order.
+  if (externalId && !externalId.includes(":reprint:")) {
+    const supabase = getSupabase();
+    const updateData: Record<string, unknown> = {
+      dotypos_webhook_received_at: timestamp,
+      dotypos_pos_response_code: body.code,
+    };
+
+    if (success && orderId) {
+      const { data, error } = await supabase.from("orders")
+        .select("items, total_price, checkout_price_grosze").eq("id", externalId).maybeSingle();
+      if (error) return NextResponse.json({ error: "Nie udało się odczytać wyceny POS." }, { status: 503 });
+      if (!data) return NextResponse.json({ error: "Nie znaleziono zamówienia POS." }, { status: 404 });
+
+      let matching: ReturnType<typeof assessPosTotal>;
+      try {
+        const { quote } = readSavedOrderPricing(data);
+        matching = assessPosTotal(quote.total, body.order?.["price-total"], body.order?.currency, body["pass-through-errors"]);
+      } catch (error) {
+        if (!(error instanceof SavedPricingError)) throw error;
+        matching = "price_mismatch";
       }
-      
-      if (success) {
-        updateData.dotypos_status = "confirmed";
-      } else {
-        updateData.dotypos_status = "pos_error";
-        updateData.dotypos_error = `POS error code: ${body.code}`;
-      }
-      
-      const update = supabase.from("orders").update(updateData).eq("id", externalId);
-      const { error } = await (success ? update : update.or("dotypos_status.is.null,dotypos_status.neq.confirmed"));
-      
-      if (error) {
-        console.error("[Dotypos Webhook] Failed to update order:", error);
-      } else {
-        console.log(`[Dotypos Webhook] Order ${externalId} updated with POS response`);
-      }
-    } catch (err) {
-      console.error("[Dotypos Webhook] DB update error:", err);
+
+      updateData.dotypos_order_id = orderId;
+      updateData.dotypos_status = matching;
+      updateData.dotypos_error = matching === "price_mismatch" ? "Kwota POS różni się od zapisanej wyceny lub brakuje wyceny."
+        : matching === "items_rejected" ? "Dotypos zgłosił błąd przetwarzania pozycji." : null;
+    } else {
+      updateData.dotypos_status = success ? "awaiting_price" : "pos_error";
+      updateData.dotypos_error = success ? null : `POS error code: ${body.code}`;
     }
+
+    const { error } = await supabase.from("orders").update(updateData).eq("id", externalId)
+      .or("dotypos_status.is.null,dotypos_status.not.in.(confirmed,price_mismatch,items_rejected)");
+    if (error) return NextResponse.json({ error: "Nie udało się zapisać wyniku POS." }, { status: 503 });
   }
-  
+
   await logWebhook("pos-action-response", timestamp);
   
   return NextResponse.json({ received: true, code: body.code });

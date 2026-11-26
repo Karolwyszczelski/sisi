@@ -23,7 +23,7 @@ export interface PosItemOptions {
 }
 
 /** Support both normalized checkout orders and orders edited by staff. */
-export function parsePosItemOptions(item: PosItemOptions) {
+export function parsePosItemOptions(item: PosItemOptions, includeAddonSummary = true) {
   const regularAddons: string[] = [];
   let meatType = "";
   let extraMeatCount = 0;
@@ -52,7 +52,7 @@ export function parsePosItemOptions(item: PosItemOptions) {
   if (item.note?.trim()) noteParts.push(item.note.trim());
   const additions = [...regularAddons];
   if (extraMeatCount) additions.push(`dodatkowe mięso x${extraMeatCount}`);
-  if (additions.length) noteParts.push(`Dodatki/szt.: ${additions.join(", ")}`);
+  if (includeAddonSummary && additions.length) noteParts.push(`Dodatki/szt.: ${additions.join(", ")}`);
   return { regularAddons, extraMeatCount, note: noteParts.join(" | ") || undefined };
 }
 

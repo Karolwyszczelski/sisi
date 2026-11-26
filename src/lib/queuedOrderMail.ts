@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { buildOrderContract } from "./orderContract";
+import { buildOrderContract, describeOrderCharges } from "./orderContract";
 import { trackingUrl } from "./orderLink";
 import { p24Site } from "./p24QueueGateway";
 
@@ -11,9 +11,7 @@ type Snapshot = Parameters<typeof buildOrderContract>[0] & {
   user?: string;
   delivery_time?: string;
   client_delivery_time?: string;
-  checkout_price_grosze?: { products: number; packaging: number; delivery: number; discount: number; deposit: number };
 };
-const money = new Intl.NumberFormat("pl-PL", { style: "currency", currency: "PLN" });
 
 export async function prepareOrderMail(db: SupabaseClient, event: string, order: Snapshot): Promise<MailBody | null> {
   let to = order.contact_email || order.email;
@@ -32,9 +30,8 @@ export async function prepareOrderMail(db: SupabaseClient, event: string, order:
     : when === "asap" ? "Jak najszybciej" : null;
 
   if (event === "accepted") {
-    const packaging_total = order.checkout_price_grosze
-      ? order.checkout_price_grosze.packaging / 100 : order.legal_accept && "packaging_total" in order.legal_accept
-        ? Number(order.legal_accept.packaging_total) : undefined;
+    const packaging_total = order.legal_accept && "packaging_total" in order.legal_accept
+      ? Number(order.legal_accept.packaging_total) : undefined;
     return { from, to, ...buildOrderContract({ ...order, packaging_total }, time) };
   }
 
@@ -52,19 +49,7 @@ export async function prepareOrderMail(db: SupabaseClient, event: string, order:
 
   if (event === "received") {
     details.push("Potwierdzenie zawarcia umowy wyślemy po przyjęciu zamówienia przez obsługę.");
-    const items = typeof order.items === "string" ? JSON.parse(order.items) : order.items;
-    if (Array.isArray(items)) for (const item of items) {
-      details.push(`• ${item.name} × ${item.quantity} · ${money.format(Number(item.price))}/szt.${Array.isArray(item.addons) && item.addons.length ? ` (${item.addons.join(", ")})` : ""}`);
-    }
-    const price = order.checkout_price_grosze;
-    if (price) details.push(
-      `Produkty i dodatki: ${money.format(price.products / 100)}`,
-      `Opakowania: ${money.format(price.packaging / 100)}`,
-      `Dostawa: ${money.format(price.delivery / 100)}`,
-      `Kaucja zwrotna: ${money.format(price.deposit / 100)}`,
-      `Rabat: ${money.format(price.discount / 100)}`,
-    );
-    details.push(`Łączna kwota: ${money.format(Number(order.total_price))}`, `Płatność: ${order.payment_method ?? "—"}`);
+    details.push(...describeOrderCharges(order), `Płatność: ${order.payment_method ?? "—"}`);
     if (order.legal_accept?.terms_version) details.push(`Regulamin: ${order.legal_accept.terms_version} (${process.env.TERMS_URL ?? p24Site() + "/regulamin"})`);
   }
   if (time && (event === "received" || event === "time_changed")) details.push(`Czas realizacji: ${time}`);

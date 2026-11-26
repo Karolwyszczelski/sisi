@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { orderDispatchToken } from "./orderDispatchAuth";
 import { signPayment } from "./orderLink";
 import { fromGrosze, toGrosze } from "./orderPricing";
+import { SavedPricingError } from "./savedOrderPricing";
 import { confirmVerifiedP24 } from "./orderLifecycle";
 import { findP24Payment, p24Registration, p24Site } from "./p24QueueGateway";
 import { prepareOrderMail, sendQueuedOrderMail } from "./queuedOrderMail";
@@ -64,6 +65,8 @@ export async function workOrderJob(db: SupabaseClient, job: OrderJob): Promise<O
 
   if (job.kind === "pos") {
     if (order.status === "cancelled") return done("pos_cancelled");
+    if (order.dotypos_status === "price_mismatch") return review("pos_price_mismatch");
+    if (order.dotypos_status === "items_rejected") return review("pos_items_rejected");
     const notify = { total: fromGrosze(amountGrosze), mode: order.selected_option };
     if (order.dotypos_order_id && ["sent", "confirmed"].includes(order.dotypos_status)) return { ...done("pos_confirmed"), notify };
     if (order.pos_dispatch_started_at) {
@@ -81,6 +84,10 @@ export async function workOrderJob(db: SupabaseClient, job: OrderJob): Promise<O
     if (response.ok && result?.success && result?.posRecorded === true) {
       return { ...done("pos_sent"), notify };
     }
+    if (result?.code === "POS_PRICE_MISMATCH") return review("pos_price_mismatch");
+    if (result?.code === "POS_ITEMS_REJECTED") return review("pos_items_rejected");
+    if (result?.code === "POS_QUOTE_INVALID") return review("pos_quote_invalid");
+    if (result?.code === "POS_MAPPING_INCOMPLETE") return retry("pos_mapping_incomplete");
     if ([401, 403].includes(response.status)) return retry("pos_authorization");
     return retry("pos_waiting_confirmation", 45);
   }
@@ -132,8 +139,8 @@ export async function processOrderJob(db: SupabaseClient, key: string | null = n
   let outcome: Outcome;
   try {
     outcome = await workOrderJob(db, job);
-  } catch {
-    outcome = retry(job.kind === "p24_register" && job.first_external_at ? "p24_lookup_retry" : `${job.kind}_failed`);
+  } catch (error) {
+    outcome = error instanceof SavedPricingError ? review("mail_quote_invalid") : retry(job.kind === "p24_register" && job.first_external_at ? "p24_lookup_retry" : `${job.kind}_failed`);
   }
   const limit = job.kind === "p24_reconcile" ? 240 : 12;
   if (outcome.state === "pending" && job.attempts >= limit) outcome = review(outcome.code);
