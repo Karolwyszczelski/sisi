@@ -16,8 +16,8 @@ Object.assign(process.env, {
   P24_MERCHANT_ID: "1",
   P24_POS_ID: "2",
   P24_CRC_KEY: "synthetic",
-  P24_REPORTS_KEY: "synthetic",
 });
+delete process.env.P24_REPORTS_KEY;
 for (const name of ["PACKAGING", "DELIVERY", "DEPOSIT", "EXTRA_MEAT", "ADDON", "SAUCE", "PREMIUM_ADDON"]) {
   delete process.env[`DOTYPOS_${name}_PRODUCT_ID`];
 }

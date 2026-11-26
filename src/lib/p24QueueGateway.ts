@@ -28,7 +28,6 @@ export function p24Site() {
 
 export function p24Registration(order: { id: string; session: string; amount: number; email: string; name: string; returnToken: string }) {
   const { merchantId, posId, crc } = credentials();
-  authorization(posId); // Require the recovery channel before registering a new session.
   const site = p24Site();
   const body = new URLSearchParams({
     p24_merchant_id: String(merchantId),

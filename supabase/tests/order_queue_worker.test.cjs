@@ -13,6 +13,7 @@ Object.assign(process.env, {
   P24_POS_ID: "2",
   P24_CRC_KEY: "synthetic",
   P24_REPORTS_KEY: "synthetic",
+  P24_REST_RECOVERY_ENABLED: "true",
   APP_BASE_URL: "https://example.invalid",
   ORDER_DISPATCH_SECRET: "synthetic",
   ORDER_LINK_SECRET: "synthetic",
@@ -20,8 +21,12 @@ Object.assign(process.env, {
 });
 
 const root = path.resolve(__dirname, "../..");
+let callbackDb;
+const posKicks = [];
 const load = Module._load;
 Module._load = function (name, parent, isMain) {
+  if (name === "@/lib/kickOrderJobs") return { kickOrderJobs: (...keys) => posKicks.push(...keys) };
+  if (name === "@supabase/supabase-js") return { createClient: () => ({ rpc: (...args) => callbackDb.rpc(...args) }) };
   if (name === "./pushServer") return { sendNewOrderPush: async () => {} };
   if (name.startsWith("@/")) name = path.join(root, "src", name.slice(2));
   return load.call(this, name, parent, isMain);
@@ -30,6 +35,10 @@ require.extensions[".ts"] = (module, filename) => module._compile(ts.transpileMo
   compilerOptions: { module: ts.ModuleKind.CommonJS, esModuleInterop: true },
 }).outputText, filename);
 
+process.env.NEXT_PUBLIC_SUPABASE_URL = "http://127.0.0.1:9";
+process.env.SUPABASE_SERVICE_ROLE_KEY = "synthetic";
+const { NextRequest } = require("next/server");
+const { POST: receiveP24 } = require("../../src/app/api/p24/callback/route.ts");
 const { processOrderJob } = require("../../src/lib/orderQueue.ts");
 const ID = "d0000000-0000-4000-8000-000000000001";
 const SESSION = `sisi-${ID}`;
@@ -71,8 +80,10 @@ function fixture(kind) {
           return { data: true };
         case "sisi_confirm_p24_payment":
           confirmationCalls.push(input);
+          if (order.payment_status === "paid") return { data: { outcome: "already_paid" } };
           order.payment_status = "paid";
-          return { data: { outcome: order.status === "cancelled" ? "refund_pending" : "paid" } };
+          return { data: { outcome: order.status === "cancelled" ? "refund_pending" : "paid",
+            orderId: order.id, dispatch: order.status !== "cancelled" } };
         case "sisi_finish_order_job":
           assert.equal(input.lease, job.lease_id);
           outcomes.push(input.result + ":" + input.code);
@@ -223,3 +234,46 @@ test("POS retries transport failure before the dispatch marker, preserving the s
   assert.equal(calls, 2);
   assert.deepEqual(f.outcomes, ["pending:pos_waiting_confirmation", "done:pos_sent"]);
 });
+
+for (const scenario of ["normal", "delayed", "missing"]) {
+  test(`callback ${scenario} without REST credentials`, async () => {
+    const original = process.env.P24_REPORTS_KEY;
+    delete process.env.P24_REPORTS_KEY;
+    delete process.env.P24_REST_RECOVERY_ENABLED;
+    posKicks.length = 0;
+    const f = fixture("p24_register");
+    callbackDb = f.db;
+    global.fetch = async (url, init) => {
+      if (url === gateway + "/trnRegister") return json({ data: { token: "synthetic-token" } });
+      assert.equal(url, gateway + "/trnVerify");
+      assert.equal(new URLSearchParams(init.body).get("p24_amount"), "2000");
+      return new Response("error=0");
+    };
+    try {
+      await processOrderJob(f.db);
+      assert.equal(f.order.p24_token, "synthetic-token");
+      if (scenario !== "normal") {
+        f.job.kind = "p24_reconcile";
+        await processOrderJob(f.db);
+        assert.equal(f.order.payment_status, "pending");
+        assert.deepEqual(posKicks, []);
+      }
+      if (scenario === "missing") {
+        assert.equal(f.confirmationCalls.length, 0);
+        return;
+      }
+      const callback = () => receiveP24(new NextRequest("https://example.invalid/api/p24/callback", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sessionId: SESSION, orderId: 123, amount: 2000, currency: "PLN" }),
+      }));
+      assert.equal((await callback()).status, 200);
+      assert.equal(f.order.payment_status, "paid");
+      assert.equal((await callback()).status, 200);
+      assert.deepEqual(posKicks, [`pos:${ID}`]);
+    } finally {
+      process.env.P24_REPORTS_KEY = original;
+      process.env.P24_REST_RECOVERY_ENABLED = "true";
+    }
+  });
+}

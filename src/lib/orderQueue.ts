@@ -116,6 +116,9 @@ export async function workOrderJob(db: SupabaseClient, job: OrderJob): Promise<O
   }
 
   if (job.kind === "p24_register" && order.p24_token) return done("p24_registered");
+  if (process.env.P24_REST_RECOVERY_ENABLED !== "true") {
+    return review(job.kind === "p24_register" ? "p24_registration_unconfirmed" : "p24_callback_unconfirmed");
+  }
   const result = await findP24Payment(order.p24_session_id, amountGrosze);
   if (result.state === "mismatch") return review("p24_payment_mismatch");
   if (result.state === "refunded") return review("p24_already_refunded_externally");
