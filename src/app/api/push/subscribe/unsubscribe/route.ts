@@ -8,9 +8,8 @@ export const dynamic = "force-dynamic";
 export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}));
 
-  const cookieStore = await cookies();
   const supabase = createRouteHandlerClient<Database>({
-    cookies: () => cookieStore as ReturnType<typeof cookies>,
+    cookies,
   });
 
   const {

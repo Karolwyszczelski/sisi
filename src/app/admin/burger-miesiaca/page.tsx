@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState, useCallback } from "react";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
+import { BURGER_MONTH_ID, burgerMonthPrice } from "@/lib/burgerMonth";
 import { useTheme } from "@/components/admin/ThemeContext";
 import {
   Flame,
@@ -50,36 +51,32 @@ export default function BurgerMonthPage() {
         .single();
 
       // Pobierz dane produktu "Burger Miesiąca" (id=12)
-      const { data: productData } = await supabase
+      const { data: productData, error: productError } = await supabase
         .from("products")
         .select("*")
-        .eq("id", "12")
+        .eq("id", BURGER_MONTH_ID)
         .single();
 
-      console.log("DEBUG burger_of_month:", bomData);
-      console.log("DEBUG products id=12:", productData);
+      if (productError) throw productError;
 
       if (bomError && bomError.code !== "PGRST116") {
         throw bomError;
       }
 
-      // Domyślne zdjęcie jeśli brak w bazie
-      const defaultImage = "/halloween.png";
-
       if (bomData) {
         setForm({
           name: bomData.name || "",
           description: bomData.description || "",
-          price: productData?.price || "36.90",
-          image_url: bomData.image_url || productData?.image_url || defaultImage,
+          price: String(productData.price ?? ""),
+          image_url: productData.image_url || "",
         });
         setLastUpdated(bomData.updated_at || null);
       } else if (productData) {
         setForm({
           name: "",
           description: productData.description || "",
-          price: productData.price || "36.90",
-          image_url: productData.image_url || defaultImage,
+          price: String(productData.price ?? ""),
+          image_url: productData.image_url || "",
         });
       }
     } catch (e) {
@@ -100,40 +97,23 @@ export default function BurgerMonthPage() {
     setSaved(false);
 
     try {
-      // 1. Zapisz do burger_of_month
-      const { error: bomError } = await supabase
-        .from("burger_of_month")
-        .upsert(
-          {
-            id: "current",
-            name: form.name,
-            description: form.description,
-            image_url: form.image_url,
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: "id" }
-        );
-
-      if (bomError) throw bomError;
-
-      // 2. Zaktualizuj produkt "Burger Miesiąca" (id=12) w products
-      const { error: productError } = await supabase
-        .from("products")
-        .update({
-          description: `${form.name} - ${form.description}`,
-          price: form.price,
-          image_url: form.image_url,
-        })
-        .eq("id", "12");
-
-      if (productError) throw productError;
+      if (uploading || burgerMonthPrice(form.price) === null) {
+        throw new Error("Poczekaj na przesłanie zdjęcia i podaj poprawną cenę większą od zera.");
+      }
+      const response = await fetch("/api/admin/burger-month", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Nie udało się zapisać zmian");
 
       setSaved(true);
-      setLastUpdated(new Date().toISOString());
+      setLastUpdated(result.updated_at);
       setTimeout(() => setSaved(false), 3000);
     } catch (e) {
       console.error("Błąd zapisu:", e);
-      setError("Nie udało się zapisać zmian");
+      setError(e instanceof Error ? e.message : "Nie udało się zapisać zmian");
     } finally {
       setSaving(false);
     }
@@ -150,7 +130,9 @@ export default function BurgerMonthPage() {
       return;
     }
 
+    if (uploading || saving) return;
     setUploading(true);
+    setSaved(false);
     setError(null);
 
     try {
@@ -235,7 +217,7 @@ export default function BurgerMonthPage() {
             <div className="flex items-center gap-3">
               <button
                 onClick={fetchData}
-                disabled={loading}
+                disabled={loading || saving || uploading}
                 className={`flex items-center gap-2 px-4 py-2 rounded-xl transition ${
                   isDark
                     ? "bg-slate-700 hover:bg-slate-600 text-slate-300"
@@ -247,7 +229,7 @@ export default function BurgerMonthPage() {
               </button>
               <button
                 onClick={handleSave}
-                disabled={saving || !form.name.trim()}
+                disabled={saving || uploading || !form.name.trim() || burgerMonthPrice(form.price) === null}
                 className="flex items-center gap-2 px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-semibold transition disabled:opacity-50"
               >
                 {saving ? (
@@ -294,16 +276,18 @@ export default function BurgerMonthPage() {
             <div>
               <label className={`flex items-center gap-2 text-sm font-medium mb-2 ${t.textMuted}`}>
                 <Tag className="h-4 w-4" />
-                Nazwa burgera *
+                Nazwa edycji *
               </label>
               <input
                 type="text"
                 value={form.name}
                 onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
                 className={t.input}
-                placeholder="Np. Chorizo, BBQ Bacon..."
+                placeholder="Np. Zbójnicki, BBQ Bacon..."
               />
             </div>
+
+            <p className={`text-sm ${t.textMuted}`}>W menu i koszyku występuje jedna pozycja „Burger Miesiąca”. Nazwa edycji opisuje jej aktualny smak.</p>
 
             {/* Cena */}
             <div>
@@ -341,7 +325,7 @@ export default function BurgerMonthPage() {
             <div>
               <label className={`flex items-center gap-2 text-sm font-medium mb-2 ${t.textMuted}`}>
                 <ImageIcon className="h-4 w-4" />
-                Zdjęcie burgera
+                Zdjęcie burgera (po przesłaniu kliknij „Zapisz zmiany”)
               </label>
 
               {form.image_url ? (
@@ -380,7 +364,7 @@ export default function BurgerMonthPage() {
                       type="file"
                       accept="image/jpeg,image/png,image/webp,image/gif"
                       onChange={handleFileSelect}
-                      disabled={uploading}
+                      disabled={uploading || saving}
                       className="hidden"
                     />
                   </label>
@@ -414,7 +398,7 @@ export default function BurgerMonthPage() {
                         type="file"
                         accept="image/jpeg,image/png,image/webp,image/gif"
                         onChange={handleFileSelect}
-                        disabled={uploading}
+                        disabled={uploading || saving}
                         className="absolute inset-0 opacity-0 cursor-pointer"
                       />
                     </>

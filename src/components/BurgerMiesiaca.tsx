@@ -5,9 +5,8 @@ import Image from "next/image";
 import { useState, useEffect, useMemo } from "react";
 import useCartStore from "@/store/cartStore";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
+import { BURGER_MONTH_ID, BURGER_MONTH_NAME, BURGER_MONTH_PLACEHOLDER, burgerMonthPrice } from "@/lib/burgerMonth";
 import clsx from "clsx";
-
-const MONTH_IMG = "/halloween.png";           // obraz burgera miesiąca
 
 const PlusSVG = (
   <svg
@@ -106,35 +105,59 @@ export default function BurgerMiesiaca() {
 
   const [burgerName, setBurgerName] = useState("");
   const [burgerDesc, setBurgerDesc] = useState("");
+  const [imageUrl, setImageUrl] = useState(BURGER_MONTH_PLACEHOLDER);
+  const [price, setPrice] = useState<number | null>(null);
+  const [available, setAvailable] = useState(false);
   const [loading, setLoading] = useState(true);
   const [added, setAdded] = useState(false);
 
   useEffect(() => {
-    (async () => {
-      setLoading(true);
-      const { data, error } = await supabase
-        .from("burger_of_month")
-        .select("name, description")
-        .eq("id", "current")
-        .single();
-
-      if (!error && data) {
-        setBurgerName(data.name || "");
-        setBurgerDesc(data.description || "");
-      } else if (error) {
-        console.error("burger_of_month:", error.message);
+    let active = true;
+    let revision = 0;
+    const refresh = async () => {
+      const currentRevision = ++revision;
+      const [edition, product] = await Promise.all([
+        supabase.from("burger_of_month").select("name, description").eq("id", "current").maybeSingle(),
+        supabase.from("products").select("price, image_url, available, description")
+          .eq("id", BURGER_MONTH_ID).single(),
+      ]);
+      if (!active || currentRevision !== revision) return;
+      if (product.error) {
+        console.error("burger_of_month product:", product.error.message);
+        setAvailable(false);
+        setPrice(null);
+      } else {
+        setPrice(burgerMonthPrice(product.data.price));
+        setImageUrl(product.data.image_url || BURGER_MONTH_PLACEHOLDER);
+        setAvailable(product.data.available === true);
+        setBurgerName(edition.data?.name || "");
+        setBurgerDesc(edition.data?.description ?? product.data.description ?? "");
       }
       setLoading(false);
-    })();
+    };
+    void refresh();
+    const channel = supabase.channel(`burger-month-${crypto.randomUUID()}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "products", filter: "id=eq.12" }, refresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "burger_of_month", filter: "id=eq.current" }, refresh)
+      .subscribe();
+    window.addEventListener("focus", refresh);
+    return () => {
+      active = false;
+      window.removeEventListener("focus", refresh);
+      void supabase.removeChannel(channel);
+    };
   }, [supabase]);
 
+  const canOrder = !loading && available && price !== null;
+  const priceLabel = price === null ? "—" : price.toFixed(2).replace(".", ",");
+  const buttonLabel = loading ? "Ładowanie…" : !canOrder ? "Chwilowo niedostępny" : added ? "Dodano do koszyka!" : "Dodaj do koszyka";
   const addMonth = () => {
+    if (!canOrder || price === null) return;
     addItem({
-      // Stały produkt wewnętrzny; jego dynamiczna nazwa pozostaje widoczna
-      // klientowi, a Dotypos mapuje id=12 na ogólny produkt "Burger Miesiąca".
-      product_id: 12,
-      name: `Burger Miesiąca – ${burgerName || "—"}`,
-      price: 34.9,
+      product_id: BURGER_MONTH_ID,
+      name: BURGER_MONTH_NAME,
+      price,
+      category: "Burger",
       quantity: 1,
     });
     setAdded(true);
@@ -195,7 +218,7 @@ export default function BurgerMiesiaca() {
             <div className="absolute inset-8 rounded-full border border-yellow-400/10" />
             
             <Image
-              src={MONTH_IMG}
+              src={imageUrl}
               alt="Burger miesiąca"
               width={280}
               height={280}
@@ -209,7 +232,7 @@ export default function BurgerMiesiaca() {
                 <div className="absolute inset-0 bg-yellow-400 rounded-2xl blur-md opacity-50" />
                 <div className="relative bg-gradient-to-br from-yellow-400 to-amber-500 rounded-2xl px-4 py-2 shadow-xl">
                   <div className="text-black font-black text-xl leading-none">
-                    34,90<span className="text-[10px] font-bold ml-0.5">zł</span>
+                    {priceLabel}<span className="text-[10px] font-bold ml-0.5">zł</span>
                   </div>
                 </div>
               </div>
@@ -266,9 +289,10 @@ export default function BurgerMiesiaca() {
         {/* Duży przycisk CTA */}
         <button
           onClick={addMonth}
+          disabled={!canOrder}
           className={clsx(
             "w-full relative overflow-hidden rounded-2xl px-6 py-5 text-lg font-bold",
-            "bg-gradient-to-r from-yellow-400 to-amber-500 text-black",
+            "bg-gradient-to-r from-yellow-400 to-amber-500 text-black disabled:opacity-50 disabled:cursor-not-allowed",
             "active:scale-[0.98] transition-transform shadow-lg shadow-yellow-500/20",
             "flex items-center justify-center gap-3"
           )}
@@ -277,7 +301,7 @@ export default function BurgerMiesiaca() {
           <span className="inline-flex items-center justify-center w-8 h-8 rounded-xl bg-black/10">
             {added ? CheckSVG : PlusSVG}
           </span>
-          <span>{added ? "Dodano do koszyka! 🎉" : "Dodaj do koszyka"}</span>
+          <span>{buttonLabel}</span>
         </button>
       </div>
 
@@ -321,7 +345,7 @@ export default function BurgerMiesiaca() {
                 
                 {/* Obrazek burgera */}
                 <Image
-                  src={MONTH_IMG}
+                  src={imageUrl}
                   alt="Burger miesiąca"
                   width={500}
                   height={500}
@@ -335,7 +359,7 @@ export default function BurgerMiesiaca() {
                     <div className="absolute inset-0 bg-yellow-400 rounded-2xl blur-xl opacity-40 group-hover:opacity-60 transition-opacity" />
                     <div className="relative bg-gradient-to-br from-yellow-400 via-yellow-400 to-amber-500 rounded-2xl px-5 py-3 shadow-2xl">
                       <div className="text-black font-black text-2xl leading-none">
-                        34,90<span className="text-sm font-bold ml-0.5">zł</span>
+                        {priceLabel}<span className="text-sm font-bold ml-0.5">zł</span>
                       </div>
                     </div>
                   </div>
@@ -399,9 +423,10 @@ export default function BurgerMiesiaca() {
               <div className="flex flex-col sm:flex-row items-center gap-4 lg:justify-start justify-center">
                 <button
                   onClick={addMonth}
+                  disabled={!canOrder}
                   className={clsx(
                     "group relative inline-flex items-center justify-center gap-3 overflow-hidden rounded-xl px-8 py-4 text-base font-bold",
-                    "bg-white text-black",
+                    "bg-white text-black disabled:opacity-50 disabled:cursor-not-allowed",
                     "hover:bg-white/90 hover:shadow-[0_0_40px_rgba(255,255,255,0.15)]",
                     "transition-all duration-300 active:scale-[0.98]"
                   )}
@@ -410,7 +435,7 @@ export default function BurgerMiesiaca() {
                   <span className="inline-flex items-center justify-center w-6 h-6 rounded-lg bg-black/10">
                     {added ? CheckSVG : PlusSVG}
                   </span>
-                  <span>{added ? "Dodano do koszyka!" : "Dodaj do koszyka"}</span>
+                  <span>{buttonLabel}</span>
                 </button>
                 
                 {/* Info o czasie */}

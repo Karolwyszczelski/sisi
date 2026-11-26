@@ -1,3 +1,4 @@
+import { getSessionAndRole } from "@/lib/serverAuth";
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
@@ -22,6 +23,11 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  const { session, role } = await getSessionAndRole();
+  if (!session || role !== "admin") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   const sb = getSupabase();
   const zones = (await req.json()) as Array<{
     id?: string;

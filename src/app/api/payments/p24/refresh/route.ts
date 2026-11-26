@@ -1,6 +1,7 @@
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+import { verifyPayment } from "@/lib/orderLink";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { hostFromEnv, p24SignVerifyMD5, amountToGrosze } from "@/lib/p24";
@@ -31,6 +32,10 @@ export async function POST(req: NextRequest) {
       try { id = (await req.json())?.id; } catch {}
     }
     if (!id) return NextResponse.json({ error: "id missing" }, { status: 400 });
+
+    if (!verifyPayment(String(id), req.headers.get("X-Order-Payment"))) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
 
     const { data: ord, error } = await supabase
       .from("orders")
@@ -73,13 +78,17 @@ export async function POST(req: NextRequest) {
       body: body.toString(),
     });
     const t = await r.text();
-    const ok = (r.ok && /error=0/.test(t)) || (r.ok && (() => { try { return JSON.parse(t)?.data?.status === "success"; } catch { return false; } })());
+    const ok = (r.ok && new URLSearchParams(t).get("error") === "0") || (r.ok && (() => { try { return JSON.parse(t)?.data?.status === "success"; } catch { return false; } })());
 
     if (ok) {
-      await supabase.from("orders")
+      const { data: updated, error: updateError } = await supabase.from("orders")
         .update({ payment_status: "paid", paid_at: new Date().toISOString() })
-        .eq("id", id);
-      if (ord.payment_status !== "paid") {
+        .eq("id", id)
+          .eq("p24_session_id", ord.p24_session_id)
+          .eq("total_price", ord.total_price)
+          .in("payment_status", ["pending", "failed"]).select("id").maybeSingle();
+      if (updateError) return NextResponse.json({ error: "Update failed" }, { status: 500 });
+      if (updated) {
         await dispatchOrderToOperations({
           orderId: String(ord.id),
           totalPln: Number(ord.total_price ?? 0),
@@ -92,7 +101,7 @@ export async function POST(req: NextRequest) {
     }
 
     // nie zmieniaj na failed jeśli P24 zwraca błąd tymczasowy
-    return NextResponse.json({ payment_status: ord.payment_status ?? "pending", raw: t }, { status: 200 });
+    return NextResponse.json({ payment_status: ord.payment_status ?? "pending" }, { status: 200 });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || "server error" }, { status: 500 });
   }

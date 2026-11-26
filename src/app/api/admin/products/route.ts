@@ -1,11 +1,14 @@
+import { parseDepositGrosze } from "@/lib/containerDeposit";
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { isBurgerMonthName } from "@/lib/burgerMonth";
 import { getSessionAndRole } from "@/lib/serverAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 type ProductPayload = {
+  deposit_grosze?: unknown;
   name?: string | null;
   price?: string | number | null;
   description?: string | null;
@@ -58,6 +61,7 @@ function buildInsertPayload(body: ProductPayload) {
   return {
     name: cleanText(body.name),
     price: cleanPrice(body.price),
+    deposit_grosze: parseDepositGrosze(body.deposit_grosze ?? 0),
     description: cleanText(body.description),
     category: cleanText(body.category),
     subcategory: cleanText(body.subcategory),
@@ -75,6 +79,9 @@ export async function POST(request: Request) {
   try {
     const body = await request.json() as ProductPayload;
     const payload = buildInsertPayload(body);
+    if (isBurgerMonthName(payload.name)) {
+      return NextResponse.json({ error: "Burger Miesiąca już istnieje. Edytuj go w zakładce Burger miesiąca." }, { status: 409 });
+    }
     const supabase = getSupabaseAdmin();
 
     const { data, error } = await supabase

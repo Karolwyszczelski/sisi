@@ -3,9 +3,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
-import { headers } from "next/headers";
 import { createClient } from "@supabase/supabase-js";
-import { hostFromEnv, p24SignVerifyMD5, parseP24Amount } from "@/lib/p24";
+import { hostFromEnv, p24SignVerifyMD5, amountToGrosze } from "@/lib/p24";
 import { dispatchOrderToOperations } from "@/lib/orderOperations";
 
 const { P24_MERCHANT_ID, P24_POS_ID, CRON_SECRET } = process.env;
@@ -26,11 +25,8 @@ const supabase = new Proxy({} as ReturnType<typeof getSupabase>, {
 });
 
 export async function GET(req: NextRequest) {
-  // auth: Bearer <CRON_SECRET> lub ?token=<CRON_SECRET>
-  const hdrs = await headers();
-  const auth = hdrs.get("authorization")?.replace(/^Bearer\s+/i, "");
-  const token = new URL(req.url).searchParams.get("token");
-  if (CRON_SECRET && auth !== CRON_SECRET && token !== CRON_SECRET) {
+  const auth = req.headers.get("authorization");
+  if (!CRON_SECRET || auth !== `Bearer ${CRON_SECRET}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -58,7 +54,7 @@ export async function GET(req: NextRequest) {
       continue;
     }
 
-    const amountGr = parseP24Amount(o.total_price, "PLN");
+    const amountGr = amountToGrosze(o.total_price);
     const sign = p24SignVerifyMD5({
       sessionId,
       orderId: String(orderId),
@@ -85,7 +81,7 @@ export async function GET(req: NextRequest) {
       const t = await r.text();
 
       const ok =
-        (r.ok && /error=0/.test(t)) ||
+        (r.ok && new URLSearchParams(t).get("error") === "0") ||
         (r.ok &&
           (() => {
             try {
@@ -96,10 +92,17 @@ export async function GET(req: NextRequest) {
           })());
 
       if (ok) {
-        await supabase
+        const { data: updated, error: updateError } = await supabase
           .from("orders")
           .update({ payment_status: "paid", paid_at: new Date().toISOString() })
-          .eq("id", o.id);
+          .eq("id", o.id)
+          .eq("p24_session_id", o.p24_session_id)
+          .eq("total_price", o.total_price)
+          .in("payment_status", ["pending", "failed"]).select("id").maybeSingle();
+        if (updateError || !updated) {
+          results[o.id] = updateError ? "update-error" : "unchanged";
+          continue;
+        }
         await dispatchOrderToOperations({
           orderId: String(o.id),
           totalPln: Number(o.total_price ?? 0),

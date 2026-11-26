@@ -3,6 +3,7 @@
 // Test Dotypos Connection
 // =============================================
 
+import { getSessionAndRole } from "@/lib/serverAuth";
 import { NextResponse } from "next/server";
 import dotypos from "@/lib/dotypos";
 
@@ -10,6 +11,11 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
+  const { session, role } = await getSessionAndRole();
+  if (!session || role !== "admin") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   try {
     const result = await dotypos.testConnection();
     

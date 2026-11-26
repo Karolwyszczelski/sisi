@@ -9,5 +9,6 @@ export interface MenuItem {
     imageUrl?: string;
     available: boolean;
     addons: string[];
+    ingredients?: string[];
   }
   

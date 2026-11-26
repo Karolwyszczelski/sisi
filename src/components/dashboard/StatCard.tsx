@@ -3,7 +3,7 @@
 import React from "react";
 import dynamic from "next/dynamic";
 
-const Chart = dynamic(() => import("./admin/dashboard/Chart"), { ssr: false });
+const Chart = dynamic(() => import("@/app/admin/dashboard/Chart"), { ssr: false });
 
 interface StatCardProps {
   title: string;              // np. "Zamówienia dziennie"

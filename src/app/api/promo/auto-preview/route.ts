@@ -128,7 +128,7 @@ export async function POST(req: Request) {
           : Number(row.per_user_max_uses),
     };
 
-    if (!dc.value || dc.value <= 0) continue;
+    if (!dc.value || dc.value <= 0 || (dc.type === "percent" && dc.value === 10)) continue;
     
     // Porównanie dat jako timestamps
     const startsMs = dc.starts_at ? new Date(dc.starts_at).getTime() : 0;

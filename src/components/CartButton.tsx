@@ -7,7 +7,7 @@ export default function CartButton() {
   const toggleCart = useCartStore((state) => state.toggleCart);
   const items = useCartStore((state) => state.items);
 
-  const itemCount = items.reduce((sum, item) => sum + item.quantity, 0);
+  const itemCount = items.reduce((sum, item) => sum + (item.quantity ?? 1), 0);
 
   return (
     <button

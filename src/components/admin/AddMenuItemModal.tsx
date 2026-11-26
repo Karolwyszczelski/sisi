@@ -4,7 +4,7 @@
 import React, { useState, useEffect } from "react";
 import { useForm, useFieldArray } from "react-hook-form";
 import productsData from "@/data/product.json";
-import type { MenuItem } from "@/app/admin/menu/page";
+import type { MenuItem } from "@/types/menu";
 import { useTheme } from "@/components/admin/ThemeContext";
 import {
   Plus, X, Tag, Coins, FileText, Layers, List,

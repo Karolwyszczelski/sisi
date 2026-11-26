@@ -34,16 +34,6 @@ type Ann = {
   dismiss_hours?: number | null;
 };
 
-const FALLBACK: Ann = {
-  id: "fallback-10",
-  text: "PROMO -10% NA CAŁE MENU! Zamów teraz!",
-  link_href: "/#menu",
-  dismiss_key: "sisi-10",
-  bg: "#de1d13",
-  fg: "#ffffff",
-  dismiss_hours: 24,
-};
-
 export default function PromoTicker() {
   const [ann, setAnn] = useState<Ann | null>(null);
 
@@ -88,7 +78,7 @@ export default function PromoTicker() {
             const list = data as Banner[];
 
             const active = list.find((b) => {
-              if (!b.enabled) return false;
+              if (!b.enabled || /10\s*%/.test(`${b.title ?? ""} ${b.body ?? ""}`)) return false;
               const from = b.starts_at ? new Date(b.starts_at) : null;
               const to = b.ends_at ? new Date(b.ends_at) : null;
               if (from && from > now) return false;
@@ -110,13 +100,12 @@ export default function PromoTicker() {
             }
           }
         } catch {
-          // w razie błędu – lecimy na fallback
+          // Banner is optional.
         }
       }
 
-      // 2) Fallback, jeśli nic z bazy
       if (!cancelled) {
-        setAnn(FALLBACK);
+        setAnn(null);
       }
     };
 

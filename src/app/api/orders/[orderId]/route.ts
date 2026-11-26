@@ -1,3 +1,4 @@
+import { buildOrderContract } from "@/lib/orderContract";
 // src/app/api/orders/[orderId]/route.ts
 export const runtime = "nodejs";
 
@@ -54,14 +55,15 @@ const optLabel = (v?: string) =>
 
 export async function PATCH(
   request: Request,
-  { params }: { params: { orderId: string } }
+  { params }: { params: Promise<{ orderId: string }> }
 ) {
   const { session, role } = await getSessionAndRole();
   if (!session || (role !== "admin" && role !== "employee")) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const supabase = createRouteHandlerClient<Database>({ cookies });
+  const cookieStore = await cookies();
+  const supabase = createRouteHandlerClient<Database>({ cookies: () => cookieStore as any });
 
   let body: any;
   try {
@@ -70,7 +72,7 @@ export async function PATCH(
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const orderId = params.orderId;
+  const { orderId } = await params;
 
   // Panel pracownika: delivery_time = deadline realizacji (ISO), client_delivery_time = deklaracja klienta
 const employeeTime: string | undefined = body.delivery_time ?? body.employee_delivery_time;
@@ -97,7 +99,6 @@ if (clientTime) updateData.client_delivery_time = clientTime;
   if (body.customer_name) updateData.name = body.customer_name;
   if (body.promo_code !== undefined) updateData.promo_code = body.promo_code;
   if (body.discount_amount !== undefined) updateData.discount_amount = body.discount_amount;
-  if (body.legal_accept && typeof body.legal_accept === "object") updateData.legal_accept = body.legal_accept;
 
   const { data, error } = await supabase
     .from("orders")
@@ -184,7 +185,10 @@ const when: string | null = updated.delivery_time ?? updated.client_delivery_tim
       const termsV = la.terms_version || TERMS_VERSION;
       const privV = la.privacy_version || PRIVACY_VERSION;
 
-      if (headline) {
+      if (body.status === "accepted" && updated.status === "accepted") {
+        const contract = buildOrderContract({ ...updated, packaging_total: la.packaging_total }, timeStr);
+        await tr.sendMail({ from: EMAIL_FROM, to: toEmail, ...contract });
+      } else if (headline) {
         await tr.sendMail({
           from: EMAIL_FROM,
           to: toEmail,
@@ -211,7 +215,7 @@ const when: string | null = updated.delivery_time ?? updated.client_delivery_tim
       }
     }
   } catch (e) {
-    console.error("[orders.patch] email error:", e);
+    console.error("[orders.patch] Customer email failed");
   }
 
   if (

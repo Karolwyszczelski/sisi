@@ -22,7 +22,6 @@ export async function POST(request: Request) {
 
   try {
     const data = await request.json();
-    console.log("[Webhook] odebrano:", data);
 
     const orderId = data.orderId || data.sessionId || data.id;
     if (!orderId) {

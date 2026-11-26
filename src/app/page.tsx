@@ -1,5 +1,7 @@
 // src/app/page.tsx
 import type { Metadata } from "next";
+import HomeMaintenance from "@/components/HomeMaintenance";
+import { HOME_MAINTENANCE } from "@/config/homeMaintenance";
 
 import Hero from "@/components/Hero";
 import BurgerMiesiaca from "@/components/BurgerMiesiaca";
@@ -15,6 +17,8 @@ export const metadata: Metadata = {
 };
 
 export default function Home() {
+  if (HOME_MAINTENANCE) return <HomeMaintenance />;
+
   return (
     <>
       {/* Desktop: standardowy layout */}

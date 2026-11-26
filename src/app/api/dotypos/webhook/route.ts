@@ -19,6 +19,7 @@
 // Setup: Register webhooks at POST /v2/clouds/{cloudId}/webhooks
 // =============================================
 
+import { isOrderDispatchAuthorized } from "@/lib/orderDispatchAuth";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
@@ -41,28 +42,25 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const timestamp = new Date().toISOString();
     
-    // Dotypos sends Idempotency-Key header in POS action webhook callbacks
-    // Use it for deduplication of retried webhook calls
-    const idempotencyKey = req.headers.get("Idempotency-Key") || req.headers.get("idempotency-key");
-    
-    console.log(
-      "[Dotypos Webhook] Received:",
-      idempotencyKey ? `idempotency-key=${idempotencyKey}` : "no-idempotency-key",
-      JSON.stringify(body, null, 2)
-    );
-    
     // Determine webhook type based on payload structure
     if (body.code !== undefined && (body.order || body.items)) {
       // POS Action response webhook (from "webhook" param in POS actions)
+      const externalId = body["external-id"] || body.order?.["external-id"];
+      if (typeof externalId !== "string" || !isOrderDispatchAuthorized(
+        `pos-callback:${externalId}`,
+        req.nextUrl.searchParams.get("t")
+      )) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
       return handlePOSActionResponse(body, timestamp);
     } else if (body.entityType || body.payloadEntity) {
       // Entity change webhook (registered webhooks)
       return handleEntityChange(body, timestamp);
     } else {
       // Unknown format - log and accept
-      console.warn("[Dotypos Webhook] Unknown payload format:", body);
+      console.warn("[Dotypos Webhook] Unknown payload format");
       
-      await logWebhook("unknown", body, timestamp);
+      await logWebhook("unknown", timestamp);
       
       return NextResponse.json({ received: true });
     }
@@ -115,8 +113,7 @@ async function handlePOSActionResponse(
         updateData.dotypos_status = "confirmed";
       } else {
         updateData.dotypos_status = "pos_error";
-        updateData.dotypos_error = body["pass-through-errors"]?.[0]?.description 
-          || `POS error code: ${body.code}`;
+        updateData.dotypos_error = `POS error code: ${body.code}`;
       }
       
       const { error } = await supabase
@@ -134,7 +131,7 @@ async function handlePOSActionResponse(
     }
   }
   
-  await logWebhook("pos-action-response", body, timestamp);
+  await logWebhook("pos-action-response", timestamp);
   
   return NextResponse.json({ received: true, code: body.code });
 }
@@ -188,7 +185,7 @@ async function handleEntityChange(
       console.log(`[Dotypos Webhook] Unhandled entity type: ${entityType}`);
   }
   
-  await logWebhook(entityType, body, receivedAt);
+  await logWebhook(entityType, receivedAt);
   
   return NextResponse.json({ received: true, entityType });
 }
@@ -198,7 +195,6 @@ async function handleEntityChange(
  */
 async function logWebhook(
   type: string,
-  payload: unknown,
   timestamp: string
 ) {
   try {
@@ -209,12 +205,12 @@ async function logWebhook(
       .from("dotypos_webhook_logs")
       .insert({
         type,
-        payload,  // JSONB column - pass object directly, not JSON.stringify
+        payload: {},
         received_at: timestamp,
       });
   } catch {
     // Table might not exist yet - that's ok, just console log
-    console.log(`[Dotypos Webhook] Log (${type}):`, JSON.stringify(payload).slice(0, 200));
+    console.log(`[Dotypos Webhook] Log (${type})`);
   }
 }
 

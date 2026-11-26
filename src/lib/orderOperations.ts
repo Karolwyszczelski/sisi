@@ -1,3 +1,4 @@
+import { orderDispatchToken } from "@/lib/orderDispatchAuth";
 import { sendNewOrderPush } from "@/lib/pushServer";
 
 type DispatchOrderInput = {
@@ -17,10 +18,10 @@ export function isOnlinePaymentPending(paymentMethod?: string | null, paymentSta
 
 function resolveAppUrl(appUrl?: string | null) {
   const raw =
-    appUrl ||
-    process.env.NEXT_PUBLIC_APP_URL ||
     process.env.APP_BASE_URL ||
+    process.env.NEXT_PUBLIC_APP_URL ||
     process.env.NEXT_PUBLIC_BASE_URL ||
+    (process.env.NODE_ENV !== "production" ? appUrl : null) ||
     "";
 
   return raw ? trimTrailingSlash(raw) : "";
@@ -52,28 +53,23 @@ export async function dispatchOrderToOperations({
 
   const sendToDotypos = async () => {
     try {
+      const token = orderDispatchToken(orderId);
+      if (!token) throw new Error("Missing order dispatch secret");
       const res = await fetch(`${baseUrl}/api/dotypos/send-order`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-Order-Dispatch": token },
+        redirect: "error",
         body: JSON.stringify({ orderId }),
       });
 
       const data = await res.json().catch(() => null);
       if (res.ok && data?.success) {
-        console.log(`${logPrefix} Dotypos POS send OK:`, data?.dotypos?.status || "sent");
-      } else if (res.ok && !data?.success) {
-        console.error(
-          `${logPrefix} Dotypos POS rejected (code ${data?.dotypos?.code}):`,
-          data?.dotypos?.status
-        );
+        console.log(`${logPrefix} Dotypos POS send OK`);
       } else {
-        console.error(
-          `${logPrefix} Dotypos POS send failed (${res.status}):`,
-          JSON.stringify(data).slice(0, 300)
-        );
+        console.error(`${logPrefix} Dotypos POS send failed (HTTP ${res.status})`);
       }
-    } catch (err) {
-      console.error(`${logPrefix} Dotypos POS send error:`, err instanceof Error ? err.message : err);
+    } catch {
+      console.error(`${logPrefix} Dotypos POS request failed`);
     }
   };
 

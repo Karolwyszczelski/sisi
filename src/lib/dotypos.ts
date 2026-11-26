@@ -416,11 +416,7 @@ async function exchangeRefreshToken(
       // Non-JSON error payload, keep raw text fallback.
     }
 
-    console.error("[Dotypos] Token exchange failed:", response.status, {
-      reason: parsedReason,
-      message: parsedMessage,
-      raw: errorText,
-    });
+    console.error("[Dotypos] Token exchange failed:", response.status);
 
     if (response.status === 403 && parsedReason === "LICENSE_UPGRADE_REQUIRED") {
       throw new Error(
@@ -573,7 +569,7 @@ export async function apiRequestWithMeta<T = unknown>(
   
   if (!response.ok) {
     const errorText = await response.text();
-    console.error(`[Dotypos] API error ${response.status}:`, errorText);
+    console.error(`[Dotypos] API error ${response.status}`);
     
     // Try to parse error response
     try {
@@ -965,7 +961,6 @@ export async function createOrder(options: {
     action["print-email"] = options.printEmail;
   }
   
-  console.log("[Dotypos] Creating order:", JSON.stringify(action, null, 2));
   
   return executePOSAction(branchId, action, {
     idempotencyKey: options.externalId, // Use order UUID as idempotency key
@@ -1010,7 +1005,6 @@ export async function createUnpaidOrder(options: {
     action.note = options.note;
   }
   
-  console.log("[Dotypos] Creating unpaid order:", JSON.stringify(action, null, 2));
   
   return executePOSAction(branchId, action, {
     idempotencyKey: options.externalId,
@@ -1067,7 +1061,6 @@ export async function createDraftOrder(options: {
     action.note = options.note;
   }
   
-  console.log("[Dotypos] Creating draft order:", JSON.stringify(action, null, 2));
   
   return executePOSAction(branchId, action, {
     idempotencyKey: options.externalId,

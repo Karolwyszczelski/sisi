@@ -7,7 +7,7 @@ import { getSessionAndRole } from "@/lib/serverAuth";
 
 export async function PATCH(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const { session, role } = await getSessionAndRole();
   if (!session || role !== "admin") return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -24,7 +24,7 @@ export async function PATCH(
       available: body.available,
       order: body.order,
     })
-    .eq("id", params.id)
+    .eq("id", (await params).id)
     .select()
     .single();
 
@@ -34,13 +34,13 @@ export async function PATCH(
 
 export async function DELETE(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const { session, role } = await getSessionAndRole();
   if (!session || role !== "admin") return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const supabase = createRouteHandlerClient<Database>({ cookies });
-  const { error } = await supabase.from("menu_items").delete().eq("id", params.id);
+  const { error } = await supabase.from("menu_items").delete().eq("id", (await params).id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ success: true });
 }

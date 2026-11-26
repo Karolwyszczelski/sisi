@@ -1,6 +1,7 @@
 // src/app/api/reservations/status/route.ts
 export const runtime = "nodejs";
 
+import { getSessionAndRole } from "@/lib/serverAuth";
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { sendEmail } from "@/lib/mailer";
@@ -179,6 +180,10 @@ function generateRejectionEmail(reservation: {
 
 export async function PATCH(req: Request) {
   try {
+    const { session, role } = await getSessionAndRole();
+    if (!session || (role !== "admin" && role !== "employee")) {
+      return NextResponse.json({ error: "Brak dostępu." }, { status: 403 });
+    }
     const body = await req.json();
     const { id, status, reason, customMessage } = body;
 
@@ -233,9 +238,8 @@ export async function PATCH(req: Request) {
           html: emailContent,
         });
 
-        console.log(`[reservations] Email sent to ${customerEmail} (${status})`);
       } catch (emailError) {
-        console.error("[reservations] Email error:", emailError);
+        console.error("[reservations] Customer email failed");
         // Nie przerywamy - rezerwacja została zaktualizowana
       }
     }

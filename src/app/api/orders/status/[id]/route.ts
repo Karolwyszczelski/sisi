@@ -19,8 +19,8 @@ const supabaseAdmin = new Proxy({} as ReturnType<typeof getSupabaseAdmin>, {
   },
 });
 
-export async function GET(req: Request, { params }: { params: { id: string } }) {
-  const id = params?.id;
+export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const id = (await params).id;
   if (!id) return NextResponse.json({ error: "missing_id" }, { status: 400 });
 
   // wymagamy podpisu ?t=

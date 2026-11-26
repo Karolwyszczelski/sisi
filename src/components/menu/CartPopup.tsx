@@ -18,7 +18,7 @@ export default function CartPopup() {
 
   if (!isClient || !isOpen) return null;
 
-  const total = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const total = items.reduce((sum, item) => sum + item.price * (item.quantity ?? 1), 0);
 
   return (
     <div className="fixed bottom-24 right-6 bg-zinc-900 border border-white/10 text-white rounded-2xl shadow-2xl shadow-black/50 z-50 p-5 w-[320px] backdrop-blur-sm">
@@ -45,10 +45,10 @@ export default function CartPopup() {
               <li key={i} className="flex justify-between items-center text-sm bg-white/5 rounded-xl p-3">
                 <div className="flex-1">
                   <p className="font-medium text-white">{item.name}</p>
-                  <p className="text-white/50 text-xs">x {item.quantity}</p>
+                  <p className="text-white/50 text-xs">x {(item.quantity ?? 1)}</p>
                 </div>
                 <div className="flex items-center gap-3">
-                  <span className="text-yellow-400 font-semibold">{(item.price * item.quantity).toFixed(2)} zł</span>
+                  <span className="text-yellow-400 font-semibold">{(item.price * (item.quantity ?? 1)).toFixed(2)} zł</span>
                   <button
                     onClick={() => removeItem(item.name)}
                     className="w-7 h-7 rounded-lg bg-white/10 flex items-center justify-center hover:bg-red-500/20 hover:text-red-400 transition-colors"

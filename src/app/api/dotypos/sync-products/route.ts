@@ -7,11 +7,12 @@
 // to the local pos_products table for mapping during order creation.
 //
 // Usage:
-// - Manual: GET /api/dotypos/sync-products
-// - With force refresh: GET /api/dotypos/sync-products?force=true
+// - Manual: POST /api/dotypos/sync-products
+// - With force refresh: POST /api/dotypos/sync-products with {"force":true}
 // - Cron job: Can be called periodically (e.g., daily)
 // =============================================
 
+import { getSessionAndRole } from "@/lib/serverAuth";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import dotypos from "@/lib/dotypos";
@@ -80,15 +81,20 @@ const toNumberOrNull = (value: unknown): number | null => {
 };
 
 /* ============================================================
-   GET Handler - Sync Products
+   POST Handler - Sync Products
    ============================================================ */
 
-export async function GET(req: NextRequest) {
+export async function POST(req: NextRequest) {
+  const { session, role } = await getSessionAndRole();
+  if (!session || role !== "admin") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   const startTime = Date.now();
   
   try {
-    const { searchParams } = new URL(req.url);
-    const force = searchParams.get("force") === "true";
+    const body = await req.json().catch(() => null);
+    const force = body?.force === true;
     
     console.log("[Dotypos Sync] Starting product sync...", { force });
     
@@ -214,36 +220,6 @@ export async function GET(req: NextRequest) {
         duration: Date.now() - startTime,
       },
       { status: 500 }
-    );
-  }
-}
-
-/* ============================================================
-   POST Handler - Sync with options
-   ============================================================ */
-
-export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json().catch(() => ({}));
-    
-    // Support POST with options
-    const url = new URL(req.url);
-    if (body.force) {
-      url.searchParams.set("force", "true");
-    }
-    
-    // Delegate to GET handler
-    const getReq = new NextRequest(url, {
-      method: "GET",
-      headers: req.headers,
-    });
-    
-    return GET(getReq);
-    
-  } catch {
-    return NextResponse.json(
-      { error: "Invalid request" },
-      { status: 400 }
     );
   }
 }

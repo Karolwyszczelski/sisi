@@ -51,6 +51,7 @@ export default function Chart({
   return (
     <div className="w-full h-full">
       <ResponsiveContainer width="100%" height="100%">
+        <>
         {type === "line" && (
           <AreaChart data={data} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
             <defs>
@@ -138,6 +139,7 @@ export default function Chart({
             </Pie>
           </PieChart>
         )}
+        </>
       </ResponsiveContainer>
     </div>
   );

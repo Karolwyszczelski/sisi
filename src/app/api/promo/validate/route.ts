@@ -62,7 +62,7 @@ export async function POST(req: Request) {
     );
   }
 
-  if (!dc.active) {
+  if (!dc.active || (dc.auto_apply && dc.type === "percent" && Number(dc.value) === 10)) {
     return NextResponse.json(
       { valid: false, message: "Kod jest nieaktywny." },
       { status: 400 }

@@ -21,7 +21,6 @@ export function getTransport() {
     const resend = new Resend(RESEND_API_KEY);
     return {
       async sendMail(msg: Mail) {
-        console.log("[mailer] using Resend", { to: msg.to, subject: msg.subject });
         const r = await resend.emails.send({
           from: msg.from || EMAIL_FROM,
           to: Array.isArray(msg.to) ? msg.to : [msg.to],
@@ -44,7 +43,6 @@ export function getTransport() {
     });
     return {
       async sendMail(msg: Mail) {
-        console.log("[mailer] using SMTP", { to: msg.to, subject: msg.subject });
         return transporter.sendMail({ from: msg.from || EMAIL_FROM, ...msg });
       },
     };

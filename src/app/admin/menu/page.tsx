@@ -10,6 +10,8 @@ import {
   X, ImageIcon, Tag, Coins, FileText, List, Layers, Upload, Trash, Check
 } from "lucide-react";
 import debounce from "lodash.debounce";
+import { useRouter } from "next/navigation";
+import { isBurgerMonthId } from "@/lib/burgerMonth";
 import Image from "next/image";
 
 /* ===================== Typy ===================== */
@@ -17,6 +19,7 @@ interface Product {
   id: string;
   name: string | null;
   price: string | number | null;
+  deposit_grosze?: number;
   description: string | null;
   category: string | null;
   subcategory: string | null;
@@ -51,28 +54,16 @@ interface ProductMutationResponse {
 
 const supabase = createClientComponentClient();
 
-const SUPABASE_BUCKET = "products";
-
-/* ===================== Helper: Upload obrazka ===================== */
-async function uploadProductImage(file: File, productId?: string): Promise<string> {
-  const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
-  const fileName = `${productId || "new"}-${Date.now()}.${ext}`;
-  const filePath = `images/${fileName}`;
-
-  const { error } = await supabase.storage
-    .from(SUPABASE_BUCKET)
-    .upload(filePath, file, { 
-      cacheControl: "3600", 
-      upsert: true 
-    });
-
-  if (error) throw error;
-
-  const { data: urlData } = supabase.storage
-    .from(SUPABASE_BUCKET)
-    .getPublicUrl(filePath);
-
-  return urlData.publicUrl;
+/* Upload through the authenticated server endpoint, matching Storage policies. */
+async function uploadProductImage(file: File): Promise<string> {
+  const body = new FormData();
+  body.append("file", file);
+  const response = await fetch("/api/admin/products/image", { method: "POST", body });
+  const result = await response.json();
+  if (!response.ok || typeof result.url !== "string") {
+    throw new Error(result.error || "Nie udało się przesłać obrazka");
+  }
+  return result.url;
 }
 
 /* ===================== Komponent uploadu obrazka ===================== */
@@ -80,18 +71,18 @@ function ImageUploader({
   imageUrl,
   onImageChange,
   isDark,
-  productId,
+  onUploadingChange,
 }: {
   imageUrl: string;
   onImageChange: (url: string) => void;
   isDark: boolean;
-  productId?: string;
+  onUploadingChange: (uploading: boolean) => void;
 }) {
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
 
   const handleFile = async (file: File) => {
-    if (!file.type.startsWith("image/")) {
+    if (!["image/jpeg", "image/png", "image/webp", "image/gif"].includes(file.type)) {
       alert("Wybierz plik obrazka (jpg, png, webp)");
       return;
     }
@@ -99,15 +90,18 @@ function ImageUploader({
       alert("Maksymalny rozmiar pliku to 5MB");
       return;
     }
+    if (uploading) return;
     setUploading(true);
+    onUploadingChange(true);
     try {
-      const url = await uploadProductImage(file, productId);
+      const url = await uploadProductImage(file);
       onImageChange(url);
     } catch (err) {
       console.error("Błąd uploadu:", err);
-      alert("Nie udało się przesłać obrazka");
+      alert(err instanceof Error ? err.message : "Nie udało się przesłać obrazka");
     } finally {
       setUploading(false);
+      onUploadingChange(false);
     }
   };
 
@@ -120,6 +114,7 @@ function ImageUploader({
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = "";
     if (file) handleFile(file);
   };
 
@@ -151,7 +146,8 @@ function ImageUploader({
               Zmień
               <input
                 type="file"
-                accept="image/*"
+                accept="image/jpeg,image/png,image/webp,image/gif"
+                disabled={uploading}
                 onChange={handleInputChange}
                 className="hidden"
               />
@@ -196,7 +192,8 @@ function ImageUploader({
           )}
           <input
             type="file"
-            accept="image/*"
+            accept="image/jpeg,image/png,image/webp,image/gif"
+            disabled={uploading}
             onChange={handleInputChange}
             className="hidden"
           />
@@ -223,6 +220,7 @@ function EditProductModal({
   const [form, setForm] = useState({
     name: product.name ?? "",
     price: product.price ?? "",
+    depositGrosze: product.deposit_grosze ?? 0,
     description: product.description ?? "",
     category: product.category ?? "",
     subcategory: product.subcategory ?? "",
@@ -231,6 +229,7 @@ function EditProductModal({
     selectedAddons: new Set<string>(product.available_addons ?? []),
   });
   const [saving, setSaving] = useState<false | "local" | "pos">(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   const splitToArray = (txt: string) =>
@@ -267,12 +266,14 @@ function EditProductModal({
   };
 
   const save = async (syncPos: boolean) => {
+    if (uploadingImage) return;
     setErr(null);
     setSaving(syncPos ? "pos" : "local");
     try {
       const payload = {
         name: form.name || null,
         price: form.price || null,
+        deposit_grosze: form.depositGrosze,
         description: form.description || null,
         category: form.category || null,
         subcategory: form.subcategory || null,
@@ -367,6 +368,20 @@ function EditProductModal({
                 onChange={(e) => setForm((f) => ({ ...f, price: e.target.value }))}
                 className={inputClass}
               />
+            </div>
+            <div>
+              <label className={labelClass}>
+                Kaucja według oznaczenia na opakowaniu
+                <select
+                  value={form.depositGrosze}
+                  onChange={(e) => setForm((f) => ({ ...f, depositGrosze: Number(e.target.value) }))}
+                  className={inputClass}
+                >
+                  <option value={0}>Brak kaucji</option>
+                  <option value={50}>0,50 zł — oznaczona puszka lub PET</option>
+                  <option value={100}>1,00 zł — oznaczone szkło wielokrotnego użytku</option>
+                </select>
+              </label>
             </div>
 
             <div className="md:col-span-2">
@@ -526,7 +541,7 @@ function EditProductModal({
               imageUrl={form.image_url}
               onImageChange={(url) => setForm((f) => ({ ...f, image_url: url }))}
               isDark={isDark}
-              productId={product.id}
+              onUploadingChange={setUploadingImage}
             />
           </div>
         </div>
@@ -535,7 +550,7 @@ function EditProductModal({
         <div className={`flex flex-col-reverse sm:flex-row justify-end gap-2 sm:gap-3 px-4 sm:px-6 py-3 sm:py-4 border-t ${isDark ? "border-slate-700 bg-slate-800/50" : "border-gray-200 bg-gray-50"}`}>
           <button
             onClick={onClose}
-            disabled={!!saving}
+            disabled={!!saving || uploadingImage}
             className={`px-4 py-2.5 rounded-lg font-medium transition w-full sm:w-auto ${
               isDark ? "bg-slate-700 hover:bg-slate-600 text-slate-300" : "bg-gray-200 hover:bg-gray-300 text-gray-700"
             } disabled:opacity-50`}
@@ -544,7 +559,7 @@ function EditProductModal({
           </button>
           <button
             onClick={() => save(false)}
-            disabled={!!saving}
+            disabled={!!saving || uploadingImage}
             className="flex items-center justify-center gap-2 px-5 py-2.5 bg-slate-600 hover:bg-slate-500 text-white rounded-lg font-semibold transition disabled:opacity-50 w-full sm:w-auto"
           >
             {saving === "local" && <Loader2 className="h-4 w-4 animate-spin" />}
@@ -552,7 +567,7 @@ function EditProductModal({
           </button>
           <button
             onClick={() => save(true)}
-            disabled={!!saving}
+            disabled={!!saving || uploadingImage}
             className="flex items-center justify-center gap-2 px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-semibold transition disabled:opacity-50 w-full sm:w-auto"
           >
             {saving === "pos" && <Loader2 className="h-4 w-4 animate-spin" />}
@@ -579,6 +594,7 @@ function AddProductModal({
   const [form, setForm] = useState({
     name: "",
     price: "",
+    depositGrosze: 0,
     description: "",
     category: "",
     subcategory: "",
@@ -587,6 +603,7 @@ function AddProductModal({
     selectedAddons: new Set<string>(),
   });
   const [saving, setSaving] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   const splitToArray = (txt: string) =>
@@ -623,6 +640,7 @@ function AddProductModal({
   };
 
   const save = async () => {
+    if (uploadingImage) return;
     setErr(null);
     if (!form.name.trim()) {
       setErr("Nazwa produktu jest wymagana");
@@ -633,6 +651,7 @@ function AddProductModal({
       const payload = {
         name: form.name || null,
         price: form.price || null,
+        deposit_grosze: form.depositGrosze,
         description: form.description || null,
         category: form.category || null,
         subcategory: form.subcategory || null,
@@ -715,6 +734,20 @@ function AddProductModal({
                 className={inputClass}
                 placeholder="28.00"
               />
+            </div>
+            <div>
+              <label className={labelClass}>
+                Kaucja według oznaczenia na opakowaniu
+                <select
+                  value={form.depositGrosze}
+                  onChange={(e) => setForm((f) => ({ ...f, depositGrosze: Number(e.target.value) }))}
+                  className={inputClass}
+                >
+                  <option value={0}>Brak kaucji</option>
+                  <option value={50}>0,50 zł — oznaczona puszka lub PET</option>
+                  <option value={100}>1,00 zł — oznaczone szkło wielokrotnego użytku</option>
+                </select>
+              </label>
             </div>
             <div className="md:col-span-2">
               <label className={labelClass}><FileText className="h-4 w-4" />Opis</label>
@@ -946,6 +979,7 @@ function AddProductModal({
             </div>
 
             <ImageUploader
+              onUploadingChange={setUploadingImage}
               imageUrl={form.image_url}
               onImageChange={(url) => setForm((f) => ({ ...f, image_url: url }))}
               isDark={isDark}
@@ -964,7 +998,7 @@ function AddProductModal({
           </button>
           <button
             onClick={save}
-            disabled={saving}
+            disabled={saving || uploadingImage}
             className="flex items-center justify-center gap-2 px-5 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg font-semibold transition disabled:opacity-50 w-full sm:w-auto"
           >
             {saving && <Loader2 className="h-4 w-4 animate-spin" />}
@@ -979,6 +1013,11 @@ function AddProductModal({
 /* ===================== Strona ===================== */
 export default function AdminMenuPage() {
   const { isDark } = useTheme();
+  const router = useRouter();
+  const editProduct = (product: Product) => {
+    if (isBurgerMonthId(product.id)) router.push("/admin/burger-miesiaca");
+    else setEditing(product);
+  };
   const [products, setProducts] = useState<Product[]>([]);
   const [allAddons, setAllAddons] = useState<Addon[]>([]);
   const [filterCat, setFilterCat] = useState<string>("all");
@@ -1102,8 +1141,8 @@ export default function AdminMenuPage() {
         switch (sortKey) {
           case "nameAsc": return (a.name || "").localeCompare(b.name || "");
           case "nameDesc": return (b.name || "").localeCompare(a.name || "");
-          case "priceAsc": return parseFloat(a.price || "0") - parseFloat(b.price || "0");
-          case "priceDesc": return parseFloat(b.price || "0") - parseFloat(a.price || "0");
+          case "priceAsc": return Number(a.price ?? 0) - Number(b.price ?? 0);
+          case "priceDesc": return Number(b.price ?? 0) - Number(a.price ?? 0);
           default: return 0;
         }
       });
@@ -1254,7 +1293,7 @@ export default function AdminMenuPage() {
         </div>
 
         {/* Tabela */}
-        <div className={`rounded-xl overflow-hidden border ${t.border} ${t.bgCard}`}>
+        <div className={`hidden md:block rounded-xl overflow-hidden border ${t.border} ${t.bgCard}`}>
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead className={isDark ? "bg-slate-700/50" : "bg-gray-50"}>
@@ -1303,7 +1342,7 @@ export default function AdminMenuPage() {
                         )}
                       </td>
                       <td className={`px-4 py-3 text-sm font-semibold ${isDark ? "text-amber-400" : "text-amber-600"}`}>
-                        {parseFloat(it.price || "0").toFixed(2)} zł
+                        {Number(it.price ?? 0).toFixed(2)} zł
                       </td>
                       <td className={`px-4 py-3 text-sm ${t.textMuted} hidden md:table-cell`}>
                         {it.subcategory ? `${it.category} > ${it.subcategory}` : it.category || "—"}
@@ -1328,7 +1367,7 @@ export default function AdminMenuPage() {
                       <td className="px-4 py-3 text-right">
                         <div className="flex items-center justify-end gap-2">
                           <button
-                            onClick={() => setEditing(it)}
+                            onClick={() => editProduct(it)}
                             className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm transition ${
                               isDark
                                 ? "text-blue-400 hover:bg-blue-500/10"
@@ -1374,7 +1413,7 @@ export default function AdminMenuPage() {
               <div className="flex justify-between items-start mb-2">
                 <div className={`font-semibold ${t.text}`}>{it.name}</div>
                 <div className={`text-sm font-bold ${isDark ? "text-amber-400" : "text-amber-600"}`}>
-                  {parseFloat(it.price || "0").toFixed(2)} zł
+                  {Number(it.price ?? 0).toFixed(2)} zł
                 </div>
               </div>
               <div className={`text-xs mb-2 ${t.textMuted}`}>
@@ -1398,7 +1437,7 @@ export default function AdminMenuPage() {
                 </button>
                 <div className="flex gap-2">
                   <button
-                    onClick={() => setEditing(it)}
+                    onClick={() => editProduct(it)}
                     className={`p-2 rounded-lg ${isDark ? "text-blue-400 hover:bg-blue-500/10" : "text-blue-600 hover:bg-blue-50"}`}
                   >
                     <Pencil className="h-4 w-4" />

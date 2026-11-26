@@ -23,7 +23,7 @@ const Patch = z.object({
   seats: z.number().int().min(1).optional(),
 });
 
-export async function PATCH(req: Request, { params }: { params: { id: string } }) {
+export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { session, role } = await getSessionAndRole();
   if (!session || (role !== "admin" && role !== "employee"))
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -48,7 +48,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   const { data, error } = await getSupabaseAdmin()
     .from("restaurant_tables")
     .update(patch)
-    .eq("id", params.id)
+    .eq("id", (await params).id)
     .select()
     .single();
 
@@ -56,12 +56,12 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   return NextResponse.json({ table: data });
 }
 
-export async function DELETE(_req: Request, { params }: { params: { id: string } }) {
+export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { session, role } = await getSessionAndRole();
   if (!session || (role !== "admin" && role !== "employee"))
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { error } = await getSupabaseAdmin().from("restaurant_tables").delete().eq("id", params.id);
+  const { error } = await getSupabaseAdmin().from("restaurant_tables").delete().eq("id", (await params).id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ ok: true });
 }

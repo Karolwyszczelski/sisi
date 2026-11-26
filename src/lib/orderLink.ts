@@ -20,3 +20,12 @@ export function trackingUrl(origin: string, id: string) {
   const t = sign(String(id));
   return `${origin.replace(/\/+$/,"")}/order/${id}?t=${t}`;
 }
+
+
+export function signPayment(orderId: string): string {
+  return sign(`payment:${orderId}`);
+}
+
+export function verifyPayment(orderId: string, token: unknown): boolean {
+  return Boolean(secret) && typeof token === "string" && verify(`payment:${orderId}`, token);
+}

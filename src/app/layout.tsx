@@ -4,11 +4,13 @@ import type { Metadata, Viewport } from "next";
 import { Montserrat, Covered_By_Your_Grace, Smooch, Anton } from "next/font/google";
 import Image from "next/image";
 import Script from "next/script";
+import HideOnMaintenanceHome from "@/components/HideOnMaintenanceHome";
 import ClientWrapper from "@/components/ClientWrapper";
 import ClientProvider from "@/components/ClientProvider";
 import ConditionalFooter from "@/components/ConditionalFooter";
 import CookieBanner from "@/components/legal/CookieBanner";
 import PromoTickerMount from "@/components/PromoTickerMount";
+import GoogleTagManager from "@/components/analytics/GoogleTagManager";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_URL || "https://www.sisiciechanow.pl";
 
@@ -82,6 +84,25 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="pl">
       <head>
+        <Script id="google-consent-default" strategy="beforeInteractive">{`
+          window.dataLayer = window.dataLayer || [];
+          window.gtag = window.gtag || function(){ window.dataLayer.push(arguments); };
+          (function(){
+            var saved = null;
+            try { saved = JSON.parse(localStorage.getItem('cookie_consent_v1') || 'null'); } catch (_) {}
+            var analytics = saved && saved.analytics === true;
+            var marketing = saved && saved.marketing === true;
+            window.gtag('consent', 'default', {
+              analytics_storage: analytics ? 'granted' : 'denied',
+              ad_storage: marketing ? 'granted' : 'denied',
+              ad_user_data: marketing ? 'granted' : 'denied',
+              ad_personalization: marketing ? 'granted' : 'denied',
+              wait_for_update: 500
+            });
+            window.gtag('set', 'ads_data_redaction', true);
+            window.gtag('set', 'url_passthrough', false);
+          })();
+        `}</Script>
         <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(restaurantLd) }} />
         <meta name="format-detection" content="telephone=no" />
         <link rel="manifest" href="/manifest.webmanifest" />
@@ -100,6 +121,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
       </head>
       <body className={`${montserrat.className} ${covered.variable} ${smooch.variable} ${anton.variable} bg-[#fff800] text-black relative overflow-x-hidden`}>
+        <HideOnMaintenanceHome><GoogleTagManager /></HideOnMaintenanceHome>
         {/* Mobile tło – nie łapie tapów */}
         <div
           className="md:hidden fixed inset-0 -z-10 bg-[url('/backgroundsisi.jpg')] bg-center bg-cover pointer-events-none select-none"
@@ -114,14 +136,16 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           className="hidden md:block object-cover opacity-20 pointer-events-none select-none -z-10"
         />
         <ClientProvider>
-          <PromoTickerMount />
+          <HideOnMaintenanceHome><PromoTickerMount /></HideOnMaintenanceHome>
           <ClientWrapper>{children}</ClientWrapper>
         </ClientProvider>
         {/* Footer ukryty na mobile i w panelu admina */}
-        <div className="hidden md:block">
-          <ConditionalFooter />
-        </div>
-        <CookieBanner />
+        <HideOnMaintenanceHome>
+          <div className="hidden md:block">
+            <ConditionalFooter />
+          </div>
+          <CookieBanner />
+        </HideOnMaintenanceHome>
       </body>
     </html>
   );

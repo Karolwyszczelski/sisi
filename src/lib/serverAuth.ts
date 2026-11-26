@@ -18,7 +18,8 @@ export async function getSessionAndRole() {
     data: { session },
   } = await supabase.auth.getSession();
 
-  if (!session) {
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  if (authError || !session || user?.id !== session.user.id) {
     return { session: null, role: null };
   }
 

@@ -44,3 +44,6 @@ next-env.d.ts
 
 # Local Supabase credentials
 /supabase/dane
+
+/SISI ORDERING.zip
+/logs/

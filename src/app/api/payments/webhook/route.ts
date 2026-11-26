@@ -3,7 +3,6 @@ export const runtime = "nodejs";
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import {
-  extractOrderIdFromSession,
   hostFromEnv,
   p24SignVerifyMD5,
   parseP24Amount,
@@ -25,11 +24,6 @@ const supabaseAdmin = new Proxy({} as ReturnType<typeof getSupabaseAdmin>, {
   },
 });
 
-type UpdatedOrder = {
-  id: string;
-  total_price?: number | string | null;
-  selected_option?: string | null;
-};
 
 // P24 wysyła application/x-www-form-urlencoded
 async function readFormOrJson(req: Request) {
@@ -64,7 +58,7 @@ export async function POST(req: Request) {
     const orderIdFromGateway = b.p24_order_id || b.orderId;
     const rawAmount = b.p24_amount ?? b.amount;
     const amountGr = parseP24Amount(rawAmount);
-    const currency = b.p24_currency || b.currency || "PLN";
+    const currency = b.p24_currency || b.currency || "";
     const sign = b.p24_sign || b.sign;
 
     if (!sessionId || !orderIdFromGateway || amountGr === null || !sign) {
@@ -72,6 +66,8 @@ export async function POST(req: Request) {
     }
 
     // weryfikacja podpisu z notyfikacji
+    if (currency !== "PLN" || amountGr <= 0) return NextResponse.json({ error: "Invalid payment amount or currency" }, { status: 400 });
+
     const expected = p24SignVerifyMD5(
       sessionId,
       orderIdFromGateway,
@@ -104,126 +100,38 @@ export async function POST(req: Request) {
     const vtxt = await vr.text();
 
     const ok =
-      (vr.ok && /error=0/.test(vtxt)) ||
+      (vr.ok && new URLSearchParams(vtxt).get("error") === "0") ||
       (vr.ok && (() => { try { const j = JSON.parse(vtxt); return j?.data?.status === "success"; } catch { return false; } })());
 
-    // z sessionId wyciągamy id zamówienia w formie tekstowe
-    const orderIdFromSession = extractOrderIdFromSession(sessionId);
+    if (!ok) return NextResponse.json({ ok: false }, { status: 400 });
 
-    if (!orderIdFromSession) {
-      console.warn("P24 webhook: unable to derive order id", { sessionId });
+    const { data: updated, error: updateError } = await supabaseAdmin
+      .from("orders")
+      .update({ p24_order_id: String(orderIdFromGateway), payment_status: "paid", paid_at: new Date().toISOString() })
+      .eq("p24_session_id", sessionId)
+      .eq("total_price", amountGr / 100)
+      .eq("payment_method", "Online")
+      .in("payment_status", ["pending", "failed"])
+      .select("id,total_price,selected_option")
+      .maybeSingle();
+
+    if (updateError) return NextResponse.json({ error: "Update failed" }, { status: 500 });
+    if (!updated) {
+      const { data: paid, error } = await supabaseAdmin.from("orders").select("id")
+        .eq("p24_session_id", sessionId).eq("total_price", amountGr / 100)
+        .eq("payment_status", "paid").eq("p24_order_id", String(orderIdFromGateway)).maybeSingle();
+      if (error) return NextResponse.json({ error: "Lookup failed" }, { status: 500 });
+      return NextResponse.json({ ok: Boolean(paid) }, { status: paid ? 200 : 409 });
     }
 
-    const updateOrderWithFallback = async (
-      values: Record<string, unknown>,
-      statusLabel: "paid" | "failed"
-    ): Promise<{ status: "success"; order: UpdatedOrder } | { status: "not-found" | "error" }> => {
-      const { data, error } = await supabaseAdmin
-        .from("orders")
-        .update(values)
-        .eq("p24_session_id", sessionId)
-        .select()
-        .maybeSingle();
-
-      if (error) {
-        console.error(
-          `P24 webhook: ${statusLabel} status update by session id failed`,
-          error
-        );
-        return { status: "error" };
-      }
-
-      if (data) {
-        return { status: "success", order: data as UpdatedOrder };
-      }
-
-      console.warn(
-        `P24 webhook: no order matched session id for ${statusLabel} update`,
-        { sessionId }
-      );
-
-      if (!orderIdFromSession) {
-        return { status: "not-found" };
-      }
-
-      const { data: fallbackData, error: fallbackError } = await supabaseAdmin
-        .from("orders")
-        .update(values)
-        .eq("id", orderIdFromSession)
-        .select()
-        .maybeSingle();
-
-      if (fallbackError) {
-        console.error(
-          `P24 webhook: ${statusLabel} status update by order id failed`,
-          fallbackError
-        );
-        return { status: "error" };
-      }
-
-      if (fallbackData) {
-        return { status: "success", order: fallbackData as UpdatedOrder };
-      }
-
-      console.warn(
-        `P24 webhook: no order matched fallback order id for ${statusLabel} update`,
-        { sessionId, orderIdFromSession }
-      );
-      return { status: "not-found" };
-    };
-
-     const baseValues: Record<string, unknown> = {
-      p24_session_id: String(sessionId),
-      ...(orderIdFromGateway
-        ? { p24_order_id: String(orderIdFromGateway) }
-        : {}),
-    };
-
-
-
-    if (ok) {
-      const paidAt = new Date().toISOString();
-      const updateResult = await updateOrderWithFallback(
-        { ...baseValues, payment_status: "paid", paid_at: paidAt },
-        "paid"
-      );
-
-      if (updateResult.status === "error") {
-        return NextResponse.json({ error: "Update failed" }, { status: 500 });
-      }
-
-      if (updateResult.status === "not-found") {
-        return NextResponse.json({ error: "Order not found" }, { status: 400 });
-      }
-
-      await dispatchOrderToOperations({
-        orderId: String(updateResult.order.id),
-        totalPln: Number(updateResult.order.total_price ?? 0),
-        selectedOption: updateResult.order.selected_option,
-        appUrl: new URL(req.url).origin,
-        logPrefix: "[payments.webhook]",
-      });
-
-      return NextResponse.json({ ok: true });
-    }
-
-    const failedResult = await updateOrderWithFallback(
-      { ...baseValues, payment_status: "failed" },
-      "failed"
-    );
-
-    if (failedResult.status === "error") {
-      return NextResponse.json({ error: "Update failed" }, { status: 500 });
-    }
-
-    if (failedResult.status === "not-found") {
-      return NextResponse.json(
-        { ok: false, error: "Order not found" },
-        { status: 400 }
-      );
-    }
-
-    return NextResponse.json({ ok: false }, { status: 400 });
+    await dispatchOrderToOperations({
+      orderId: String(updated.id),
+      totalPln: Number(updated.total_price),
+      selectedOption: updated.selected_option,
+      appUrl: new URL(req.url).origin,
+      logPrefix: "[p24]",
+    });
+    return NextResponse.json({ ok: true });
   } catch (e: any) {
     console.error("[P24_WEBHOOK_ERROR]", e);
     return NextResponse.json({ error: "Server error" }, { status: 500 });

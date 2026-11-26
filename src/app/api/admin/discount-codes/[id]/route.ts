@@ -22,7 +22,7 @@ function parseDate(v: any): string | null {
 
 export async function PATCH(
   req: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const { session, role } = await getSessionAndRole();
   if (!session || role !== "admin") {
@@ -102,7 +102,7 @@ export async function PATCH(
   const { data, error } = await getSupabaseAdmin()
     .from("discount_codes")
     .update(updates)
-    .eq("id", params.id)
+    .eq("id", (await params).id)
     .select(
       "id, code, type, value, active, public, auto_apply, min_order, max_uses, per_user_max_uses, used_count, starts_at, expires_at"
     )
@@ -119,7 +119,7 @@ export async function PATCH(
 // DELETE = trwałe usunięcie kodu rabatowego
 export async function DELETE(
   _req: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const { session, role } = await getSessionAndRole();
   if (!session || role !== "admin") {
@@ -129,7 +129,7 @@ export async function DELETE(
   const { error } = await getSupabaseAdmin()
     .from("discount_codes")
     .delete()
-    .eq("id", params.id);
+    .eq("id", (await params).id);
 
   if (error) {
     console.error("[discount-codes] DELETE error:", error);

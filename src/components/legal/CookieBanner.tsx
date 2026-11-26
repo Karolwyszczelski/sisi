@@ -2,14 +2,9 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Cookie, X, Shield, ChevronDown } from "lucide-react";
+import { applyGoogleConsent, COOKIE_CONSENT_KEY, type CookieConsent } from "@/lib/analytics";
 
-const KEY = "cookie_consent_v1";
-
-type Consent = {
-  necessary: true;
-  analytics: boolean;
-  marketing: boolean;
-};
+const KEY = COOKIE_CONSENT_KEY;
 
 export default function CookieBanner() {
   const [open, setOpen] = useState(false);
@@ -23,12 +18,10 @@ export default function CookieBanner() {
     } catch { setOpen(true); }
   }, []);
 
-  const save = (c: Consent) => {
+  const save = (c: CookieConsent) => {
     try {
       localStorage.setItem(KEY, JSON.stringify(c));
-      if (c.analytics) {
-        // Tutaj GA/Tag Manager jeśli potrzebny
-      }
+      applyGoogleConsent(c);
     } catch {}
     setOpen(false);
   };

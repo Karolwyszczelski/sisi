@@ -7,6 +7,7 @@ import { Search, Plus, Check } from "lucide-react";
 import CategorySelector from "./CategorySelector";
 import ProductCard from "./ProductCard";
 import useCartStore from "@/store/cartStore";
+import { canonicalizeBurgerMonth, isBurgerMonthName } from "@/lib/burgerMonth";
 import menu from "../../data/product.json";
 
 export interface RawMenuCategory {
@@ -81,7 +82,7 @@ function money(v: any): number {
 function normalizeSupabaseData(data: SupabaseProduct[]): RawMenuCategory[] {
   const map: Record<string, Record<string, any[]>> = {};
 
-  data.forEach((p) => {
+  canonicalizeBurgerMonth(data).forEach((p) => {
     if (p.available === false) return;
 
     const cat = p.category || "Inne";
@@ -150,7 +151,6 @@ export default function MenuSection() {
       const r1 = await supabase
         .from("products")
         .select(selectWithImage)
-        .eq("available", true)
         .order("category", { ascending: true })
         .order("subcategory", { ascending: true })
         .order("name", { ascending: true });
@@ -162,7 +162,6 @@ export default function MenuSection() {
         const r2 = await supabase
           .from("products")
           .select(selectNoImage)
-          .eq("available", true)
           .order("category", { ascending: true })
           .order("subcategory", { ascending: true })
           .order("name", { ascending: true });
@@ -174,7 +173,7 @@ export default function MenuSection() {
       if (error) {
         setUseFallback(true);
         setLoadError("Błąd ładowania z serwera. Pokażę lokalne menu.");
-      } else if (data && data.length > 0) {
+      } else if (data) {
         const normalized = normalizeSupabaseData(data);
         setRemoteMenu(normalized);
         setUseFallback(false);
@@ -187,10 +186,11 @@ export default function MenuSection() {
     } finally {
       setLoading(false);
     }
-  }, [selectedCategory]);
+  }, []);
 
   useEffect(() => {
     fetchFromSupabase();
+    window.addEventListener("focus", fetchFromSupabase);
 
     const channel = supabase
       .channel("public:products")
@@ -200,12 +200,21 @@ export default function MenuSection() {
       .subscribe();
 
     return () => {
+      window.removeEventListener("focus", fetchFromSupabase);
       void supabase.removeChannel(channel);
     };
   }, [fetchFromSupabase]);
 
+  // A monthly edition cannot be ordered from a stale bundled price/availability.
+  const fallbackMenu: RawMenuCategory[] = (menu as RawMenuCategory[]).map((category) => ({
+    ...category,
+    items: category.items?.filter((item) => !isBurgerMonthName(item.name)),
+    subcategories: category.subcategories?.map((sub) => ({
+      ...sub, items: sub.items.filter((item) => !isBurgerMonthName(item.name)),
+    })),
+  }));
   const sourceMenu: RawMenuCategory[] =
-    useFallback || !remoteMenu ? (menu as RawMenuCategory[]) : remoteMenu;
+    useFallback || !remoteMenu ? fallbackMenu : remoteMenu;
 
   const categoryData =
     selectedCategory === "Wszystko" 
@@ -455,7 +464,7 @@ function MobileProductCard({ product, isFirst }: { product: any; isFirst: boolea
   const [expanded, setExpanded] = useState(false);
 
   // Parsuj składniki
-  const ingredients = Array.isArray(product.ingredients) 
+  const ingredients = Array.isArray(product.ingredients) && product.ingredients.length > 0
     ? product.ingredients.join(" · ") 
     : product.description || "";
 

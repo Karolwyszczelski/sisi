@@ -47,60 +47,19 @@ export default function IntegrationsForm() {
 
   useEffect(() => {
     (async () => {
-      // Handle OAuth callback from new API (dotypos_success) or old (token)
-      const dotyposSuccess = searchParams.get("dotypos_success");
       const dotyposError = searchParams.get("dotypos_error");
-      const callbackCloudId = searchParams.get("cloudid");
-      const token = searchParams.get("token");
-      
-      // Handle new callback format
-      if (dotyposSuccess === "connected" && callbackCloudId) {
-        setConnected(true);
-        setCloudId(callbackCloudId);
+      if (dotyposError) console.error("Błąd połączenia Dotypos:", dotyposError);
+      if (dotyposError || searchParams.has("dotypos_success") || searchParams.has("token")) {
         router.replace("/admin/settings");
-        setLoading(false);
-        return;
-      }
-      
-      // Handle error
-      if (dotyposError) {
-        console.error("❌ Błąd połączenia Dotypos:", dotyposError);
-        router.replace("/admin/settings");
-        setLoading(false);
-        return;
-      }
-      
-      // Handle legacy callback (direct token in URL - for old admin.dotykacka.pl flow)
-      if (token && callbackCloudId) {
-        const { error } = await supabase
-          .from("integrations")
-          .upsert(
-            { 
-              id: "dotypos", 
-              refresh_token: token, 
-              cloud_id: callbackCloudId,
-              connected_at: new Date().toISOString(),
-            },
-            { onConflict: "id" }
-          );
-        if (error) {
-          console.error("❌ Błąd zapisu integracji Dotypos:", error.message);
-        } else {
-          setConnected(true);
-          setCloudId(callbackCloudId);
-        }
-        router.replace("/admin/settings");
-        setLoading(false);
-        return;
       }
 
       // Check existing connection
       const { data, error } = await supabase
         .from("integrations")
-        .select("refresh_token, cloud_id, connected_at")
+        .select("cloud_id, connected_at")
         .eq("id", "dotypos")
         .single();
-      if (!error && data?.refresh_token) {
+      if (!error && data?.cloud_id) {
         setConnected(true);
         setCloudId(data.cloud_id);
         if (data.connected_at) {
@@ -201,7 +160,7 @@ export default function IntegrationsForm() {
     setSyncResult(null);
     
     try {
-      const res = await fetch("/api/dotypos/sync-products");
+      const res = await fetch("/api/dotypos/sync-products", { method: "POST" });
       const data = await res.json();
       
       if (data.success) {

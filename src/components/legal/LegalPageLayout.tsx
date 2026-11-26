@@ -8,6 +8,8 @@ interface LegalPageLayoutProps {
   title: string;
   icon: "terms" | "privacy" | "cookies";
   children: React.ReactNode;
+  version?: string;
+  effectiveDate?: string;
 }
 
 const iconMap = {
@@ -22,7 +24,7 @@ const colorMap = {
   cookies: "from-green-400 to-emerald-500",
 };
 
-export default function LegalPageLayout({ title, icon, children }: LegalPageLayoutProps) {
+export default function LegalPageLayout({ title, icon, children, version = LEGAL.docsVersion, effectiveDate = LEGAL.effectiveDate }: LegalPageLayoutProps) {
   const Icon = iconMap[icon];
   const gradient = colorMap[icon];
 
@@ -58,10 +60,10 @@ export default function LegalPageLayout({ title, icon, children }: LegalPageLayo
               <div className="flex items-center gap-3 text-white/50 text-sm">
                 <span className="flex items-center gap-1.5">
                   <Calendar size={14} />
-                  Wersja: {LEGAL.docsVersion}
+                  Wersja: {version}
                 </span>
                 <span className="w-1 h-1 rounded-full bg-white/30" />
-                <span>od {LEGAL.effectiveDate}</span>
+                <span>od {effectiveDate}</span>
               </div>
             </div>
           </div>
@@ -70,29 +72,12 @@ export default function LegalPageLayout({ title, icon, children }: LegalPageLayo
 
       {/* Content */}
       <div className="relative max-w-4xl mx-auto px-6 pb-16">
-        <article className="bg-white/[0.02] backdrop-blur-sm border border-white/10 rounded-3xl p-6 md:p-10 shadow-2xl">
-          {/* Article Content */}
-          <div className="prose prose-invert prose-lg max-w-none
-            prose-headings:text-white prose-headings:font-bold
-            prose-h2:text-xl prose-h2:md:text-2xl prose-h2:mt-10 prose-h2:mb-4 prose-h2:pb-2 prose-h2:border-b prose-h2:border-white/10
-            prose-p:text-white/80 prose-p:leading-relaxed
-            prose-li:text-white/80 prose-li:marker:text-yellow-400
-            prose-ul:space-y-2
-            prose-ol:space-y-2
-            prose-a:text-yellow-400 prose-a:no-underline hover:prose-a:text-yellow-300 hover:prose-a:underline
-            prose-strong:text-white prose-strong:font-semibold
-            prose-hr:border-white/10 prose-hr:my-10
-          ">
-            {children}
-          </div>
-        </article>
-
         {/* Company Info Card */}
-        <div className="mt-8 bg-white/[0.03] border border-white/10 rounded-2xl p-6 md:p-8">
-          <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+        <div className="mb-6 bg-white/[0.03] border border-white/10 rounded-2xl p-6 md:p-8">
+          <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
             <Building size={20} className="text-yellow-400" />
-            Dane administratora
-          </h3>
+            {icon === "terms" ? "Dane sprzedawcy i kontakt" : "Dane administratora i kontakt"}
+          </h2>
           <div className="grid md:grid-cols-2 gap-4 text-sm">
             <div className="space-y-3">
               <p className="text-white/80">
@@ -103,6 +88,7 @@ export default function LegalPageLayout({ title, icon, children }: LegalPageLayo
               </p>
               <p className="text-white/60">
                 {LEGAL.registeredAddress}
+                {icon === "terms" && <><br />Lokal: {LEGAL.restaurantAddress}</>}
               </p>
             </div>
             <div className="space-y-3">
@@ -123,6 +109,23 @@ export default function LegalPageLayout({ title, icon, children }: LegalPageLayo
             </div>
           </div>
         </div>
+
+        <article className="bg-white/[0.02] backdrop-blur-sm border border-white/10 rounded-3xl p-6 md:p-10 shadow-2xl">
+          {/* Article Content */}
+          <div className="prose prose-invert prose-lg max-w-none
+            prose-headings:text-white prose-headings:font-bold
+            prose-h2:text-xl prose-h2:md:text-2xl prose-h2:mt-10 prose-h2:mb-4 prose-h2:pb-2 prose-h2:border-b prose-h2:border-white/10
+            prose-p:text-white/80 prose-p:leading-relaxed
+            prose-li:text-white/80 prose-li:marker:text-yellow-400
+            prose-ul:space-y-2
+            prose-ol:space-y-2
+            prose-a:text-yellow-400 prose-a:no-underline hover:prose-a:text-yellow-300 hover:prose-a:underline
+            prose-strong:text-white prose-strong:font-semibold
+            prose-hr:border-white/10 prose-hr:my-10
+          ">
+            {children}
+          </div>
+        </article>
 
         {/* Quick Links */}
         <div className="mt-8 flex flex-wrap gap-3">

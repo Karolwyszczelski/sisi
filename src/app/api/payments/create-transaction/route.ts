@@ -2,6 +2,7 @@
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+import { verifyPayment } from "@/lib/orderLink";
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { amountToGrosze, hostFromEnv, p24SignRegisterMD5 } from "@/lib/p24";
@@ -29,18 +30,23 @@ export async function POST(req: Request) {
       url.searchParams.get("orderId") ??
       url.searchParams.get("id");
 
-    const email = String(body?.email ?? "");
-    const customerName = String(body?.customerName ?? "");
-
     if (!orderId) return NextResponse.json({ error: "orderId missing" }, { status: 400 });
+
+    if (!verifyPayment(String(orderId), body?.paymentToken)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
 
     const { data: order, error } = await supabase
       .from("orders")
-      .select("id,total_price")
+      .select("id,total_price,payment_method,payment_status,p24_token,contact_email,name")
       .eq("id", orderId)
       .maybeSingle();
 
     if (error || !order) return NextResponse.json({ error: "order not found" }, { status: 404 });
+
+    if (order.payment_method !== "Online" || order.payment_status !== "pending" || Number(order.total_price) <= 0) {
+      return NextResponse.json({ error: "Zamówienie nie oczekuje na płatność online." }, { status: 409 });
+    }
 
     const { P24_MERCHANT_ID, P24_POS_ID, P24_CRC_KEY, APP_BASE_URL, NEXT_PUBLIC_BASE_URL } = process.env;
     if (!P24_MERCHANT_ID || !P24_POS_ID || !P24_CRC_KEY)
@@ -52,7 +58,10 @@ export async function POST(req: Request) {
     const baseUrl = (APP_BASE_URL || NEXT_PUBLIC_BASE_URL || "https://www.sisiciechanow.pl").replace(/\/+$/, "");
     const host = hostFromEnv();
 
-    const p24_url_return = `${baseUrl}/pickup-order?id=${orderId}`;
+    const p24_url_return = `${baseUrl}/pickup-order?${new URLSearchParams({ id: String(orderId), t: body.paymentToken })}`;
+    if (order.p24_token) {
+      return NextResponse.json({ paymentUrl: `https://${host}/trnRequest/${order.p24_token}`, returnUrl: p24_url_return });
+    }
     const p24_url_status = `${baseUrl}/api/p24/callback`;
 
     const p24_sign = p24SignRegisterMD5(sessionId, P24_MERCHANT_ID, amountGr, "PLN", P24_CRC_KEY);
@@ -64,8 +73,8 @@ export async function POST(req: Request) {
       p24_amount: String(amountGr),
       p24_currency: "PLN",
       p24_description: `Zamówienie #${orderId}`,
-      p24_email: email,
-      p24_client: customerName,
+      p24_email: String(order.contact_email ?? ""),
+      p24_client: String(order.name ?? ""),
       p24_country: "PL",
       p24_language: "pl",
       p24_url_return,
@@ -90,7 +99,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "trnRegister failed" }, { status: 502 });
     }
 
-    await supabase
+    const { data: registered, error: registrationError } = await supabase
       .from("orders")
       .update({
         payment_method: "Online",
@@ -98,7 +107,13 @@ export async function POST(req: Request) {
         p24_session_id: sessionId,
         p24_token: p24Token,
       })
-      .eq("id", orderId);
+      .eq("id", orderId)
+      .eq("payment_status", "pending")
+      .eq("total_price", order.total_price)
+      .select("id").maybeSingle();
+    if (registrationError || !registered) {
+      return NextResponse.json({ error: "Nie udało się zapisać sesji płatności." }, { status: registrationError ? 500 : 409 });
+    }
 
     const paymentUrl = `https://${host}/trnRequest/${p24Token}`;
     return NextResponse.json({ paymentUrl, token: p24Token, returnUrl: p24_url_return });

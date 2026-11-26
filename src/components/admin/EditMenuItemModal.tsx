@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { useForm, useFieldArray } from "react-hook-form";
 import productsData from "@/data/product.json";
-import type { MenuItem } from "@/app/admin/menu/page";
+import type { MenuItem } from "@/types/menu";
 import { useTheme } from "@/components/admin/ThemeContext";
 import {
   Pencil, X, Tag, Coins, FileText, Layers, List,
@@ -36,7 +36,7 @@ export default function EditMenuItemModal({ item, onClose, onSave }: Props) {
       subcategory: item.subcategory,
       description: item.description,
       imageFile: undefined,
-      ingredients: item.ingredients.map(v => ({ value: v })),
+      ingredients: (item.ingredients ?? []).map(v => ({ value: v })),
     },
   });
   const { fields, append, remove } = useFieldArray({ control, name: "ingredients" });
@@ -52,7 +52,7 @@ export default function EditMenuItemModal({ item, onClose, onSave }: Props) {
       subcategory: item.subcategory,
       description: item.description,
       imageFile: undefined,
-      ingredients: item.ingredients.map(v => ({ value: v })),
+      ingredients: (item.ingredients ?? []).map(v => ({ value: v })),
     });
   }, [item, reset]);
 

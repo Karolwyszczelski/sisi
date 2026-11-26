@@ -1,10 +1,13 @@
 // src/components/menu/CheckoutModal.tsx
 "use client";
 
+import { ORDER_TERMS_VERSION as TERMS_VERSION } from "@/config/termsSnapshot";
+import { depositForOrder } from "@/lib/containerDeposit";
 import React, { useState, useEffect, useMemo, useRef, useDeferredValue, useCallback } from "react";
 import Script from "next/script";
 import { X, MapPin, ShoppingBag, Truck } from "lucide-react";
 import useIsClient from "@/lib/useIsClient";
+import { inferDefaultMeat, resolveOrderMeat } from "@/lib/orderMeat";
 import useCartStore from "@/store/cartStore";
 import { createClient } from "@supabase/supabase-js";
 import QRCode from "react-qr-code";
@@ -14,6 +17,13 @@ import { toZonedTime } from "date-fns-tz";
 import clsx from "clsx";
 import { createPortal } from "react-dom";
 import { countPackagingUnits } from "@/lib/packaging";
+import {
+  cartItemsToAnalytics,
+  storePendingPurchase,
+  trackEvent,
+  trackPurchase,
+  type PurchasePayload,
+} from "@/lib/analytics";
 
 declare global {
   interface Window {
@@ -64,7 +74,7 @@ const supabase = new Proxy({} as ReturnType<typeof getSupabase>, {
   },
 });
 
-const TERMS_VERSION = process.env.NEXT_PUBLIC_TERMS_VERSION || "2025-09-15";
+
 const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || "";
 const THANKS_QR_URL = process.env.NEXT_PUBLIC_REVIEW_QR_URL || "https://g.co/kgs/47NSDMH";
 
@@ -94,7 +104,7 @@ const toPrice = (v: any): number => {
   return 0;
 };
 
-type Product = { id: number; name: string; category: string | null; subcategory: string | null; available_addons: string[] | null };
+type Product = { id: number; name: string; category: string | null; subcategory: string | null; deposit_grosze?: number; available_addons: string[] | null };
 
 /* === normalizacja nazw dla pewnego dopasowania product_id === */
 const normalizeName = (s?: string) =>
@@ -138,17 +148,6 @@ const safeFetch = async (url: string, opts: RequestInit) => {
 };
 
 /* burger/mięso */
-const inferDefaultMeat = (meta?: Product, name?: string): "wołowina" | "kurczak" | null => {
-  const n = (name || meta?.name || "").toLowerCase();
-  const cat = (meta?.category || "").toLowerCase();
-  const sub = (meta?.subcategory || "").toLowerCase();
-
-  if (sub.includes("vege") || n.includes("vege")) return null;
-  if (sub.includes("kurczak") || n.includes("chicken")) return "kurczak";
-  if (cat === "burger" || n.includes("burger")) return "wołowina";
-  return null;
-};
-
 const isBurger = (meta?: Product, name?: string) => {
   const cat = (meta?.category || "").toLowerCase();
   const n = (name || meta?.name || "").toLowerCase();
@@ -167,22 +166,6 @@ const isFries = (meta?: Product, name?: string) => {
     cat.includes("fryt") ||
     n.includes("fries")
   );
-};
-
-// Kaucja za butelki/puszki (1 zł) - dla napojów oprócz wody
-const DEPOSIT_AMOUNT = 1;
-
-const isDrinkWithDeposit = (meta?: Product, name?: string) => {
-  const cat = (meta?.category || "").toLowerCase();
-  const n = (name || meta?.name || "").toLowerCase();
-  
-  // Sprawdź czy to napój
-  const isDrink = cat === "napoje" || cat === "napój";
-  if (!isDrink) return false;
-  
-  // Woda nie ma kaucji
-  const isWater = n.includes("woda") || n.includes("kropla");
-  return !isWater;
 };
 
 const MEAT_OPTIONS: Array<"wołowina" | "kurczak"> = ["wołowina", "kurczak"];
@@ -214,7 +197,6 @@ const ProductItem: React.FC<{
     // burger: pełne dodatki; frytki: tylko sosy
   const burger = isBurger(meta, prod?.name);
   const fries = isFries(meta, prod?.name);
-  const drinkWithDeposit = isDrinkWithDeposit(meta, prod?.name);
 
   // Dla burgerów i frytek - zawsze wszystkie dodatki z bazy (lub fallback)
   // Fallback do AVAILABLE_ADDONS gdy baza nie zwróci danych
@@ -249,12 +231,10 @@ const ProductItem: React.FC<{
   const extraMeatCost = burger ? (prod.extraMeatCount || 0) * 15 : 0;
   
   // Kaucja za napoje (oprócz wody)
-  const depositCost = drinkWithDeposit ? DEPOSIT_AMOUNT * (prod.quantity || 1) : 0;
 
-  const lineTotal = (priceNum + addonsCost + extraMeatCost) * (prod.quantity || 1) + depositCost;
+  const lineTotal = (priceNum + addonsCost + extraMeatCost) * (prod.quantity || 1);
 
-  const selectedMeat =
-    (prod.meatType as string | undefined) ?? (burger ? defaultMeat : null) ?? null;
+  const selectedMeat = burger && defaultMeat === "wołowina" ? prod.meatType ?? defaultMeat : defaultMeat;
 
   const supportsMeat = burger && selectedMeat !== null;
   const supportsAddons = burger || fries;
@@ -270,18 +250,13 @@ const ProductItem: React.FC<{
         <span className="text-yellow-400 font-bold text-lg">{lineTotal.toFixed(2).replace(".", ",")} zł</span>
       </div>
       
-      {drinkWithDeposit && (
-        <div className="text-xs text-orange-400 mb-3 bg-orange-400/10 px-3 py-1.5 rounded-lg inline-block">
-          +{(DEPOSIT_AMOUNT * (prod.quantity || 1)).toFixed(2).replace(".", ",")} zł kaucja
-        </div>
-      )}
 
       <div className="text-xs text-white/70 space-y-2">
         {supportsMeat && (
           <>
             <div className="font-semibold text-white text-sm">Mięso: <span className="text-white/50 font-normal text-xs">(w cenie)</span></div>
             <div className="flex gap-2">
-              {MEAT_OPTIONS.map((opt) => (
+              {(defaultMeat === "kurczak" ? [defaultMeat] : MEAT_OPTIONS).map((opt) => (
                 <button
                   key={opt}
                   className={clsx(
@@ -611,7 +586,7 @@ export default function CheckoutModal() {
   useEffect(() => {
     supabase
       .from("products")
-      .select("id,name,category,subcategory,available_addons")
+      .select("id,name,category,subcategory,available_addons,deposit_grosze")
       .then((r) => {
         if (!r.error && r.data) setProducts((r.data as Product[]) || []);
       });
@@ -787,7 +762,6 @@ export default function CheckoutModal() {
       const meta = productByNorm.get(normalizeName(it.name));
       const burger = isBurger(meta, it?.name);
       const fries = isFries(meta, it?.name);
-      const drinkWithDeposit = isDrinkWithDeposit(meta, it?.name);
 
       // Pobierz listę dodatków - zawsze wszystkie z bazy lub fallback
       const allAddonNames = addonsFromDb.length > 0 
@@ -817,9 +791,8 @@ export default function CheckoutModal() {
       const extraMeatCost = burger ? (it.extraMeatCount || 0) * 15 : 0;
       
       // Kaucja za napoje (oprócz wody)
-      const depositCost = drinkWithDeposit ? DEPOSIT_AMOUNT : 0;
       
-      return acc + (priceNum + addonsCost + extraMeatCost + depositCost) * qty;
+      return acc + (priceNum + addonsCost + extraMeatCost) * qty;
 
     }, 0);
   }, [items, productByNorm, addonsFromDb, getAddonPrice]);
@@ -833,6 +806,10 @@ export default function CheckoutModal() {
       : 0;
   const packagingCost = packagingUnits * packagingCostSetting;
   const subtotal = baseTotal + packagingCost;
+  const deposit = items.reduce((sum, item) => {
+    const product = productByNorm.get(normalizeName(item.name));
+    return sum + depositForOrder(selectedOption, product?.deposit_grosze, item.quantity || 1);
+  }, 0);
 
   const calcDelivery = async (destinationPlaceId: string) => {
     setDeliveryInfo(null);
@@ -991,8 +968,33 @@ export default function CheckoutModal() {
     autoPromoKey,
   ]);
 
-  const totalWithDelivery = Math.max(0, subtotal + (deliveryInfo?.cost || 0) - discount);
+  const calculatedTotal = Math.max(0, subtotal + (deliveryInfo?.cost || 0) - discount + deposit);
+  const [serverQuote, setServerQuote] = useState<{ total: number; products: number; packaging: number; delivery: number; discount: number; deposit: number; lines: number[] } | null>(null);
+  useEffect(() => {
+    setServerQuote(null);
+  }, [items, calculatedTotal, selectedOption, paymentMethod, contactEmail, deliveryPlaceId, promo, isCheckoutOpen]);
+  const totalWithDelivery = serverQuote?.total ?? calculatedTotal;
   const shouldHideOrderActions = Boolean(TURNSTILE_SITE_KEY && turnstileError);
+
+  useEffect(() => {
+    if (!isCheckoutOpen || !selectedOption) return;
+    trackEvent("add_shipping_info", {
+      currency: "PLN",
+      value: totalWithDelivery,
+      shipping_tier: selectedOption,
+      items: cartItemsToAnalytics(items),
+    });
+  }, [isCheckoutOpen, selectedOption]);
+
+  useEffect(() => {
+    if (!isCheckoutOpen || !paymentMethod) return;
+    trackEvent("add_payment_info", {
+      currency: "PLN",
+      value: totalWithDelivery,
+      payment_type: paymentMethod,
+      items: cartItemsToAnalytics(items),
+    });
+  }, [isCheckoutOpen, paymentMethod]);
 
   const closeCheckoutModal = () => {
     originalCloseCheckoutModal();
@@ -1062,7 +1064,7 @@ export default function CheckoutModal() {
   const buildItemsPayload = () =>
     items.map((item: any, index: number) => {
       const meta = findMetaByName(item.name);
-      const inferred = inferDefaultMeat(meta, item.name);
+      const meatType = resolveOrderMeat({ ...meta, name: item.name, category: meta?.category ?? item.category }, item.meatType);
       const burger = isBurger(meta, item.name);
       const fries = isFries(meta, item.name);
 
@@ -1079,7 +1081,7 @@ export default function CheckoutModal() {
         unit_price: toPrice(item.price),
         category: item.category ?? meta?.category ?? null,
         options: {
-          meatType: burger ? (item.meatType ?? inferred) : null,
+          meatType: burger ? meatType : null,
           extraMeatCount: burger ? item.extraMeatCount : 0,
           addons: sanitizedAddons,
           swaps: burger ? item.swaps : [],
@@ -1088,6 +1090,27 @@ export default function CheckoutModal() {
       };
 
     });
+
+  const buildAnalyticsPurchase = (
+    orderId: string | number,
+    serverTotal: number,
+    itemsPayload: ReturnType<typeof buildItemsPayload>,
+  ): PurchasePayload => ({
+    transaction_id: String(orderId),
+    value: Number(serverTotal) || totalWithDelivery,
+    currency: "PLN",
+    shipping: deliveryInfo?.cost || 0,
+    ...(promo?.code ? { coupon: promo.code } : {}),
+    ...(paymentMethod ? { payment_type: paymentMethod } : {}),
+    ...(selectedOption ? { fulfillment_type: selectedOption } : {}),
+    items: itemsPayload.map((item: any) => ({
+      item_id: String(item.product_id ?? item.name),
+      item_name: item.name,
+      ...(item.category ? { item_category: item.category } : {}),
+      price: Number(item.unit_price) || 0,
+      quantity: item.quantity || 1,
+    })),
+  });
 
   const hoursGuardFail = () => {
     const nowPl = toZonedTime(new Date(), "Europe/Warsaw");
@@ -1164,9 +1187,14 @@ export default function CheckoutModal() {
         cache: "no-store",
       });
 
-      if (res.status === 409) return { retry: true as const };
       const text = await res.text();
       let data: any; try { data = JSON.parse(text); } catch { data = { raw: text }; }
+      if (res.status === 409 && data.code === "PRICE_CHANGED" && typeof data.total === "number") {
+        setServerQuote(data.quote ?? null);
+        setShowConfirmation(false);
+        throw new Error(`Kwota zmieniła się na ${data.total.toFixed(2).replace(".", ",")} zł. Sprawdź ją i potwierdź zamówienie ponownie.`);
+      }
+      if (res.status === 409 && data.error === "duplicate") return { retry: true as const };
       if (!res.ok) throw new Error(data.error || data.message || `HTTP ${res.status}`);
       return { retry: false as const, data };
     };
@@ -1202,7 +1230,17 @@ export default function CheckoutModal() {
       const orderPayload = buildOrderPayload();
       const itemsPayload = buildItemsPayload();
 
-      await postWithTurnstile("/api/orders/create", { orderPayload, itemsPayload });
+      const data = await postWithTurnstile("/api/orders/create", { orderPayload, itemsPayload });
+      const purchase = buildAnalyticsPurchase(data.orderId, data.total, itemsPayload);
+
+      trackEvent("order_submitted", {
+        transaction_id: purchase.transaction_id,
+        value: purchase.value,
+        currency: "PLN",
+        payment_type: paymentMethod,
+        fulfillment_type: selectedOption,
+      });
+      trackPurchase(purchase);
 
       try { tsIdsRef.current.forEach(({ id }) => window.turnstile?.reset(id)); } catch {}
       clearCart();
@@ -1260,13 +1298,24 @@ export default function CheckoutModal() {
         },
         body: JSON.stringify({
           orderId: newOrderId,
-          amount: amountFromServer,
+          paymentToken: data.paymentToken,
           email: effectiveEmail,
           customerName: name,
         }),
       });
 
-      if (pay.paymentUrl) window.location.href = pay.paymentUrl;
+      if (pay.paymentUrl) {
+        const purchase = buildAnalyticsPurchase(newOrderId, amountFromServer, itemsPayload);
+        trackEvent("order_submitted", {
+          transaction_id: purchase.transaction_id,
+          value: purchase.value,
+          currency: "PLN",
+          payment_type: "Online",
+          fulfillment_type: selectedOption,
+        });
+        storePendingPurchase(purchase);
+        window.location.href = pay.paymentUrl;
+      }
       else throw new Error("Brak URL do płatności");
     } catch (e: any) {
       setErrorMessage(e.message || "Nie udało się zainicjować płatności.");
@@ -1281,18 +1330,28 @@ export default function CheckoutModal() {
 
   if (!isClient || !isCheckoutOpen) return null;
 
-  /* zgody */
-  const LegalConsentEl = (
-    <label className="flex items-start gap-2 mt-3 text-xs leading-5 text-white/80">
-      <input type="checkbox" checked={legalAccepted} onChange={(e) => setLegalAccepted(e.target.checked)} className="mt-0.5 accent-yellow-400" />
-      <span>
-        Akceptuję{" "}
-        <a href="/legal/regulamin" target="_blank" rel="noopener noreferrer" className="underline text-yellow-400 hover:text-yellow-300">Regulamin</a>{" "}
-        oraz{" "}
-        <a href="/legal/polityka-prywatnosci" target="_blank" rel="noopener noreferrer" className="underline text-yellow-400 hover:text-yellow-300">Politykę prywatności</a>{" "}
-        (v{TERMS_VERSION}).
-      </span>
-    </label>
+  const renderLegalConsent = (noticeId: string) => (
+    <div className="mt-3 space-y-2 text-xs leading-5 text-white/80">
+      <label className="flex items-start gap-2">
+        <input
+          type="checkbox"
+          checked={legalAccepted}
+          onChange={(event) => setLegalAccepted(event.target.checked)}
+          aria-describedby={noticeId}
+          className="mt-0.5 accent-yellow-400"
+        />
+        <span>
+          Zapoznałem się z{" "}
+          <a href="/regulamin" target="_blank" rel="noopener noreferrer" className="underline text-yellow-400 hover:text-yellow-300">regulaminem</a>{" "}
+          (v{TERMS_VERSION}) i go akceptuję.
+        </span>
+      </label>
+      <p id={noticeId}>
+        Składając zamówienie, przekazujesz restauracji dane potrzebne do jego
+        realizacji i kontaktu w sprawie zamówienia. Szczegóły znajdziesz w{" "}
+        <a href="/polityka-prywatnosci" target="_blank" rel="noopener noreferrer" className="underline text-yellow-400 hover:text-yellow-300">polityce prywatności</a>.
+      </p>
+    </div>
   );
 
   // Przycisk nieaktywny gdy brak weryfikacji Turnstile
@@ -1357,7 +1416,7 @@ export default function CheckoutModal() {
               </div>
             ) : (
               <>
-                {errorMessage && !promo && <div className="mb-4 bg-red-500/20 border border-red-500/30 text-red-400 px-4 py-2 rounded-xl">{errorMessage}</div>}
+                {errorMessage && <div className="mb-4 bg-red-500/20 border border-red-500/30 text-red-400 px-4 py-2 rounded-xl">{errorMessage}</div>}
 
                 {/* STEP 2 - Sposób odbioru */}
                 {checkoutStep === 2 && (
@@ -1512,7 +1571,7 @@ export default function CheckoutModal() {
                             {deliveryInfo.pricingCity
                               ? `${deliveryInfo.pricingCity}: opłata stała`
                               : `Trasa: ${deliveryInfo.billableDistanceKm} km × ${deliveryInfo.costPerKm.toFixed(2)} zł/km`}
-                            {" • "}Koszt dostawy: {deliveryInfo.cost.toFixed(2)} zł
+                            {" • "}Koszt dostawy: {(serverQuote?.delivery ?? deliveryInfo.cost).toFixed(2)} zł
                             {" • "}ETA {deliveryInfo.eta}
                           </p>
                         )}
@@ -1525,6 +1584,7 @@ export default function CheckoutModal() {
                         <input type="text" placeholder="Adres (opcjonalnie)" className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/40 focus:border-yellow-400/50 focus:outline-none" value={optionalAddress} onChange={(e) => setOptionalAddress(e.target.value)} disabled={submitting} />
                       )}
                       <input type="email" placeholder="Email (wymagany do potwierdzenia)" className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/40 focus:border-yellow-400/50 focus:outline-none" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} disabled={submitting} />
+                      <p className="text-xs leading-5 text-white/70">Informacje o przetwarzaniu danych kontaktowych znajdziesz w <a href="/polityka-prywatnosci" target="_blank" rel="noopener noreferrer" className="underline text-yellow-400">polityce prywatności</a>.</p>
                       {contactEmail !== "" && !validEmail && <p className="text-xs text-red-400">Podaj poprawny adres e-mail.</p>}
                     </div>
 
@@ -1536,10 +1596,11 @@ export default function CheckoutModal() {
                         {/* Rozpisane produkty z dodatkami */}
                         <div className="space-y-2 max-h-[200px] overflow-y-auto">
                           {items.map((item, idx) => {
+                            const meta = findMetaByName(item.name);
+                            const meatType = resolveOrderMeat({ ...meta, name: item.name, category: meta?.category ?? item.category }, item.meatType);
                             const addonsCost = (item.addons || []).reduce((sum: number, addon: string) => sum + getAddonPrice(addon), 0);
                             const extraMeatCost = isBurger(findMetaByName(item.name), item.name) ? (item.extraMeatCount || 0) * 15 : 0;
-                            const depositCost = isDrinkWithDeposit(findMetaByName(item.name), item.name) ? DEPOSIT_AMOUNT * (item.quantity || 1) : 0;
-                            const itemTotal = (toPrice(item.price) + addonsCost + extraMeatCost) * (item.quantity || 1) + depositCost;
+                            const itemTotal = (toPrice(item.price) + addonsCost + extraMeatCost) * (item.quantity || 1);
                             
                             return (
                               <div key={idx} className="bg-zinc-800/50 rounded-lg p-3 border border-white/5">
@@ -1548,12 +1609,12 @@ export default function CheckoutModal() {
                                     <span className="text-white font-medium text-sm">{item.name}</span>
                                     <span className="text-white/50 text-xs ml-1">x{item.quantity || 1}</span>
                                   </div>
-                                  <span className="text-yellow-400 font-semibold text-sm">{itemTotal.toFixed(2)} zł</span>
+                                  <span className="text-yellow-400 font-semibold text-sm">{(serverQuote?.lines[idx] ?? itemTotal).toFixed(2)} zł</span>
                                 </div>
                                 {/* Mięso */}
-                                {item.meatType && (
+                                {meatType && (
                                   <div className="text-xs text-white/50 mt-1">
-                                    Mięso: {item.meatType === "wołowina" ? "🐂 Wołowina" : "🐔 Kurczak"}
+                                    Mięso: {meatType === "wołowina" ? "🐂 Wołowina" : "🐔 Kurczak"}
                                   </div>
                                 )}
                                 {/* Dodatki */}
@@ -1580,10 +1641,10 @@ export default function CheckoutModal() {
                         </div>
 
                         <div className="border-t border-white/10 pt-3 space-y-2">
-                          <div className="flex justify-between text-sm"><span className="text-white/60">Produkty:</span><span className="text-white font-medium">{baseTotal.toFixed(2)} zł</span></div>
-                          {(selectedOption === "takeaway" || selectedOption === "delivery") && <div className="flex justify-between text-sm"><span className="text-white/60">Opakowania ({packagingUnits} szt.):</span><span className="text-white font-medium">{packagingCost.toFixed(2)} zł</span></div>}
-                          {deliveryInfo && <div className="flex justify-between text-sm"><span className="text-white/60">Dostawa:</span><span className="text-white font-medium">{deliveryInfo.cost.toFixed(2)} zł</span></div>}
-                          {discount > 0 && <div className="flex justify-between text-sm"><span className="text-white/60">Rabat:</span><span className="text-white font-medium">-{discount.toFixed(2)} zł</span></div>}
+                          <div className="flex justify-between text-sm"><span className="text-white/60">Produkty:</span><span className="text-white font-medium">{(serverQuote?.products ?? baseTotal).toFixed(2)} zł</span></div>
+                          {(selectedOption === "takeaway" || selectedOption === "delivery") && <div className="flex justify-between text-sm"><span className="text-white/60">Opakowania ({packagingUnits} szt.):</span><span className="text-white font-medium">{(serverQuote?.packaging ?? packagingCost).toFixed(2)} zł</span></div>}
+                          {deliveryInfo && <div className="flex justify-between text-sm"><span className="text-white/60">Dostawa:</span><span className="text-white font-medium">{(serverQuote?.delivery ?? deliveryInfo.cost).toFixed(2)} zł</span></div>}
+                          {(serverQuote?.discount ?? discount) > 0 && <div className="flex justify-between text-sm"><span className="text-white/60">Rabat:</span><span className="text-white font-medium">-{(serverQuote?.discount ?? discount).toFixed(2)} zł</span></div>}
                         </div>
 
                         {selectedOption === "delivery" && outOfRange && (
@@ -1596,11 +1657,12 @@ export default function CheckoutModal() {
                         <PromoSectionExternal
                           promo={promo}
                           promoError={promoError}
-                          autoPromo={autoPromo}
+                          autoPromo={serverQuote ? null : autoPromo}
                           onApply={applyPromo}
                           onClear={clearPromo}
                         />
 
+                        {(serverQuote?.deposit ?? deposit) > 0 && <div className="flex justify-between text-sm"><span>Kaucja zwrotna:</span><span>{(serverQuote?.deposit ?? deposit).toFixed(2)} zł</span></div>}
                         <div className="flex justify-between items-center font-bold text-lg border-t border-white/10 pt-3 mt-2">
                           <span className="text-white">Razem:</span>
                           <span className="text-white text-xl">{totalWithDelivery.toFixed(2)} zł</span>
@@ -1619,7 +1681,7 @@ export default function CheckoutModal() {
                             ))}
                           </div>
 
-                          {LegalConsentEl}
+                          {renderLegalConsent("checkout-privacy-mobile")}
 
                           {TURNSTILE_SITE_KEY ? (
                             <div className="mt-3">
@@ -1657,7 +1719,7 @@ export default function CheckoutModal() {
                                 return;
                               }
                               if (!legalAccepted) {
-                                setErrorMessage("Zaakceptuj regulamin i politykę prywatności.");
+                                setErrorMessage("Zaakceptuj regulamin.");
                                 return;
                               }
                               setShowConfirmation(true);
@@ -1667,7 +1729,7 @@ export default function CheckoutModal() {
                             className="flex-1 py-3 bg-white text-black rounded-xl font-bold disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation inline-flex items-center justify-center gap-2 hover:bg-white/90 transition-all"
                           >
                             {submitting ? <Spinner /> : null}
-                            {submitting ? "Przetwarzanie…" : `Zamawiam • ${totalWithDelivery.toFixed(2)} zł`}
+                            {submitting ? "Przetwarzanie…" : "Przejdź do potwierdzenia"}
                           </button>
                         ) : (
                           <button
@@ -1677,7 +1739,7 @@ export default function CheckoutModal() {
                             className="flex-1 py-3 bg-green-500 text-white rounded-xl font-bold hover:bg-green-400 touch-manipulation inline-flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed transition text-sm"
                           >
                             {submitting ? <Spinner /> : "✓"}
-                            {submitting ? "Składanie…" : `Potwierdź • ${paymentMethod}`}
+                            {submitting ? "Składanie…" : "Zamówienie z obowiązkiem zapłaty"}
                           </button>
                         )}
                       </div>
@@ -1745,7 +1807,7 @@ export default function CheckoutModal() {
                     <div className="border-t border-white/10 pt-4 hidden lg:block">
                       <div className="flex justify-between font-semibold text-white text-lg">
                         <span>Suma produktów:</span>
-                        <span>{baseTotal.toFixed(2)} zł</span>
+                        <span>{(serverQuote?.products ?? baseTotal).toFixed(2)} zł</span>
                       </div>
                     </div>
 
@@ -1764,7 +1826,7 @@ export default function CheckoutModal() {
                     <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-zinc-900 border-t border-white/10 p-4 z-50">
                       <div className="flex justify-between items-center mb-2">
                         <span className="text-white/70 text-sm">Suma:</span>
-                        <span className="text-yellow-400 font-bold text-lg">{baseTotal.toFixed(2)} zł</span>
+                        <span className="text-yellow-400 font-bold text-lg">{(serverQuote?.products ?? baseTotal).toFixed(2)} zł</span>
                       </div>
                       <button
                         onClick={nextStep}
@@ -1788,9 +1850,9 @@ export default function CheckoutModal() {
             <aside className="hidden lg:block w-[300px] flex-shrink-0">
               <div className="sticky top-4 bg-zinc-900 border border-white/10 rounded-2xl shadow-xl p-5 space-y-3">
                 <h2 className="text-lg font-semibold text-white">Podsumowanie</h2>
-                <div className="flex justify-between text-sm text-white/70"><span>Produkty:</span><span className="text-white">{baseTotal.toFixed(2)} zł</span></div>
-                {(selectedOption === "takeaway" || selectedOption === "delivery") && <div className="flex justify-between text-sm text-white/70"><span>Opakowania ({packagingUnits} szt.):</span><span className="text-white">{packagingCost.toFixed(2)} zł</span></div>}
-                {deliveryInfo && <div className="flex justify-between text-sm text-white/70"><span>Dostawa:</span><span className="text-white">{deliveryInfo.cost.toFixed(2)} zł</span></div>}
+                <div className="flex justify-between text-sm text-white/70"><span>Produkty:</span><span className="text-white">{(serverQuote?.products ?? baseTotal).toFixed(2)} zł</span></div>
+                {(selectedOption === "takeaway" || selectedOption === "delivery") && <div className="flex justify-between text-sm text-white/70"><span>Opakowania ({packagingUnits} szt.):</span><span className="text-white">{(serverQuote?.packaging ?? packagingCost).toFixed(2)} zł</span></div>}
+                {deliveryInfo && <div className="flex justify-between text-sm text-white/70"><span>Dostawa:</span><span className="text-white">{(serverQuote?.delivery ?? deliveryInfo.cost).toFixed(2)} zł</span></div>}
 
                 {selectedOption === "delivery" && outOfRange && (
                   <p className="text-xs text-red-400">Adres poza zasięgiem dostawy.</p>
@@ -1802,15 +1864,16 @@ export default function CheckoutModal() {
            <PromoSectionExternal
   promo={promo}
   promoError={promoError}
-  autoPromo={autoPromo}
+  autoPromo={serverQuote ? null : autoPromo}
   onApply={applyPromo}
   onClear={clearPromo}
 />
 
 
-                {discount > 0 && <div className="flex justify-between text-sm text-green-400"><span>Rabat:</span><span>-{discount.toFixed(2)} zł</span></div>}
+                {(serverQuote?.discount ?? discount) > 0 && <div className="flex justify-between text-sm text-green-400"><span>Rabat:</span><span>-{(serverQuote?.discount ?? discount).toFixed(2)} zł</span></div>}
 
-                <div className="flex justify-between font-semibold text-white border-t border-white/10 pt-3 mt-2"><span>RAZEM:</span><span>{totalWithDelivery.toFixed(2)} zł</span></div>
+                {(serverQuote?.deposit ?? deposit) > 0 && <div className="flex justify-between text-sm"><span>Kaucja zwrotna:</span><span>{(serverQuote?.deposit ?? deposit).toFixed(2)} zł</span></div>}
+                        <div className="flex justify-between font-semibold text-white border-t border-white/10 pt-3 mt-2"><span>RAZEM:</span><span>{totalWithDelivery.toFixed(2)} zł</span></div>
                 {deliveryInfo && <p className="text-xs text-white/40">ETA: {deliveryInfo.eta}</p>}
 
                 <div className="mt-3 pt-3 border-t border-white/10">
@@ -1825,7 +1888,7 @@ export default function CheckoutModal() {
                     ))}
                   </div>
 
-                  {LegalConsentEl}
+                  {renderLegalConsent("checkout-privacy-desktop")}
 
                   {TURNSTILE_SITE_KEY ? (
                     <div className="mt-2">
@@ -1850,7 +1913,7 @@ export default function CheckoutModal() {
                         className="w-full mt-3 py-2.5 bg-white text-black rounded-xl font-semibold text-sm disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2 hover:bg-white/90 transition"
                       >
                         {submitting ? <Spinner /> : null}
-                        {submitting ? "Przetwarzanie…" : "Potwierdź płatność"}
+                        {submitting ? "Przetwarzanie…" : "Przejdź do potwierdzenia"}
                       </button>
                     )
                   ) : (
@@ -1863,7 +1926,7 @@ export default function CheckoutModal() {
                           className="w-full py-2.5 bg-green-500 text-white rounded-xl font-semibold text-sm hover:bg-green-400 inline-flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed transition"
                         >
                           {submitting ? <Spinner /> : "✓"}
-                          {submitting ? "Składanie zamówienia…" : `Zamawiam (${paymentMethod})`}
+                          {submitting ? "Składanie zamówienia…" : "Zamówienie z obowiązkiem zapłaty"}
                         </button>
                         <button onClick={() => setShowConfirmation(false)} className="text-xs text-white/50 hover:text-white transition" disabled={submitting}>Zmień metodę</button>
                       </div>

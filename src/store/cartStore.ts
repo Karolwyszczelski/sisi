@@ -1,5 +1,6 @@
 // src/store/cartStore.ts
 import { create } from 'zustand';
+import { cartItemToAnalytics, cartItemsToAnalytics, cartValue, trackEvent } from '@/lib/analytics';
 
 export interface CartItem {
   product_id?: string | number;
@@ -49,6 +50,11 @@ const useCartStore = create<CartState>((set) => ({
 
   addItem: (item) =>
     set((state) => {
+      trackEvent("add_to_cart", {
+        currency: "PLN",
+        value: (Number(item.price) || 0) * (item.quantity || 1),
+        items: [cartItemToAnalytics(item)],
+      });
       const existing = state.items.find((i) => i.name === item.name);
       if (existing) {
         return {
@@ -65,7 +71,6 @@ const useCartStore = create<CartState>((set) => ({
           {
             ...item,
             quantity: item.quantity || 1,
-            meatType: item.meatType || "wołowina",
             extraMeatCount: 0,
             addons: [],
             swaps: []
@@ -76,6 +81,14 @@ const useCartStore = create<CartState>((set) => ({
 
   removeItem: (name) =>
     set((state) => {
+      const removed = state.items.find((item) => item.name === name);
+      if (removed) {
+        trackEvent("remove_from_cart", {
+          currency: "PLN",
+          value: Number(removed.price) || 0,
+          items: [cartItemToAnalytics(removed, 1)],
+        });
+      }
       const updatedItems = state.items.reduce<CartItem[]>((acc, item) => {
         if (item.name === name) {
           const newQuantity = (item.quantity || 1) - 1;
@@ -92,6 +105,14 @@ const useCartStore = create<CartState>((set) => ({
 
   removeWholeItem: (name) =>
     set((state) => {
+      const removed = state.items.find((item) => item.name === name);
+      if (removed) {
+        trackEvent("remove_from_cart", {
+          currency: "PLN",
+          value: (Number(removed.price) || 0) * (removed.quantity || 1),
+          items: [cartItemToAnalytics(removed)],
+        });
+      }
       const updatedItems = state.items.filter((item) => item.name !== name);
       return { items: updatedItems };
     }),
@@ -197,7 +218,14 @@ const useCartStore = create<CartState>((set) => ({
       checkoutStep: Math.max(1, state.checkoutStep - 1),
     })),
 
-  openCheckoutModal: () => set({ isCheckoutOpen: true }),
+  openCheckoutModal: () => set((state) => {
+    trackEvent("begin_checkout", {
+      currency: "PLN",
+      value: cartValue(state.items),
+      items: cartItemsToAnalytics(state.items),
+    });
+    return { isCheckoutOpen: true };
+  }),
   closeCheckoutModal: () => set({ isCheckoutOpen: false }),
 }));
 

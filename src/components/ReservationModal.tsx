@@ -8,6 +8,7 @@ import { format, startOfMonth, endOfMonth, isSameDay } from "date-fns";
 import { pl } from "date-fns/locale";
 import { createClient } from "@supabase/supabase-js";
 import Image from "next/image";
+import { trackEvent } from "@/lib/analytics";
 
 const getSupabase = () => {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -35,6 +36,10 @@ export default function ReservationModal({ isOpen, onClose, id, onOpenMenu }: Pr
   const SLOT_COUNT =
     Math.floor(((END_HOUR * 60) - (START_HOUR * 60 + START_MIN)) / SLOT_DURATION_MIN) + 1;
   const MAX_PER_SLOT = 5;
+
+  useEffect(() => {
+    if (isOpen) trackEvent("reservation_start", { reservation_type: "table" });
+  }, [isOpen]);
 
   const [currentMonth, setCurrentMonth] = useState<Date>(new Date());
   const [countsPerDay, setCountsPerDay] = useState<Record<string, number>>({});
@@ -161,6 +166,12 @@ export default function ReservationModal({ isOpen, onClose, id, onOpenMenu }: Pr
       });
       const jr = await res.json();
       if (!res.ok) throw new Error(jr.error || "Błąd zapisu");
+      trackEvent("generate_lead", {
+        lead_type: "table_reservation",
+        reservation_date: format(selectedDate!, "yyyy-MM-dd"),
+        reservation_time: selectedTime,
+        party_size: guestCount,
+      });
       alert("Rezerwacja zapisana.");
       onClose();
     } catch (err: any) {

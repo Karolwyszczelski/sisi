@@ -1,6 +1,7 @@
 export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
+import { getSessionAndRole } from "@/lib/serverAuth";
 import { createClient } from "@supabase/supabase-js";
 
 // Lazy initialization - klient tworzony dopiero przy pierwszym użyciu
@@ -33,6 +34,11 @@ export async function GET() {
 
 // POST – zapis układu + synchronizacja tabeli restaurant_tables (do rezerwacji)
 export async function POST(req: Request) {
+  const { session, role } = await getSessionAndRole();
+  if (!session || role !== "admin") {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const supabase = getSupabase();
   let body: any;
   try {
     body = await req.json();

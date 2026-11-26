@@ -124,9 +124,9 @@ export default function MenuTable({ categories, items }: MenuTableProps) {
         <div className="fixed inset-0 bg-black opacity-30" />
         {editItem && (
           <EditMenuItemModal
-            item={editItem!}
-            categories={categories}
-            onSaved={() => {
+            item={{ ...editItem, subcategory: editItem.subcategory ?? undefined, description: editItem.description ?? undefined, addons: [] }}
+            onClose={() => setEditItem(null)}
+            onSave={() => {
               setEditItem(null);
               // opcjonalnie: odśwież dane serwera
             }}

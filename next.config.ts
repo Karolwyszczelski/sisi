@@ -6,13 +6,13 @@ const csp = [
   "base-uri 'self'",
   "block-all-mixed-content",
   "font-src 'self' https://fonts.gstatic.com data:",
-  "img-src 'self' blob: data: https://*.googleusercontent.com https://*.ggpht.com https://maps.gstatic.com https://maps.googleapis.com https://lottie.host",
+  "img-src 'self' blob: data: https://*.supabase.co https://*.googleusercontent.com https://*.ggpht.com https://maps.gstatic.com https://maps.googleapis.com https://analytics.google.com https://*.google-analytics.com https://lottie.host",
   "media-src 'self'",
   "object-src 'none'",
   "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: https://maps.googleapis.com https://maps.gstatic.com https://www.googletagmanager.com https://challenges.cloudflare.com",
   "script-src-elem 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: https://maps.googleapis.com https://maps.gstatic.com https://www.googletagmanager.com https://challenges.cloudflare.com",
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-  "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://maps.googleapis.com https://*.googleapis.com https://*.google.com https://secure.przelewy24.pl https://sandbox.przelewy24.pl https://challenges.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com https://lottie.host",
+  "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://maps.googleapis.com https://*.googleapis.com https://*.google.com https://analytics.google.com https://*.google-analytics.com https://*.analytics.google.com https://secure.przelewy24.pl https://sandbox.przelewy24.pl https://challenges.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com https://lottie.host",
   "frame-src 'self' https://*.google.com https://*.gstatic.com https://challenges.cloudflare.com https://secure.przelewy24.pl https://sandbox.przelewy24.pl",
   "form-action 'self' https://secure.przelewy24.pl https://sandbox.przelewy24.pl https://admin.dotykacka.cz",
   "manifest-src 'self'",
@@ -26,7 +26,6 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
   eslint: { ignoreDuringBuilds: true },
-  typescript: { ignoreBuildErrors: true },
 
   images: {
     remotePatterns: [

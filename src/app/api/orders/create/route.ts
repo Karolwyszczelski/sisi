@@ -1,3 +1,7 @@
+import { depositForOrder } from "@/lib/containerDeposit";
+import { ORDER_TERMS_TEXT, ORDER_TERMS_VERSION } from "@/config/termsSnapshot";
+import { getSessionAndRole } from "@/lib/serverAuth";
+import { resolveOrderMeat } from "@/lib/orderMeat";
 // src/app/api/orders/create/route.ts
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,7 +26,7 @@ import {
 } from "@/lib/googleDelivery";
 
 /* === email + link śledzenia === */
-import { trackingUrl } from "@/lib/orderLink";
+import { signPayment, trackingUrl } from "@/lib/orderLink";
 import { sendEmail } from "@/lib/mailer";
 
 /* ============== Supabase admin ============== */
@@ -46,7 +50,6 @@ const supabaseAdmin = new Proxy({} as ReturnType<typeof getSupabaseAdmin>, {
 const TURNSTILE_SECRET_KEY = process.env.TURNSTILE_SECRET_KEY || "";
 
 /* ====== Wersje/Linki regulaminów (do maili) ====== */
-const TERMS_VERSION = process.env.TERMS_VERSION || "2025-01";
 const PRIVACY_VERSION = process.env.PRIVACY_VERSION || "2025-01";
 const TERMS_URL =
   process.env.TERMS_URL || "https://www.sisiciechanow.pl/regulamin";
@@ -148,7 +151,7 @@ const parseIngredients = (v: any): string[] => {
 };
 
 /* ============== Enrichment z DB ============== */
-const PRODUCT_TABLES = ["products", "menu_items", "menu", "dishes"] as const;
+
 
 type ProductRow = {
   id: string | number;
@@ -161,23 +164,6 @@ type ProductRow = {
   composition?: any;
   sklad?: any;
 };
-
-async function fetchProductsByIds(idsMixed: (string | number)[]) {
-  const ids = Array.from(new Set(idsMixed.map((x) => String(x)))).filter(Boolean);
-  if (!ids.length) return new Map<string, ProductRow>();
-  for (const table of PRODUCT_TABLES) {
-    const { data, error } = await supabaseAdmin
-      .from(table)
-      .select("id,name,title,label,description,description_pl,ingredients,composition,sklad")
-      .in("id", ids);
-    if (!error && data && data.length) {
-      const map = new Map<string, ProductRow>();
-      (data as any[]).forEach((r) => map.set(String(r.id), r as ProductRow));
-      return map;
-    }
-  }
-  return new Map<string, ProductRow>();
-}
 
 const nameFromProductRow = (row?: ProductRow): string | undefined =>
   row ? row.name || row.title || row.label || undefined : undefined;
@@ -255,16 +241,6 @@ function buildItemFromDbAndOptions(dbRow: ProductRow | undefined, raw: Any): Nor
     description,
     _src: raw,
   };
-}
-
-const ALLOWED_ORDER_STATUSES = ["new", "placed", "accepted", "cancelled", "completed"] as const;
-type AllowedOrderStatus = (typeof ALLOWED_ORDER_STATUSES)[number];
-
-function sanitizeOrderStatus(raw: unknown): AllowedOrderStatus {
-  const value = typeof raw === "string" ? raw.trim().toLowerCase() : "";
-  return (ALLOWED_ORDER_STATUSES as readonly string[]).includes(value)
-    ? (value as AllowedOrderStatus)
-    : "placed";
 }
 
 // === START INSERT: TZ helpers (Europe/Warsaw) ===
@@ -441,24 +417,10 @@ function normalizeBody(raw: any, req: Request) {
   const ua = req.headers.get("user-agent") || null;
   const accepted_at = new Date().toISOString();
 
-  const legal_accept =
-    base?.legal_accept && typeof base.legal_accept === "object"
-      ? {
-          terms_version: base.legal_accept.terms_version || TERMS_VERSION,
-          privacy_version: base.legal_accept.privacy_version || PRIVACY_VERSION,
-          marketing_opt_in: !!base.legal_accept.marketing_opt_in,
-          accepted_at: base.legal_accept.accepted_at || accepted_at,
-          ip: base.legal_accept.ip || ip,
-          ua: base.legal_accept.ua || ua,
-        }
-      : {
-          terms_version: TERMS_VERSION,
-          privacy_version: PRIVACY_VERSION,
-          marketing_opt_in: !!base?.marketing_opt_in,
-          accepted_at,
-          ip,
-          ua,
-        };
+  const submittedTerms = base?.legal_accept?.terms_version;
+  const legal_accept = submittedTerms === ORDER_TERMS_VERSION
+    ? { terms_version: submittedTerms, terms_text: ORDER_TERMS_TEXT, privacy_version: PRIVACY_VERSION, marketing_opt_in: false, accepted_at, ip, ua }
+    : null;
 
   return {
     name: base?.name ?? base?.customer_name ?? null,
@@ -495,7 +457,7 @@ function normalizeBody(raw: any, req: Request) {
       null,
     delivery_lat: num(base?.delivery_lat ?? base?.lat, null),
     delivery_lng: num(base?.delivery_lng ?? base?.lng, null),
-    status: sanitizeOrderStatus(base?.status),
+    status: "placed",
     // czas dostawy (canonical) + legacy kolumna "deliveryTime" (case-sensitive)
     ...(() => {
       const ct = normalizeClientTime(base?.client_delivery_time ?? base?.delivery_time ?? null);
@@ -505,7 +467,7 @@ function normalizeBody(raw: any, req: Request) {
       };
     })(),
     eta: base?.eta ?? null,
-    user: base?.user ?? base?.user_id ?? null,
+    user: null as string | null,
     legal_accept,
     itemsArray,
   };
@@ -515,22 +477,6 @@ function normalizeBody(raw: any, req: Request) {
 const SAUCES = [
   "Amerykański","Ketchup","Majonez","Musztarda","Meksykański","Serowy chili","Czosnkowy","Musztardowo-miodowy","BBQ",
 ];
-
-// Kaucja za butelki/puszki (1 zł) - dla napojów oprócz wody
-const DEPOSIT_AMOUNT = 1;
-
-const isDrinkWithDeposit = (category?: string, name?: string): boolean => {
-  const cat = (category || "").toLowerCase();
-  const n = (name || "").toLowerCase();
-  
-  // Sprawdź czy to napój
-  const isDrink = cat === "napoje" || cat === "napój";
-  if (!isDrink) return false;
-  
-  // Woda nie ma kaucji
-  const isWater = n.includes("woda") || n.includes("kropla");
-  return !isWater;
-};
 
 // Mapa cen dodatków pobierana z bazy
 type AddonPriceMap = Map<string, number>;
@@ -571,7 +517,6 @@ function calcSubtotalFromItems(selected_option: string, itemsArray: Any[], packa
     const addonsCost = (addons ?? []).reduce((s: number, a: any) => s + getAddonPriceFromMap(String(a), addonPriceMap), 0);
     const extraMeat = Number(it?.options?.extraMeatCount ?? 0) || 0;
     const extraMeatCost = extraMeat * 15;
-    const productName = String(it.name || "");
     const productCategory = resolveProductCategory(it, productCategoryMap);
     const packagingCostPerUnit =
       (selected_option === "delivery" || selected_option === "takeaway") &&
@@ -579,10 +524,8 @@ function calcSubtotalFromItems(selected_option: string, itemsArray: Any[], packa
         ? packagingCostSetting
         : 0;
 
-    // Kaucja za napoje (oprócz wody)
-    const depositCost = isDrinkWithDeposit(productCategory, productName) ? DEPOSIT_AMOUNT : 0;
     
-    return acc + (basePrice + addonsCost + extraMeatCost + depositCost + packagingCostPerUnit) * qty;
+    return acc + (basePrice + addonsCost + extraMeatCost + packagingCostPerUnit) * qty;
   }, 0);
   return Math.max(0, Math.round(itemsSum * 100) / 100);
 }
@@ -594,6 +537,7 @@ export async function POST(req: Request) {
   // Mapa cen dodatków z bazy
   let addonPriceMap: AddonPriceMap = new Map();
   // Mapa kategorii produktów (dla kaucji)
+  const productsMap = new Map<string, ProductRow & { price: unknown; deposit_grosze: number; available: boolean | null; category: string | null; subcategory: string | null }>();
   let productCategoryMap: ProductCategoryMap = new Map();
 
   try {
@@ -618,7 +562,7 @@ export async function POST(req: Request) {
           .eq("available", true),
         supabaseAdmin
           .from("products")
-          .select("id, name, category"),
+          .select("id, name, category, subcategory, price, available, description, ingredients, deposit_grosze"),
         supabaseAdmin
           .from("order_settings")
           .select("*")
@@ -672,9 +616,14 @@ export async function POST(req: Request) {
         }
       }
 
+      if (productsErr || addonsErr) {
+        return NextResponse.json({ error: "Katalog zamówień jest niedostępny." }, { status: 503 });
+      }
+
       // Buduj mapę kategorii produktów (dla kaucji)
       if (!productsErr && products) {
         for (const product of products) {
+          productsMap.set(String(product.id), product);
           if (product.name && product.category) {
             productCategoryMap.set(`id:${String(product.id)}`, product.category);
             productCategoryMap.set(
@@ -713,7 +662,7 @@ export async function POST(req: Request) {
       if (error || !dc) throw new Error("invalid_code");
 
       const nowMs = Date.now();
-      if (!dc.active) throw new Error("inactive");
+      if (!dc.active || (dc.auto_apply && dc.type === "percent" && Number(dc.value) === 10)) throw new Error("inactive");
       
       // Porównanie dat jako timestamps
       const startsMs = dc.starts_at ? new Date(dc.starts_at).getTime() : 0;
@@ -819,7 +768,7 @@ export async function POST(req: Request) {
               : Number(row.per_user_max_uses),
         };
 
-        if (!dc.value || dc.value <= 0) continue;
+        if (!dc.value || dc.value <= 0 || (dc.type === "percent" && dc.value === 10)) continue;
         
         // Porównanie dat jako timestamps (ms)
         const startsMs = dc.starts_at ? new Date(dc.starts_at).getTime() : 0;
@@ -928,6 +877,18 @@ if (TURNSTILE_SECRET_KEY) {
 }
 
     const n = normalizeBody(raw, req);
+    if (n.payment_method === "Online" && !process.env.ORDER_LINK_SECRET) {
+      return NextResponse.json({ error: "Płatność online jest chwilowo niedostępna." }, { status: 503 });
+    }
+    const { session } = await getSessionAndRole();
+    n.user = session?.user.id ?? null;
+    const displayedTotal = (raw.orderPayload ?? raw).total_price;
+    if (typeof displayedTotal !== "number" || !Number.isFinite(displayedTotal) || displayedTotal < 0) {
+      return NextResponse.json({ error: "Brakuje kwoty do potwierdzenia." }, { status: 400 });
+    }
+    const expectedGrosze = Math.round(displayedTotal * 100);
+
+    if (!n.legal_accept) return NextResponse.json({ error: "Zaakceptuj regulamin zamówień." }, { status: 400 });
 
     // Sprawdź czy wybrany typ zamówienia jest włączony
     const selectedOpt = n.selected_option || "local";
@@ -979,6 +940,36 @@ if (TURNSTILE_SECRET_KEY) {
         { status: 400 },
       );
     }
+
+    const catalogItems: Any[] = [];
+    for (const item of n.itemsArray) {
+      const product = productsMap.get(String(item.product_id ?? item.productId ?? item.id ?? ""));
+      const price = Number(product?.price);
+      if (!product?.name || product.available === false || product.price == null || !Number.isFinite(price) || price < 0) {
+        return NextResponse.json({ error: "Produkt jest niedostępny. Odśwież menu i sprawdź koszyk." }, { status: 409 });
+      }
+      const options = item.options ?? {};
+      const addons = options.addons ?? item.addons ?? [];
+      if (!Array.isArray(addons) || addons.some((addon) => typeof addon !== "string" || !addonPriceMap.has(addon.trim().toLowerCase()))) {
+        return NextResponse.json({ error: "Wybrany dodatek jest niedostępny." }, { status: 409 });
+      }
+      const selected = options.meatType;
+      const meatType = resolveOrderMeat(product, selected === "wołowina" || selected === "kurczak" ? selected : null);
+      const extraMeatCount = Number(options.extraMeatCount ?? 0);
+      if (!Number.isSafeInteger(extraMeatCount) || extraMeatCount < 0 || extraMeatCount > 99 || (extraMeatCount > 0 && !meatType)) {
+        return NextResponse.json({ error: "Niepoprawna liczba dodatkowych porcji mięsa." }, { status: 400 });
+      }
+      catalogItems.push({
+        product_id: product.id,
+        name: product.name,
+        category: product.category,
+        deposit_grosze: product.deposit_grosze,
+        quantity: Number(item.quantity ?? item.qty ?? 1),
+        price,
+        options: { addons: addons.map((addon: string) => addon.trim()), meatType, extraMeatCount, swaps: options.swaps, note: options.note ?? item.note },
+      });
+    }
+    n.itemsArray = catalogItems;
 
     // 2.1) Subtotal po stronie serwera
     const baseFromItems = calcSubtotalFromItems(n.selected_option, n.itemsArray, packagingCostSetting, addonPriceMap, productCategoryMap);
@@ -1091,13 +1082,6 @@ if (TURNSTILE_SECRET_KEY) {
       n.total_price = Math.max(0, Math.round((baseFromItems - Math.min(discount, baseFromItems)) * 100) / 100);
     }
 
-    // 3) Dociągnij produkty
-    const productIds = n.itemsArray
-      .map((it) => it.product_id ?? it.productId ?? it.id ?? null)
-      .filter(Boolean)
-      .map((x: any) => String(x));
-    const productsMap = await fetchProductsByIds(productIds);
-
     // 4) Pozycje
     const normalizedItems: NormalizedItem[] = n.itemsArray.map((it) => {
       const key = String(it.product_id ?? it.productId ?? it.id ?? "");
@@ -1111,6 +1095,39 @@ if (TURNSTILE_SECRET_KEY) {
     // >>> USTAW MINIMA (przed insertem do orders)
     const baseBeforeDiscount = baseFromItems;
     // <<<
+
+    const baseTotal = Math.max(
+      0,
+      Math.round((baseFromItems + (n.delivery_cost ?? 0)) * 100) / 100
+    );
+    const deposit = n.itemsArray.reduce((sum, item) => sum + depositForOrder(n.selected_option, item.deposit_grosze, item.quantity), 0);
+    n.total_price = Math.round((baseTotal + deposit) * 100) / 100;
+    const emailLower = (n.contact_email || "").toLowerCase() || null;
+    const lines = n.itemsArray.map((item) => calcSubtotalFromItems("local", [item], 0, addonPriceMap, productCategoryMap));
+    const productsTotal = Math.round(lines.reduce((sum, amount) => sum + amount, 0) * 100) / 100;
+    const delivery = n.delivery_cost ?? 0;
+    const packaging = Math.round((baseTotal - productsTotal - delivery) * 100) / 100;
+    const changedQuote = (total: number, discount: number) => NextResponse.json({
+      code: "PRICE_CHANGED",
+      total,
+      quote: { total, products: productsTotal, packaging, delivery, discount, deposit, lines },
+    }, { status: 409 });
+
+    let quotedDiscount = 0;
+    if (n.promo_code) {
+      try {
+        quotedDiscount = computeDiscount(baseTotal, await getDiscountByCode(n.promo_code));
+      } catch {
+        return NextResponse.json({ error: "Kod promocyjny jest nieważny." }, { status: 400 });
+      }
+    } else {
+      const quote = await getBestAutoDiscount(baseTotal, n.user ?? null, emailLower);
+      quotedDiscount = quote?.amount ?? 0;
+    }
+    const quotedGrosze = Math.round((baseTotal - quotedDiscount + deposit) * 100);
+    if (quotedGrosze !== expectedGrosze) {
+      return changedQuote(quotedGrosze / 100, quotedDiscount);
+    }
 
     // 5) Zapis do orders
     const itemsForOrdersColumn = JSON.stringify(normalizedItems);
@@ -1141,7 +1158,7 @@ if (TURNSTILE_SECRET_KEY) {
         user: n.user,
         promo_code: null,     // policzymy niżej
         discount_amount: 0,   // policzymy niżej
-        legal_accept: n.legal_accept,
+        legal_accept: { ...n.legal_accept, packaging_total: packaging, deposit_total: deposit },
       })
       .select("id, selected_option, total_price, name")
       .single();
@@ -1153,11 +1170,12 @@ if (TURNSTILE_SECRET_KEY) {
 
      const newOrderId = orderRow.id;
 
-    const baseTotal = Math.max(
-      0,
-      Math.round((baseFromItems + (n.delivery_cost ?? 0)) * 100) / 100
-    );
-    const emailLower = (n.contact_email || "").toLowerCase() || null;
+    const priceChanged = async (total: number, discount: number) => {
+      const { error } = await supabaseAdmin.from("orders").delete().eq("id", newOrderId);
+      if (error) throw error;
+      return changedQuote(total, discount);
+    };
+
 
     // Zużycie kodu (z amount)
     let currentTotal = n.total_price;
@@ -1198,8 +1216,10 @@ if (TURNSTILE_SECRET_KEY) {
         const applied = computeDiscount(baseTotal, dc);
         const newTotal = Math.max(
           0,
-          Math.round((baseTotal - applied) * 100) / 100
+          Math.round((baseTotal - applied + deposit) * 100) / 100
         );
+
+        if (Math.round(newTotal * 100) !== expectedGrosze) return await priceChanged(newTotal, applied);
 
         const { error: redErr } = await supabaseAdmin
           .from("discount_redemptions")
@@ -1259,8 +1279,10 @@ if (TURNSTILE_SECRET_KEY) {
           const { dc, amount } = auto;
           const newTotal = Math.max(
             0,
-            Math.round((baseTotal - amount) * 100) / 100
+            Math.round((baseTotal - amount + deposit) * 100) / 100
           );
+
+          if (Math.round(newTotal * 100) !== expectedGrosze) return await priceChanged(newTotal, amount);
 
           // Zapisz redempcję (tracking) — zwykły insert.
           // Auto-rabat może być wielokrotnie użyty przez ten sam email
@@ -1315,6 +1337,8 @@ if (TURNSTILE_SECRET_KEY) {
         );
       }
     }
+
+    if (Math.round(currentTotal * 100) !== expectedGrosze) return await priceChanged(currentTotal, appliedDiscount);
 
     // 6) order_items
 if (Array.isArray(n.itemsArray) && n.itemsArray.length > 0) {
@@ -1426,30 +1450,59 @@ if (Array.isArray(n.itemsArray) && n.itemsArray.length > 0) {
           clientTimeDisplay = `<p style="margin:8px 0">Wybrany czas: <strong>Jak najszybciej</strong></p>`;
         }
 
+        const escape = (value: unknown) => String(value ?? "").replace(/[&<>"']/g, (char) =>
+          ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!
+        );
+        const formatMoney = (value: number) => `${value.toFixed(2).replace(".", ",")} zł`;
+        const packaging = ["takeaway", "delivery"].includes(n.selected_option)
+          ? n.itemsArray.reduce((sum, item) => sum + (requiresPackaging(item.category) ? item.quantity * packagingCostSetting : 0), 0)
+          : 0;
+        const delivery = n.delivery_cost ?? 0;
+        const lineItems = normalizedItems.map((item) => {
+          const options = [...item.addons];
+          for (const swap of item._src?.options?.swaps ?? []) {
+            options.push(`Zamiana: ${swap.from} → ${swap.to}`);
+          }
+          return `<li>${escape(item.name)} × ${item.quantity} · ${formatMoney(item.price)}/szt.${options.length ? `<br>${options.map(escape).join(", ")}` : ""}</li>`;
+        }).join("");
+        const paymentLabel = n.payment_method === "Online"
+          ? "Przelewy24 — oczekuje na płatność"
+          : n.payment_method === "Terminal" ? "Karta przy realizacji" : "Gotówka przy realizacji";
+        const subject = n.payment_method === "Online"
+          ? `SISI • Zamówienie #${newOrderId} oczekuje na płatność`
+          : `SISI • Otrzymaliśmy zamówienie #${newOrderId}`;
+
         const html = `
           <div style="font-family:Inter,Arial,sans-serif;line-height:1.5;color:#111">
-            <h2 style="margin:0 0 8px">Potwierdzenie zamówienia #${newOrderId}</h2>
-            <p style="margin:0 0 16px">Dziękujemy za zamówienie w SISI.</p>
+            <h2 style="margin:0 0 8px">${escape(subject)}</h2>
+            <p style="margin:0 0 16px">Otrzymaliśmy zamówienie. Potwierdzenie zawarcia umowy wyślemy po przyjęciu zamówienia przez obsługę.</p>
             <p style="margin:16px 0">
               <a href="${url}" style="display:inline-block;padding:12px 18px;background:#111;color:#fff;border-radius:8px;text-decoration:none">
                 Sprawdź status i czas dostawy
               </a>
             </p>
-            <p style="margin:8px 0">Kwota: <strong>${total} zł</strong></p>
+            <ul>${lineItems}</ul>
+            <p>Produkty i dodatki: ${formatMoney(baseTotal - packaging - delivery)}<br>
+            Opakowania: ${formatMoney(packaging)}<br>
+            Dostawa: ${formatMoney(delivery)}<br>
+            Kaucja: ${formatMoney(deposit)}<br>
+            Rabat: ${formatMoney(appliedDiscount)}</p>
+            <p>Płatność: ${escape(paymentLabel)}</p>
+            <p style="margin:8px 0">Do zapłaty: <strong>${total} zł</strong></p>
             <p style="margin:8px 0">Opcja: <strong>${optLabel(orderRow.selected_option)}</strong></p>
             ${clientTimeDisplay}
             <hr style="margin:20px 0;border:none;border-top:1px solid #eee" />
             <p style="font-size:12px;color:#555;margin:0">
-              Akceptacja: Regulamin v${TERMS_VERSION} (<a href="${TERMS_URL}">link</a>),
+              Akceptacja: Regulamin v${escape(n.legal_accept.terms_version)} (<a href="${escape(TERMS_URL)}">link</a>),
               Polityka prywatności v${PRIVACY_VERSION} (<a href="${PRIVACY_URL}">link</a>)
             </p>
           </div>
         `;
 
-        await sendEmail({ to: n.contact_email, subject: `SISI • Potwierdzenie zamówienia #${newOrderId}`, html });
+        await sendEmail({ to: n.contact_email, subject, html });
       }
-    } catch (mailErr) {
-      console.error("[orders.create] email to client error:", mailErr);
+    } catch {
+      console.error("[orders.create] Customer email failed");
     }
 
     // 7) OK
@@ -1457,6 +1510,7 @@ if (Array.isArray(n.itemsArray) && n.itemsArray.length > 0) {
       {
         orderId: newOrderId,
         total: currentTotal,
+        ...(n.payment_method === "Online" ? { paymentToken: signPayment(String(newOrderId)) } : {}),
         discount_amount: appliedDiscount,
         promo_code: appliedCode?.code ?? null,
       },

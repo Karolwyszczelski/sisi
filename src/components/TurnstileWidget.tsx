@@ -2,8 +2,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 
-declare global { interface Window { turnstile?: any } }
-
 type Props = {
   siteKey: string;
   onSuccess: (token: string) => void;
@@ -35,7 +33,7 @@ export default function TurnstileWidget({
 
   // wyrenderuj widget raz
   useEffect(() => {
-    if (!ready || !containerRef.current || widgetId.current) return;
+    if (!ready || !window.turnstile || !containerRef.current || widgetId.current) return;
     widgetId.current = window.turnstile.render(containerRef.current, {
       sitekey: siteKey,
       callback: (token: string) => onSuccess(token),

@@ -6,6 +6,7 @@ import CartButton from "./CartButton";
 import CartPopup from "./menu/CartPopup";
 import CheckoutModal from "./menu/CheckoutModal";
 import Header from "./Header";
+import { HOME_MAINTENANCE } from "@/config/homeMaintenance";
 
 export default function ClientWrapper({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -34,6 +35,8 @@ export default function ClientWrapper({ children }: { children: React.ReactNode 
   }, []);
   // START marker: useEffect(() => {
   // END marker: }, []);
+
+  if (HOME_MAINTENANCE && pathname === "/") return children;
 
   return (
     <>

@@ -1,12 +1,12 @@
 // src/app/api/menu_items/route.ts
 import { NextResponse } from "next/server";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
-import { cookies, headers } from "next/headers";
+import { cookies } from "next/headers";
 import type { Database } from "@/types/supabase";
 import { getSessionAndRole } from "@/lib/serverAuth";
 
 export async function GET() {
-  const supabase = createRouteHandlerClient<Database>({ cookies, headers });
+  const supabase = createRouteHandlerClient<Database>({ cookies });
 
   const { data, error } = await supabase
     .from("menu_items")
@@ -42,7 +42,7 @@ export async function POST(request: Request) {
   }
 
   // 3) insert into Supabase
-  const supabase = createRouteHandlerClient<Database>({ cookies, headers });
+  const supabase = createRouteHandlerClient<Database>({ cookies });
   const { data, error } = await supabase
     .from("menu_items")
     .insert({

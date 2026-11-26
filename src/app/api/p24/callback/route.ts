@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { extractOrderIdFromSession, hostFromEnv, p24SignVerifyMD5, parseP24Amount } from "@/lib/p24";
+import { hostFromEnv, p24SignVerifyMD5, parseP24Amount } from "@/lib/p24";
 import { dispatchOrderToOperations } from "@/lib/orderOperations";
 
 const { P24_MERCHANT_ID, P24_POS_ID, DEBUG_P24 } = process.env;
@@ -30,11 +30,6 @@ type P24Fields = {
   orderId?: string | number; p24_order_id?: string | number;
 };
 
-type UpdatedOrder = {
-  id: string;
-  total_price?: number | string | null;
-  selected_option?: string | null;
-};
 
 function pick(v: any, ...keys: string[]) {
   for (const k of keys) {
@@ -74,7 +69,7 @@ async function handle(req: NextRequest) {
 
   const sessionId = String(pick(data, "sessionId", "p24_session_id") || "");
   const rawAmount = pick(data, "amount", "p24_amount");
-  const currency = String(pick(data, "currency", "p24_currency") || "PLN");
+  const currency = String(pick(data, "currency", "p24_currency") || "");
   const orderIdFromGateway = String(pick(data, "orderId", "p24_order_id") || "");
 
   if (DEBUG_P24 === "1") console.log("P24 cb in:", { ct: req.headers.get("content-type"), method: req.method, sessionId, rawAmount, currency, orderIdFromGateway });
@@ -85,6 +80,8 @@ async function handle(req: NextRequest) {
 
   const amountGr = parseP24Amount(rawAmount, currency);
   if (amountGr === null) return NextResponse.json({ error: "Bad amount" }, { status: 400 });
+
+  if (currency !== "PLN" || amountGr <= 0) return NextResponse.json({ error: "Invalid payment amount or currency" }, { status: 400 });
 
   const expected = p24SignVerifyMD5({ sessionId, orderId: orderIdFromGateway, amount: amountGr, currency });
 
@@ -108,40 +105,38 @@ async function handle(req: NextRequest) {
   if (DEBUG_P24 === "1") console.log("P24 verify:", { status: res.status, text });
 
   const ok =
-    (res.ok && /error=0/.test(text)) ||
+    (res.ok && new URLSearchParams(text).get("error") === "0") ||
     (res.ok && (() => { try { return JSON.parse(text)?.data?.status === "success"; } catch { return false; } })());
 
-  const orderIdFromSession = extractOrderIdFromSession(sessionId);
-  const baseValues: Record<string, unknown> = { p24_session_id: sessionId, p24_order_id: orderIdFromGateway };
+  if (!ok) return NextResponse.json({ ok: false }, { status: 400 });
 
-  const updateOrderWithFallback = async (values: Record<string, unknown>) => {
-    const q1 = await supabase.from("orders").update(values).eq("p24_session_id", sessionId).select().maybeSingle();
-    if (q1.error) return { status: "error" as const };
-    if (q1.data) return { status: "success" as const, order: q1.data as UpdatedOrder };
-    if (!orderIdFromSession) return { status: "not-found" as const };
-    const q2 = await supabase.from("orders").update(values).eq("id", orderIdFromSession).select().maybeSingle();
-    if (q2.error) return { status: "error" as const };
-    return q2.data
-      ? { status: "success" as const, order: q2.data as UpdatedOrder }
-      : { status: "not-found" as const };
-  };
+  const { data: updated, error: updateError } = await supabase
+    .from("orders")
+    .update({ p24_order_id: String(orderIdFromGateway), payment_status: "paid", paid_at: new Date().toISOString() })
+    .eq("p24_session_id", sessionId)
+    .eq("total_price", amountGr / 100)
+    .eq("payment_method", "Online")
+    .in("payment_status", ["pending", "failed"])
+    .select("id,total_price,selected_option")
+    .maybeSingle();
 
-  if (ok) {
-    const r = await updateOrderWithFallback({ ...baseValues, payment_status: "paid", paid_at: new Date().toISOString() });
-    if (r.status !== "success") return NextResponse.json({ error: r.status }, { status: r.status === "error" ? 500 : 400 });
-    await dispatchOrderToOperations({
-      orderId: String(r.order.id),
-      totalPln: Number(r.order.total_price ?? 0),
-      selectedOption: r.order.selected_option,
-      appUrl: new URL(req.url).origin,
-      logPrefix: "[p24.callback]",
-    });
-    return NextResponse.json({ ok: true });
+  if (updateError) return NextResponse.json({ error: "Update failed" }, { status: 500 });
+  if (!updated) {
+    const { data: paid, error } = await supabase.from("orders").select("id")
+      .eq("p24_session_id", sessionId).eq("total_price", amountGr / 100)
+      .eq("payment_status", "paid").eq("p24_order_id", String(orderIdFromGateway)).maybeSingle();
+    if (error) return NextResponse.json({ error: "Lookup failed" }, { status: 500 });
+    return NextResponse.json({ ok: Boolean(paid) }, { status: paid ? 200 : 409 });
   }
 
-  const rf = await updateOrderWithFallback({ ...baseValues, payment_status: "failed" });
-  if (rf.status !== "success") return NextResponse.json({ ok: false, error: rf.status }, { status: rf.status === "error" ? 500 : 400 });
-  return NextResponse.json({ ok: false }, { status: 400 });
+  await dispatchOrderToOperations({
+    orderId: String(updated.id),
+    totalPln: Number(updated.total_price),
+    selectedOption: updated.selected_option,
+    appUrl: new URL(req.url).origin,
+    logPrefix: "[p24]",
+  });
+  return NextResponse.json({ ok: true });
 }
 
 export async function POST(req: NextRequest) { return handle(req); }

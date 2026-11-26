@@ -1,5 +1,7 @@
 "use client";
 
+import { ORDER_TERMS_BODY, ORDER_TERMS_COMPANY } from "@/config/termsSnapshot";
+
 import React, { useState, useCallback, useEffect, useRef } from "react";
 import { 
   Menu, X, ChevronLeft, Home, UtensilsCrossed, Info, Phone, User, Mail, Lock, Eye, EyeOff, ShoppingCart, Trash2, Minus, Plus,
@@ -612,52 +614,10 @@ export default function MobilePageWrapper() {
             <div className="px-5 py-6">
               <article className="prose prose-invert prose-sm prose-a:text-yellow-400 hover:prose-a:text-yellow-300 max-w-none">
                 <h1 className="text-2xl font-bold text-white mb-6">Regulamin</h1>
-                
-                <p className="text-white/80">
-                  Regulamin określa zasady korzystania z serwisu zamówień online {LEGAL.shortBrand} oraz warunki zawierania i realizacji umów sprzedaży na odległość.
-                  Operatorem Serwisu jest <b>{LEGAL.legalName}</b>, NIP {LEGAL.nip}, REGON {LEGAL.regon}, z adresem rejestrowym: {LEGAL.registeredAddress}.
-                </p>
-
-                <h2 className="text-lg font-bold text-white mt-6 mb-3">1) Definicje</h2>
-                <ul className="text-white/80 space-y-2">
-                  <li><b>Serwis</b> – strona/aplikacja internetowa umożliwiająca składanie zamówień.</li>
-                  <li><b>Sprzedawca/Operator</b> – {LEGAL.legalName}.</li>
-                  <li><b>Klient</b> – konsument lub przedsiębiorca składający zamówienie.</li>
-                  <li><b>Zamówienie</b> – oświadczenie woli Klienta, zmierzające do zawarcia umowy sprzedaży.</li>
-                </ul>
-
-                <h2 className="text-lg font-bold text-white mt-6 mb-3">2) Postanowienia ogólne</h2>
-                <ul className="text-white/80 space-y-2">
-                  <li>Serwis działa zgodnie z prawem polskim i UE.</li>
-                  <li>Minimalne wymagania: przeglądarka z JavaScriptem i cookies.</li>
-                  <li>Zakazuje się dostarczania treści bezprawnych.</li>
-                </ul>
-
-                <h2 className="text-lg font-bold text-white mt-6 mb-3">3) Składanie zamówień</h2>
-                <ol className="text-white/80 space-y-2 list-decimal list-inside">
-                  <li>Klient wybiera produkty, opcję odbioru, podaje dane kontaktowe i metodę płatności.</li>
-                  <li>Po złożeniu zamówienia Klient otrzymuje potwierdzenie e-mail.</li>
-                  <li>Umowa zostaje zawarta z chwilą akceptacji zamówienia przez obsługę.</li>
-                </ol>
-
-                <h2 className="text-lg font-bold text-white mt-6 mb-3">4) Ceny i płatności</h2>
-                <ul className="text-white/80 space-y-2">
-                  <li>Ceny są brutto (zawierają podatki).</li>
-                  <li>Metody płatności: gotówka, terminal, płatność online.</li>
-                  <li>Paragon fiskalny wydawany jest w lokalu lub z zamówieniem.</li>
-                </ul>
-
-                <h2 className="text-lg font-bold text-white mt-6 mb-3">5) Reklamacje</h2>
-                <ul className="text-white/80 space-y-2">
-                  <li>Reklamacje należy składać niezwłocznie na {LEGAL.email}.</li>
-                  <li>Odpowiadamy w terminie do 14 dni kalendarzowych.</li>
-                </ul>
-
-                <div className="mt-8 pt-4 border-t border-white/10">
-                  <p className="text-sm text-white/40">
-                    Wersja: {LEGAL.docsVersion} · obowiązuje od: {LEGAL.effectiveDate}
-                  </p>
-                </div>
+                <p className="whitespace-pre-line">{ORDER_TERMS_COMPANY}</p>
+                {ORDER_TERMS_BODY.split("\n").filter(Boolean).map((line) =>
+                  line.startsWith("§") ? <h2 key={line}>{line}</h2> : <p key={line}>{line}</p>
+                )}
               </article>
             </div>
           </div>

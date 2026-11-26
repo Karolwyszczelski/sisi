@@ -1,3 +1,5 @@
+import { isOrderDispatchAuthorized, orderDispatchToken } from "@/lib/orderDispatchAuth";
+import { getSessionAndRole } from "@/lib/serverAuth";
 // src/app/api/dotypos/send-order/route.ts
 // ==========================================
 // Send Order to Dotypos POS System
@@ -26,6 +28,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import dotypos, { DotyposOrderItem } from "@/lib/dotypos";
+import { compactPosItems, parsePosItemOptions, type PosItemOptions, type PosLine, type PosVariant } from "@/lib/posOrderItems";
 import { isOnlinePaymentPending } from "@/lib/orderOperations";
 import { DEFAULT_POS_PRODUCT_OVERRIDES } from "@/lib/posProductMappings";
 import {
@@ -69,12 +72,14 @@ function getSupabase() {
  * The /api/dotypos/webhook endpoint still works for entity change
  * notifications (PRODUCT, ORDERBEAN, etc.) registered via webhooks API.
  */
-function getWebhookUrl(): string | undefined {
+function getWebhookUrl(externalId: string): string | undefined {
   // Return undefined to use SYNC mode (default webhook)
   // Set DOTYPOS_USE_ASYNC_WEBHOOK=true to use async webhook mode
   if (process.env.DOTYPOS_USE_ASYNC_WEBHOOK === "true") {
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://sisiciechanow.pl";
-    return `${appUrl}/api/dotypos/webhook`;
+    const token = orderDispatchToken(`pos-callback:${externalId}`);
+    if (!token) return undefined;
+    return `${appUrl.replace(/\/$/, "")}/api/dotypos/webhook?${new URLSearchParams({ t: token })}`;
   }
   return undefined;
 }
@@ -83,7 +88,7 @@ function getWebhookUrl(): string | undefined {
    Types
    ============================================================ */
 
-interface OrderItem {
+interface OrderItem extends PosItemOptions {
   name: string;
   quantity: number;
   price: number;
@@ -91,7 +96,7 @@ interface OrderItem {
   note?: string;
   category?: string | null;
   product_id?: number | string;
-  _src?: {
+  _src?: NonNullable<PosItemOptions["_src"]> & {
     product_id?: number | string;
   };
 }
@@ -410,6 +415,13 @@ export async function POST(req: NextRequest) {
       );
     }
     
+    if (isForceResend || !isOrderDispatchAuthorized(String(orderId), req.headers.get("X-Order-Dispatch"))) {
+      const { session, role } = await getSessionAndRole();
+      if (!session || (role !== "admin" && role !== "employee")) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
+    }
+
     console.log(`[Dotypos Order] Processing order: ${orderId}${isForceResend ? " (force resend)" : ""}`);
     
     const supabase = getSupabase();
@@ -431,7 +443,7 @@ export async function POST(req: NextRequest) {
     
     const order: OrderData = orders[0];
 
-    if (isOnlinePaymentPending(order.payment_method, order.payment_status) && !isForceResend) {
+    if (isOnlinePaymentPending(order.payment_method, order.payment_status)) {
       console.warn(`[Dotypos Order] Online payment not confirmed; skipping POS send for order ${orderId}`);
       return NextResponse.json(
         {
@@ -491,7 +503,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         { 
           error: "No POS products available",
-          message: "Please run product sync first: GET /api/dotypos/sync-products",
+          message: "Please run product sync first: POST /api/dotypos/sync-products",
         },
         { status: 503 }
       );
@@ -607,9 +619,8 @@ export async function POST(req: NextRequest) {
     const needsPackaging = selectedOpt === "delivery" || selectedOpt === "takeaway";
 
     // 4. Map order items to Dotypos items
-    // Każda sztuka produktu jest osobną pozycją z własnym blokiem dodatków.
-    // Dzięki temu kucharz widzi dokładnie które dodatki należą do którego burgera.
-    const dotyposItems: DotyposOrderItem[] = [];
+    // Build per-unit preparations first, then merge identical variants.
+    const variants: PosVariant[] = [];
     const unmappedItems: string[] = [];
     
     for (const item of items) {
@@ -653,40 +664,8 @@ export async function POST(req: NextRequest) {
         continue;
       }
       
-      // Rozbij addons na kategorie:
-      //   meatTypeNote  → tylko notatka bonu (wybór mięsa, bezpłatne)
-      //   extraMeatCount → osobna pozycja POS "Dodatkowe mięso"
-      //   regularAddons  → osobne pozycje POS wg kategorii z bazy addons
-      const regularAddons: string[] = [];
-      let meatTypeNote: string | undefined;
-      let extraMeatCount = 0;
-      
-      for (const addon of (item.addons || [])) {
-        // "Mięso: kurczak" → tylko w notatce, NIE jako płatny produkt
-        const meatMatch = addon.match(/^Mięso:\s*(.+)$/i);
-        if (meatMatch) {
-          meatTypeNote = meatMatch[1].trim();
-          continue;
-        }
-        // "Dodatkowe mięso x2" → osobna pozycja POS
-        const extraMeatMatch = addon.match(/^Dodatkowe mięso x(\d+)$/i);
-        if (extraMeatMatch) {
-          extraMeatCount += parseInt(extraMeatMatch[1], 10);
-          continue;
-        }
-        regularAddons.push(addon);
-      }
-      
-      // Notatka do produktu: typ mięsa + opcjonalna ręczna notatka klienta
-      const noteParts: string[] = [];
-      if (meatTypeNote) noteParts.push(`Mięso: ${meatTypeNote}`);
-      if (item.note)     noteParts.push(item.note);
-      const itemNote = noteParts.length > 0 ? noteParts.join(" | ") : undefined;
-      
-      const qty = item.quantity || 1;
-      if (qty > 1) {
-        console.log(`[Dotypos Order] Splitting "${item.name}" × ${qty} into individual units (each with own addons)`);
-      }
+      const { regularAddons, extraMeatCount, note: itemNote } = parsePosItemOptions(item);
+      const qty = item.quantity ?? 1;
 
       const itemUnitPrice = typeof item.price === "number"
         ? item.price
@@ -699,65 +678,46 @@ export async function POST(req: NextRequest) {
         ? itemUnitPrice
         : undefined;
       
-      // Każda sztuka → własna pozycja burgera + własne dodatki
-      for (let unit = 0; unit < qty; unit++) {
-        // Główny produkt
-        dotyposItems.push({
-          id: posProduct.pos_id,
-          qty: 1,
-          ...(manualPrice !== undefined ? { "manual-price": manualPrice } : {}),
-          note: itemNote,
-        });
-        
-        // Opakowanie dla każdej sztuki produktu
-        if (needsPackaging && itemRequiresPackaging && packagingProduct) {
-          dotyposItems.push({
-            id: packagingProduct.pos_id,
-            qty: 1,
-            ...(packagingUnitPrice !== undefined
-              ? { "manual-price": packagingUnitPrice }
-              : {}),
-            note: `Opakowanie do: ${item.name}`,
-          });
-        }
-
-        // Dodatkowe mięso dla tej sztuki
-        if (extraMeatCount > 0) {
-          if (extraMeatProduct) {
-            dotyposItems.push({
-              id: extraMeatProduct.pos_id,
-              qty: extraMeatCount,
-              note: `Do: ${item.name}`,
-            });
-          } else {
-            console.warn(`[Dotypos Order] Brak produktu "Dodatkowe mięso" w POS`);
-          }
-        }
-        
-        // Płatne dodatki dla tej sztuki
-        for (const addonName of regularAddons) {
-          const category = addonCategoryMap.get(addonName.toLowerCase()) || "dodatek";
-          
-          let addonPosProduct: PosProduct | undefined;
-          if (category === "sos")     addonPosProduct = extraSauceProduct;
-          else if (category === "premium") addonPosProduct = extraFluidCheeseProduct;
-          else                          addonPosProduct = extraIngredientProduct;
-          
-          if (addonPosProduct) {
-            dotyposItems.push({
-              id: addonPosProduct.pos_id,
-              qty: 1,
-              note: addonName,
-            });
-          } else {
-            console.warn(`[Dotypos Order] Brak produktu POS dla dodatku "${addonName}" (kategoria: ${category})`);
-            // Dodaj do unmapped tylko raz (przy pierwszej sztuce)
-            if (unit === 0) unmappedItems.push(`Dodatek: ${addonName}`);
-          }
+      const addons: PosLine[] = [];
+      if (extraMeatCount > 0) {
+        if (extraMeatProduct) {
+          addons.push({ id: extraMeatProduct.pos_id, qty: extraMeatCount });
+        } else {
+          unmappedItems.push(`Dodatkowe mięso: ${item.name}`);
+          console.warn('[Dotypos Order] Brak produktu "Dodatkowe mięso" w POS');
         }
       }
+      for (const addonName of regularAddons) {
+        const category = addonCategoryMap.get(addonName.toLowerCase()) || "dodatek";
+        const addonPosProduct = category === "sos" ? extraSauceProduct
+          : category === "premium" ? extraFluidCheeseProduct : extraIngredientProduct;
+        if (addonPosProduct) {
+          addons.push({ id: addonPosProduct.pos_id, qty: 1, note: addonName });
+        } else {
+          console.warn(`[Dotypos Order] Brak produktu POS dla dodatku "${addonName}" (kategoria: ${category})`);
+          unmappedItems.push(`Dodatek: ${addonName}`);
+        }
+      }
+      variants.push({
+        product: {
+          id: posProduct.pos_id,
+          qty,
+          ...(manualPrice !== undefined ? { "manual-price": manualPrice } : {}),
+          note: itemNote,
+        },
+        addons,
+        requiresPackaging: needsPackaging && itemRequiresPackaging,
+      });
     }
-    
+
+    const dotyposItems: DotyposOrderItem[] = compactPosItems(
+      variants,
+      needsPackaging && packagingProduct ? {
+        id: packagingProduct.pos_id,
+        ...(packagingUnitPrice !== undefined ? { "manual-price": packagingUnitPrice } : {}),
+      } : undefined,
+    );
+
     // If all items are unmapped, fail
     if (dotyposItems.length === 0) {
       return NextResponse.json(
@@ -937,10 +897,10 @@ export async function POST(req: NextRequest) {
       takeAway: isTakeAway,
       discountPercent: discountPercent > 0 ? discountPercent : undefined,
       tableId,
-      webhookUrl: getWebhookUrl(),
+      webhookUrl: getWebhookUrl(String(externalId)),
     });
     
-    console.log("[Dotypos Order] Response:", response);
+    console.log("[Dotypos Order] Response code:", response.code);
     
     // 9. Update order with Dotypos reference
     const dotyposOrderId = response.order?.id || response.orderId;
@@ -978,7 +938,7 @@ export async function POST(req: NextRequest) {
     });
     
   } catch (error) {
-    console.error("[Dotypos Order] Error:", error);
+    console.error("[Dotypos Order] POS dispatch failed");
     
     // Handle specific POS errors
     const errorMessage = error instanceof Error ? error.message : "Unknown error";

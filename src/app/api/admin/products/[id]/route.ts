@@ -1,7 +1,9 @@
+import { parseDepositGrosze } from "@/lib/containerDeposit";
 import { NextResponse } from "next/server";
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import dotypos from "@/lib/dotypos";
 import { getSessionAndRole } from "@/lib/serverAuth";
+import { isBurgerMonthId, isBurgerMonthName } from "@/lib/burgerMonth";
 import { DEFAULT_POS_PRODUCT_OVERRIDES } from "@/lib/posProductMappings";
 
 export const runtime = "nodejs";
@@ -21,6 +23,7 @@ type ProductRow = {
 };
 
 type ProductPayload = {
+  deposit_grosze?: unknown;
   name?: string | null;
   price?: string | number | null;
   description?: string | null;
@@ -95,6 +98,7 @@ function buildUpdatePayload(body: ProductPayload) {
   if (hasOwn(body, "subcategory")) payload.subcategory = cleanText(body.subcategory);
   if (hasOwn(body, "ingredients")) payload.ingredients = cleanStringArray(body.ingredients);
   if (hasOwn(body, "image_url")) payload.image_url = cleanText(body.image_url);
+  if (hasOwn(body, "deposit_grosze")) payload.deposit_grosze = parseDepositGrosze(body.deposit_grosze);
   if (hasOwn(body, "available_addons")) payload.available_addons = cleanStringArray(body.available_addons);
   if (hasOwn(body, "available") && typeof body.available === "boolean") payload.available = body.available;
   return payload;
@@ -221,15 +225,21 @@ async function syncProductToPos(
 
 export async function PATCH(
   request: Request,
-  context: { params: { id: string } | Promise<{ id: string }> }
+  context: { params: Promise<{ id: string }> }
 ) {
   const unauthorized = await requireStaff();
   if (unauthorized) return unauthorized;
 
   try {
-    const { id } = await Promise.resolve(context.params);
+    const { id } = await context.params;
     const body = await request.json() as ProductPayload;
     const payload = buildUpdatePayload(body);
+    if (isBurgerMonthId(id) && Object.keys(payload).some((key) => key !== "available")) {
+      return NextResponse.json({ error: "Cenę, opis i zdjęcie zmień w zakładce Burger miesiąca." }, { status: 409 });
+    }
+    if (!isBurgerMonthId(id) && isBurgerMonthName(payload.name)) {
+      return NextResponse.json({ error: "W menu może być tylko jeden Burger Miesiąca. Edytuj istniejący produkt." }, { status: 409 });
+    }
     const supabase = getSupabaseAdmin();
 
     if (Object.keys(payload).length === 0) {
@@ -272,14 +282,17 @@ export async function PATCH(
 
 export async function DELETE(
   request: Request,
-  context: { params: { id: string } | Promise<{ id: string }> }
+  context: { params: Promise<{ id: string }> }
 ) {
   void request;
   const unauthorized = await requireStaff();
   if (unauthorized) return unauthorized;
 
   try {
-    const { id } = await Promise.resolve(context.params);
+    const { id } = await context.params;
+    if (isBurgerMonthId(id)) {
+      return NextResponse.json({ error: "Burgera miesiąca można wyłączyć, ale nie usunąć. Jest powiązany z sekcją promocyjną i POS." }, { status: 409 });
+    }
     const supabase = getSupabaseAdmin();
     const { error } = await supabase.from("products").delete().eq("id", id);
 
