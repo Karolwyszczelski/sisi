@@ -116,10 +116,8 @@ async function handlePOSActionResponse(
         updateData.dotypos_error = `POS error code: ${body.code}`;
       }
       
-      const { error } = await supabase
-        .from("orders")
-        .update(updateData)
-        .eq("id", externalId);
+      const update = supabase.from("orders").update(updateData).eq("id", externalId);
+      const { error } = await (success ? update : update.or("dotypos_status.is.null,dotypos_status.neq.confirmed"));
       
       if (error) {
         console.error("[Dotypos Webhook] Failed to update order:", error);

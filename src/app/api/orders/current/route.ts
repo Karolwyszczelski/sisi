@@ -26,7 +26,7 @@ const { session, role } = await getSessionAndRole();
 
     // Widok admin/employee – prosto i szybko (bez joinów)
     if (role === "admin" || role === "employee") {
-      const query = getSupabaseAdmin()
+      let query = getSupabaseAdmin()
         .from("orders")
         .select(
           [
@@ -49,22 +49,27 @@ const { session, role } = await getSessionAndRole();
             "selected_option",
             "payment_method",
             "payment_status",
+            "checkout_price_grosze",
             // === START INSERT: order_note ===
             "order_note",
             // === END INSERT: order_note ===
           ].join(","),
           { count: "exact" }
         )
-        // Online orders reach the kitchen/admin board only after P24 is confirmed.
-        .or("payment_method.neq.Online,payment_method.is.null,payment_status.eq.paid")
         .order("created_at", { ascending: false })
         .range(offset, offset + limit - 1);
 
+      if (role !== "admin" || searchParams.get("includePending") !== "1") {
+        query = query.or("payment_method.neq.Online,payment_method.is.null,payment_status.eq.paid,status.eq.cancelled");
+      }
       const { data, count, error } = await query;
 
 
       if (error) throw error;
-      return NextResponse.json({ orders: data ?? [], totalCount: count ?? 0 });
+      const orders = (data as unknown as Record<string, unknown>[] | null)?.map(({ checkout_price_grosze, ...order }) => ({
+        ...order, pricing_locked: checkout_price_grosze != null || order.payment_method === "Online" || order.payment_status === "paid",
+      }));
+      return NextResponse.json({ orders: orders ?? [], totalCount: count ?? 0 });
     }
 
     // Widok klienta – pokazujemy bieżące

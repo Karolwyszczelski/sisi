@@ -3,36 +3,16 @@ import { buildOrderContract } from "@/lib/orderContract";
 export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
-import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
-import { createClient } from "@supabase/supabase-js";
 import { getSessionAndRole } from "@/lib/serverAuth";
 import { getTransport } from "@/lib/mailer";
 import { trackingUrl } from "@/lib/orderLink";
-import { dispatchOrderToOperations } from "@/lib/orderOperations";
-import type { Database } from "@/types/supabase";
+import { changeOrder, orderChangeError, orderIdSchema, orderServiceClient, staffOrderStatus } from "@/lib/orderLifecycle";
 
 /* ====== Wersje/Linki regulaminów (dopisek w mailach) ====== */
 const TERMS_VERSION = process.env.TERMS_VERSION || "2025-01";
 const PRIVACY_VERSION = process.env.PRIVACY_VERSION || "2025-01";
 const TERMS_URL = process.env.TERMS_URL || "https://www.sisiciechanow.pl/regulamin";
 const PRIVACY_URL = process.env.PRIVACY_URL || "https://www.sisiciechanow.pl/polityka-prywatnosci";
-
-/** Admin Supabase (do pobrania e-maila użytkownika, jeśli brak w zamówieniu) */
-const getAdmin = () => {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) throw new Error("Missing Supabase environment variables");
-  return createClient(url, key, { auth: { persistSession: false } });
-};
-
-let _admin: ReturnType<typeof getAdmin> | null = null;
-const admin = new Proxy({} as ReturnType<typeof getAdmin>, {
-  get(_, prop) {
-    if (!_admin) _admin = getAdmin();
-    return (_admin as any)[prop];
-  },
-});
 
 /** Bezpieczny nadawca dla Resend/SMTP (usuwa przypadkowe cudzysłowy/spacje) */
 const EMAIL_FROM =
@@ -62,9 +42,6 @@ export async function PATCH(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const cookieStore = await cookies();
-  const supabase = createRouteHandlerClient<Database>({ cookies: () => cookieStore as any });
-
   let body: any;
   try {
     body = await request.json();
@@ -72,21 +49,27 @@ export async function PATCH(
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const { orderId } = await params;
+  const id = orderIdSchema.safeParse((await params).orderId);
+  if (!id.success || !body || typeof body !== "object" || Array.isArray(body)) {
+    return NextResponse.json({ error: "Niepoprawna zmiana zamówienia." }, { status: 400 });
+  }
+  const { data: orderId } = id;
+  const status = staffOrderStatus.optional().safeParse(body.status);
+  if (!status.success || body.payment_status !== undefined ||
+      (body.payment_method !== undefined && !["Gotówka", "Terminal"].includes(body.payment_method))) {
+    return NextResponse.json({ error: "Nie można ręcznie ustawić tego stanu płatności lub zamówienia." }, { status: 400 });
+  }
 
-  // Panel pracownika: delivery_time = deadline realizacji (ISO), client_delivery_time = deklaracja klienta
-const employeeTime: string | undefined = body.delivery_time ?? body.employee_delivery_time;
-const clientTime: string | undefined = body.client_delivery_time;
-
+  const employeeTime = body.delivery_time ?? body.employee_delivery_time;
+  const clientTime = body.client_delivery_time;
 
   const updateData: Record<string, any> = {};
-  if (body.status) updateData.status = body.status;
+  if (status.data) updateData.status = status.data;
 if (employeeTime) updateData.delivery_time = employeeTime;
 if (clientTime) updateData.client_delivery_time = clientTime;
   if (body.items !== undefined) updateData.items = typeof body.items === "string" ? body.items : JSON.stringify(body.items);
   if (body.selected_option) updateData.selected_option = body.selected_option;
   if (body.payment_method) updateData.payment_method = body.payment_method;
-  if (body.payment_status !== undefined) updateData.payment_status = body.payment_status;
   if (body.total_price !== undefined) updateData.total_price = body.total_price;
   if (body.address) updateData.address = body.address;
   if (body.street) updateData.street = body.street;
@@ -100,24 +83,18 @@ if (clientTime) updateData.client_delivery_time = clientTime;
   if (body.promo_code !== undefined) updateData.promo_code = body.promo_code;
   if (body.discount_amount !== undefined) updateData.discount_amount = body.discount_amount;
 
-  const { data, error } = await supabase
-    .from("orders")
-    .update(updateData)
-    .eq("id", orderId)
-    .select()
-    .single();
-
-  if (error) {
-    console.error("[orders.patch] supabase error:", error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  if (!Object.keys(updateData).length) {
+    return NextResponse.json({ error: "Brak zmian zamówienia." }, { status: 400 });
   }
-  if (!data) return NextResponse.json({ error: "Order not found after update" }, { status: 404 });
+  const admin = orderServiceClient();
+  const { data, error } = await changeOrder(admin, orderId, updateData, session.user.id);
+  const failure = orderChangeError(error, data?.outcome === "ok");
+  if (failure) return failure;
 
-  const updated = data as any;
-const when: string | null = updated.delivery_time ?? updated.client_delivery_time ?? null;
-
-  // Przydatne w sekcji e-maili
-  const onlyTimeUpdate = !!employeeTime && updated.status === "accepted" && body.status !== "accepted";
+  const updated = data.order;
+  if (!data.stateChanged && !data.timeChanged) return NextResponse.json(updated);
+  const when = updated.delivery_time ?? updated.client_delivery_time ?? null;
+  const onlyTimeUpdate = data.timeChanged && !data.stateChanged && updated.status === "accepted";
 
   // ===== E-MAIL =====
   try {
@@ -149,7 +126,6 @@ const when: string | null = updated.delivery_time ?? updated.client_delivery_tim
 
       const timeStr = fmtTime(when);
       const optionTxt = optLabel(updated.selected_option);
-      const changingPaymentStatus = body.payment_status !== undefined;
 
       let subject = `SISI • Zamówienie #${orderId}`;
       let headline = "";
@@ -175,17 +151,13 @@ const when: string | null = updated.delivery_time ?? updated.client_delivery_tim
             headline = "Zamówienie zostało anulowane";
             break;
         }
-      } else if (changingPaymentStatus && body.payment_status === "paid" && updated.payment_method === "Online") {
-        subject += " — płatność potwierdzona";
-        headline = "Otrzymaliśmy Twoją płatność online";
-        extra = "Status płatności: <b>opłacone</b>";
       }
 
       const la = (updated.legal_accept ?? {}) as any;
       const termsV = la.terms_version || TERMS_VERSION;
       const privV = la.privacy_version || PRIVACY_VERSION;
 
-      if (body.status === "accepted" && updated.status === "accepted") {
+      if (data.stateChanged && updated.status === "accepted") {
         const contract = buildOrderContract({ ...updated, packaging_total: la.packaging_total }, timeStr);
         await tr.sendMail({ from: EMAIL_FROM, to: toEmail, ...contract });
       } else if (headline) {
@@ -216,21 +188,6 @@ const when: string | null = updated.delivery_time ?? updated.client_delivery_tim
     }
   } catch (e) {
     console.error("[orders.patch] Customer email failed");
-  }
-
-  if (
-    body.payment_status === "paid" &&
-    updated.payment_method === "Online" &&
-    !updated.dotypos_order_id &&
-    !updated.dotypos_sent_at
-  ) {
-    await dispatchOrderToOperations({
-      orderId: String(orderId),
-      totalPln: Number(updated.total_price ?? 0),
-      selectedOption: updated.selected_option,
-      appUrl: request.headers.get("origin"),
-      logPrefix: "[orders.patch]",
-    });
   }
 
   return NextResponse.json(updated);

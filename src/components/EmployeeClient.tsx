@@ -28,6 +28,7 @@ interface Order {
   selected_option?: "local" | "takeaway" | "delivery";
   payment_method?: PaymentMethod;
   payment_status?: PaymentStatus;
+  pricing_locked?: boolean;
 }
 
 const getOptionLabel = (opt?: Order["selected_option"]) =>
@@ -517,6 +518,7 @@ export default function PickupOrdersPage() {
         selected_option: o.selected_option,
         payment_method: (o.payment_method as PaymentMethod) ?? "Gotówka",
         payment_status: (o.payment_status as PaymentStatus) ?? null,
+        pricing_locked: Boolean(o.pricing_locked),
       }));
 
       setTotal(totalCount ?? 0);
@@ -650,14 +652,7 @@ export default function PickupOrdersPage() {
     } finally { setEditingOrderId(null); }
   };
 
-  const restoreOrder = async (id: string) => {
-    const res = await fetch(`/api/orders/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: "new" }),
-    });
-    if (res.ok) { updateLocal(id, { status: "new" }); fetchOrders(); }
-  };
+
 
   const paymentBadge = (o: Order) => {
     if (o.payment_method === "Online") {
@@ -672,15 +667,14 @@ export default function PickupOrdersPage() {
   const setPaymentMethod = async (o: Order, method: PaymentMethod) => {
     try {
       setEditingOrderId(o.id);
-      const patch: any = { payment_method: method };
-      if (method !== "Online") patch.payment_status = null;
+      const patch = { payment_method: method };
       const res = await fetch(`/api/orders/${o.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(patch),
       });
       if (!res.ok) return;
-      updateLocal(o.id, { payment_method: method, payment_status: patch.payment_status ?? o.payment_status });
+      updateLocal(o.id, { payment_method: method, payment_status: o.payment_status });
     } finally { setEditingOrderId(null); }
   };
 
@@ -825,11 +819,11 @@ export default function PickupOrdersPage() {
                           value={o.payment_method || "Gotówka"}
                           onChange={(e) => setPaymentMethod(o, e.target.value as PaymentMethod)}
                           className="h-8 rounded border px-2 text-xs"
-                          disabled={editingOrderId === o.id}
+                          disabled={editingOrderId === o.id || o.payment_method === "Online" || o.payment_status === "paid" || o.status === "completed" || o.status === "cancelled"}
                         >
                           <option>Gotówka</option>
                           <option>Terminal</option>
-                          <option>Online</option>
+                          {o.payment_method === "Online" && <option>Online</option>}
                         </select>
 
                         {o.payment_method === "Online" && (
@@ -870,14 +864,14 @@ export default function PickupOrdersPage() {
                   {(o.status === "new" || o.status === "pending" || o.status === "placed") && (
                     <>
                       <AcceptButton order={o} onAccept={(m) => acceptAndSetTime(o, m)} />
-                      <EditOrderButton
+                      {!o.pricing_locked && <EditOrderButton
                         orderId={o.id}
                         currentProducts={parseProducts(o.items).map(normalizeProduct)}
                         currentSelectedOption={o.selected_option || "local"}
                         onOrderUpdated={(id, data) => (data ? updateLocal(id, data) : fetchOrders())}
                         onEditStart={() => setEditingOrderId(o.id)}
                         onEditEnd={() => setEditingOrderId(null)}
-                      />
+                      />}
                       <CancelButton orderId={o.id} onOrderUpdated={() => fetchOrders()} />
                     </>
                   )}
@@ -894,14 +888,14 @@ export default function PickupOrdersPage() {
                           +{m >= 60 ? `${m / 60} h` : `${m} min`}
                         </button>
                       ))}
-                      <EditOrderButton
+                      {!o.pricing_locked && <EditOrderButton
                         orderId={o.id}
                         currentProducts={parseProducts(o.items).map(normalizeProduct)}
                         currentSelectedOption={o.selected_option || "local"}
                         onOrderUpdated={(id, data) => (data ? updateLocal(id, data) : fetchOrders())}
                         onEditStart={() => setEditingOrderId(o.id)}
                         onEditEnd={() => setEditingOrderId(null)}
-                      />
+                      />}
                       <button
                         onClick={() => completeOrder(o.id)}
                         className="h-10 rounded-md bg-sky-600 px-4 text-sm font-semibold text-white hover:bg-sky-500"
@@ -911,14 +905,7 @@ export default function PickupOrdersPage() {
                     </>
                   )}
 
-                  {o.status === "cancelled" && (
-                    <button
-                      onClick={() => restoreOrder(o.id)}
-                      className="h-10 rounded-md bg-sky-600 px-4 text-sm font-semibold text-white hover:bg-sky-500"
-                    >
-                      Przywróć
-                    </button>
-                  )}
+
                 </footer>
               </article>
             );

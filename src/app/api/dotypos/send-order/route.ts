@@ -115,6 +115,7 @@ interface OrderData {
   order_note?: string;
   payment_method?: string;
   payment_status?: string;
+  status?: string;
   total_price?: number;
   base_before_discount?: number;
   discount_amount?: number;
@@ -442,6 +443,9 @@ export async function POST(req: NextRequest) {
     }
     
     const order: OrderData = orders[0];
+    if (order.status === "cancelled") {
+      return NextResponse.json({ error: "Anulowane zamówienie nie może trafić do POS." }, { status: 409 });
+    }
 
     if (isOnlinePaymentPending(order.payment_method, order.payment_status)) {
       console.warn(`[Dotypos Order] Online payment not confirmed; skipping POS send for order ${orderId}`);
@@ -889,6 +893,10 @@ export async function POST(req: NextRequest) {
       ? `${orderId}:reprint:${Date.now()}`
       : orderId;
 
+    const { data: mayDispatch, error: dispatchError } = await supabase.rpc("sisi_begin_pos_dispatch", { order_id: orderId });
+    if (dispatchError) return NextResponse.json({ error: "Nie udało się rozpocząć wysyłki zamówienia." }, { status: 500 });
+    if (!mayDispatch) return NextResponse.json({ error: "Stan zamówienia blokuje wysyłkę do POS." }, { status: 409 });
+
     const response = await dotypos.createDraftOrder({
       externalId,
       items: dotyposItems,
@@ -916,7 +924,8 @@ export async function POST(req: NextRequest) {
           dotypos_sent_at: new Date().toISOString(),
           dotypos_status: dotyposStatus,
         })
-        .eq("id", orderId);
+        .eq("id", orderId)
+        .or("dotypos_status.is.null,dotypos_status.neq.confirmed");
     }
     
     const duration = Date.now() - startTime;

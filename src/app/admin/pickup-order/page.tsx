@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
+import OrderFollowups from "@/components/admin/OrderFollowups";
 import EditOrderButton from "@/components/EditOrderButton";
 import CancelButton from "@/components/CancelButton";
 import PushNotificationControl from "@/components/admin/PushNotificationControl";
@@ -34,6 +35,7 @@ interface Order {
   selected_option?: "local" | "takeaway" | "delivery";
   payment_method?: PaymentMethod;
   payment_status?: PaymentStatus;
+  pricing_locked?: boolean;
   order_note?: string | null;
 }
 
@@ -767,7 +769,7 @@ export default function PickupOrdersPage() {
     try {
       if (!silent && !editingOrderId) setLoading(true);
       const offset = (page - 1) * perPage;
-      const res = await fetch(`/api/orders/current?limit=${perPage}&offset=${offset}`, { cache: "no-store" });
+      const res = await fetch(`/api/orders/current?includePending=1&limit=${perPage}&offset=${offset}`, { cache: "no-store" });
       if (!res.ok) return;
 
       const { orders: raw, totalCount } = await res.json();
@@ -796,6 +798,7 @@ delivery_time: o.delivery_time ?? undefined,
         selected_option: o.selected_option,
         payment_method: (o.payment_method as PaymentMethod) ?? "Gotówka",
         payment_status: (o.payment_status as PaymentStatus) ?? null,
+        pricing_locked: Boolean(o.pricing_locked),
       }));
 
       setTotal(totalCount ?? 0);
@@ -807,9 +810,9 @@ delivery_time: o.delivery_time ?? undefined,
       });
 
       const prev = prevIdsRef.current;
-      const newOnes = mapped.filter((o) => (o.status === "new" || o.status === "pending" || o.status === "placed") && !prev.has(o.id));
+      const newOnes = mapped.filter((o) => (o.payment_method !== "Online" || o.payment_status === "paid") && (o.status === "new" || o.status === "pending" || o.status === "placed") && !prev.has(o.id));
       if (!silent && initializedRef.current && newOnes.length > 0) void playDing();
-      prevIdsRef.current = new Set(mapped.map((o) => o.id));
+      prevIdsRef.current = new Set(mapped.filter((o) => o.payment_method !== "Online" || o.payment_status === "paid").map((o) => o.id));
       initializedRef.current = true;
 
       setOrders(mapped);
@@ -847,38 +850,21 @@ delivery_time: o.delivery_time ?? undefined,
     return () => clearInterval(iv);
   }, [orders, editingOrderId, fetchOrders]);
 
-  const lastRefreshRef = useRef<Map<string, number>>(new Map());
   const refreshPaymentStatus = async (id: string) => {
     try {
       setEditingOrderId(id);
       const res = await fetch(`/api/payments/p24/refresh?id=${id}`, { method: "POST" });
       if (!res.ok) return;
-      const { payment_status } = await res.json();
-      setOrders((prev) => prev.map((o) => (o.id === id ? { ...o, payment_status: payment_status as PaymentStatus } : o)));
+      await fetchOrders();
     } finally {
       setEditingOrderId(null);
     }
   };
-  useEffect(() => {
-    const iv = setInterval(() => {
-      const now = Date.now();
-      orders.forEach((o) => {
-        if (o.payment_method === "Online" && o.payment_status === "pending") {
-          const last = lastRefreshRef.current.get(o.id) ?? 0;
-          if (now - last >= 15000) {
-            lastRefreshRef.current.set(o.id, now);
-            void refreshPaymentStatus(o.id);
-          }
-        }
-      });
-    }, 15000);
-    return () => clearInterval(iv);
-  }, [orders]);
-
   // dźwięk co 2 s dopóki są „new” (działa tylko gdy ekran/aplikacja jest aktywna;
 // na zablokowanym ekranie dźwięk zapewnia systemowa notyfikacja Web Push)
 const hasNew = useMemo(
-  () => orders.some((o) => o.status === "new" || o.status === "pending" || o.status === "placed"),
+  () => orders.some((o) => ["new", "pending", "placed"].includes(o.status) &&
+    (o.payment_method !== "Online" || o.payment_status === "paid")),
   [orders]
 );
 
@@ -973,14 +959,7 @@ useEffect(() => {
     } finally { setEditingOrderId(null); }
   };
 
-  const restoreOrder = async (id: string) => {
-    const res = await fetch(`/api/orders/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: "new" }),
-    });
-    if (res.ok) { updateLocal(id, { status: "new" }); fetchOrders(); }
-  };
+
 
   const forcePrintOrder = async (id: string) => {
     try {
@@ -1019,15 +998,14 @@ useEffect(() => {
   const setPaymentMethod = async (o: Order, method: PaymentMethod) => {
     try {
       setEditingOrderId(o.id);
-      const patch: any = { payment_method: method };
-      if (method !== "Online") patch.payment_status = null;
+      const patch = { payment_method: method };
       const res = await fetch(`/api/orders/${o.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(patch),
       });
       if (!res.ok) return;
-      updateLocal(o.id, { payment_method: method, payment_status: patch.payment_status ?? o.payment_status });
+      updateLocal(o.id, { payment_method: method, payment_status: o.payment_status });
     } finally { setEditingOrderId(null); }
   };
 
@@ -1039,8 +1017,11 @@ useEffect(() => {
     [orders, filterStatus, filterOption]
   );
 
+  const awaitingPayment = filtered.filter((o) =>
+    ["new", "pending", "placed"].includes(o.status) && o.payment_method === "Online" && o.payment_status !== "paid"
+  );
   const newList = filtered.filter((o) =>
-    o.status === "new" || o.status === "pending" || o.status === "placed"
+    ["new", "pending", "placed"].includes(o.status) && (o.payment_method !== "Online" || o.payment_status === "paid")
   );
   const currList = filtered.filter((o) => o.status === "accepted");
   const histList = filtered.filter((o) => o.status === "cancelled" || o.status === "completed");
@@ -1198,11 +1179,11 @@ useEffect(() => {
                           value={o.payment_method || "Gotówka"}
                           onChange={(e) => setPaymentMethod(o, e.target.value as PaymentMethod)}
                           className={`h-9 rounded-lg border px-3 text-sm focus:outline-none ${isDark ? "border-slate-700 bg-slate-800 text-slate-300 focus:border-slate-600" : "border-gray-300 bg-white text-gray-700"}`}
-                          disabled={editingOrderId === o.id}
+                          disabled={editingOrderId === o.id || o.payment_method === "Online" || o.payment_status === "paid" || o.status === "completed" || o.status === "cancelled"}
                         >
                           <option>Gotówka</option>
                           <option>Terminal</option>
-                          <option>Online</option>
+                          {o.payment_method === "Online" && <option>Online</option>}
                         </select>
 
                         {o.payment_method === "Online" && (
@@ -1237,7 +1218,7 @@ useEffect(() => {
                 </div>
 
                 <footer className="mt-5 flex flex-wrap items-center gap-2">
-                  {o.status !== "cancelled" && (
+                  {o.status !== "cancelled" && (o.payment_method !== "Online" || o.payment_status === "paid") && (
                     <button
                       onClick={() => forcePrintOrder(o.id)}
                       disabled={printingOrderId === o.id}
@@ -1250,15 +1231,15 @@ useEffect(() => {
 
                   {(o.status === "new" || o.status === "pending" || o.status === "placed") && (
                     <>
-                      <AcceptButton order={o} onAccept={(m) => acceptAndSetTime(o, m)} onAcceptAtTime={(iso) => acceptAtExactTime(o, iso)} />
-                      <EditOrderButton
+                      {(o.payment_method !== "Online" || o.payment_status === "paid") && <AcceptButton order={o} onAccept={(m) => acceptAndSetTime(o, m)} onAcceptAtTime={(iso) => acceptAtExactTime(o, iso)} />}
+                      {!o.pricing_locked && <EditOrderButton
                         orderId={o.id}
                         currentProducts={parseProducts(o.items).map(normalizeProduct)}
                         currentSelectedOption={o.selected_option || "local"}
                         onOrderUpdated={(id, data) => (data ? updateLocal(id, data) : fetchOrders())}
                         onEditStart={() => setEditingOrderId(o.id)}
                         onEditEnd={() => setEditingOrderId(null)}
-                      />
+                      />}
                       <CancelButton orderId={o.id} onOrderUpdated={() => fetchOrders()} />
                     </>
                   )}
@@ -1277,14 +1258,14 @@ useEffect(() => {
                           </button>
                         ))}
                       </div>
-                      <EditOrderButton
+                      {!o.pricing_locked && <EditOrderButton
                         orderId={o.id}
                         currentProducts={parseProducts(o.items).map(normalizeProduct)}
                         currentSelectedOption={o.selected_option || "local"}
                         onOrderUpdated={(id, data) => (data ? updateLocal(id, data) : fetchOrders())}
                         onEditStart={() => setEditingOrderId(o.id)}
                         onEditEnd={() => setEditingOrderId(null)}
-                      />
+                      />}
                       <button
                         onClick={() => completeOrder(o.id)}
                         className="h-10 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-500 transition-colors"
@@ -1294,14 +1275,7 @@ useEffect(() => {
                     </>
                   )}
 
-                  {o.status === "cancelled" && (
-                    <button
-                      onClick={() => restoreOrder(o.id)}
-                      className={`h-10 rounded-lg px-4 text-sm font-semibold transition-colors ${isDark ? "bg-slate-700 text-slate-300 hover:bg-slate-600" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
-                    >
-                      Przywróć
-                    </button>
-                  )}
+
                 </footer>
               </article>
             );
@@ -1679,7 +1653,9 @@ useEffect(() => {
           </div>
         )}
 
+      <OrderFollowups isDark={isDark} />
       <ProductList list={newList} title="Nowe zamówienia" />
+      {awaitingPayment.length > 0 && <ProductList list={awaitingPayment} title="Zamówienia bez potwierdzonej płatności" />}
       <div className="mt-8" />
       <ProductList list={currList} title="Zamówienia w realizacji" />
       <div className="mt-8" />

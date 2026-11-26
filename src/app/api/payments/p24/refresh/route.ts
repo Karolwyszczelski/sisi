@@ -1,11 +1,12 @@
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+import { getSessionAndRole } from "@/lib/serverAuth";
 import { verifyPayment } from "@/lib/orderLink";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { hostFromEnv, p24SignVerifyMD5, amountToGrosze } from "@/lib/p24";
-import { dispatchOrderToOperations } from "@/lib/orderOperations";
+import { confirmVerifiedP24 } from "@/lib/orderLifecycle";
 
 const { P24_MERCHANT_ID, P24_POS_ID } = process.env;
 
@@ -34,21 +35,27 @@ export async function POST(req: NextRequest) {
     if (!id) return NextResponse.json({ error: "id missing" }, { status: 400 });
 
     if (!verifyPayment(String(id), req.headers.get("X-Order-Payment"))) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      const { session, role } = await getSessionAndRole();
+      if (!session || role !== "admin") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     const { data: ord, error } = await supabase
       .from("orders")
-      .select("id,total_price,selected_option,p24_session_id,p24_order_id,payment_status")
+      .select("id,status,total_price,selected_option,p24_session_id,p24_order_id,payment_status")
       .eq("id", id)
       .maybeSingle();
 
     if (error || !ord) return NextResponse.json({ error: "order not found" }, { status: 404 });
 
+    if (ord.payment_status === "paid") {
+      return NextResponse.json({ payment_status: "paid", order_status: ord.status });
+    }
+
     // bez order_id P24 nie zweryfikuje transakcji (klasyczne /trnVerify)
     if (!ord.p24_order_id || !ord.p24_session_id) {
       return NextResponse.json({
         payment_status: ord.payment_status,
+        order_status: ord.status,
         reason: "missing-p24-order-or-session",
       });
     }
@@ -81,27 +88,18 @@ export async function POST(req: NextRequest) {
     const ok = (r.ok && new URLSearchParams(t).get("error") === "0") || (r.ok && (() => { try { return JSON.parse(t)?.data?.status === "success"; } catch { return false; } })());
 
     if (ok) {
-      const { data: updated, error: updateError } = await supabase.from("orders")
-        .update({ payment_status: "paid", paid_at: new Date().toISOString() })
-        .eq("id", id)
-          .eq("p24_session_id", ord.p24_session_id)
-          .eq("total_price", ord.total_price)
-          .in("payment_status", ["pending", "failed"]).select("id").maybeSingle();
-      if (updateError) return NextResponse.json({ error: "Update failed" }, { status: 500 });
-      if (updated) {
-        await dispatchOrderToOperations({
-          orderId: String(ord.id),
-          totalPln: Number(ord.total_price ?? 0),
-          selectedOption: ord.selected_option,
-          appUrl: new URL(req.url).origin,
-          logPrefix: "[p24.refresh]",
-        });
+      const outcome = await confirmVerifiedP24(supabase, {
+        sessionId: String(ord.p24_session_id), gatewayOrderId: String(ord.p24_order_id), amountGrosze: amountGr,
+      }, url.origin);
+      if (outcome !== "mismatch") {
+        const { data: latest, error } = await supabase.from("orders").select("status").eq("id", id).single();
+        if (error) return NextResponse.json({ error: "Nie udało się sprawdzić zamówienia." }, { status: 500 });
+        return NextResponse.json({ payment_status: "paid", order_status: latest.status });
       }
-      return NextResponse.json({ payment_status: "paid" });
     }
 
     // nie zmieniaj na failed jeśli P24 zwraca błąd tymczasowy
-    return NextResponse.json({ payment_status: ord.payment_status ?? "pending" }, { status: 200 });
+    return NextResponse.json({ payment_status: ord.payment_status ?? "pending", order_status: ord.status }, { status: 200 });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || "server error" }, { status: 500 });
   }

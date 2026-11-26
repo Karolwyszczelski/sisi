@@ -38,13 +38,13 @@ export async function POST(req: Request) {
 
     const { data: order, error } = await supabase
       .from("orders")
-      .select("id,total_price,payment_method,payment_status,p24_token,contact_email,name")
+      .select("id,status,total_price,payment_method,payment_status,p24_token,contact_email,name")
       .eq("id", orderId)
       .maybeSingle();
 
     if (error || !order) return NextResponse.json({ error: "order not found" }, { status: 404 });
 
-    if (order.payment_method !== "Online" || order.payment_status !== "pending" || Number(order.total_price) <= 0) {
+    if (!["new", "pending", "placed", "accepted"].includes(order.status) || order.payment_method !== "Online" || order.payment_status !== "pending" || Number(order.total_price) <= 0) {
       return NextResponse.json({ error: "Zamówienie nie oczekuje na płatność online." }, { status: 409 });
     }
 
@@ -109,6 +109,7 @@ export async function POST(req: Request) {
       })
       .eq("id", orderId)
       .eq("payment_status", "pending")
+      .in("status", ["new", "pending", "placed", "accepted"])
       .eq("total_price", order.total_price)
       .select("id").maybeSingle();
     if (registrationError || !registered) {

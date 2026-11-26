@@ -7,7 +7,7 @@ import {
   p24SignVerifyMD5,
   parseP24Amount,
 } from "@/lib/p24";
-import { dispatchOrderToOperations } from "@/lib/orderOperations";
+import { confirmVerifiedP24 } from "@/lib/orderLifecycle";
 
 const getSupabaseAdmin = () => {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -105,33 +105,10 @@ export async function POST(req: Request) {
 
     if (!ok) return NextResponse.json({ ok: false }, { status: 400 });
 
-    const { data: updated, error: updateError } = await supabaseAdmin
-      .from("orders")
-      .update({ p24_order_id: String(orderIdFromGateway), payment_status: "paid", paid_at: new Date().toISOString() })
-      .eq("p24_session_id", sessionId)
-      .eq("total_price", amountGr / 100)
-      .eq("payment_method", "Online")
-      .in("payment_status", ["pending", "failed"])
-      .select("id,total_price,selected_option")
-      .maybeSingle();
-
-    if (updateError) return NextResponse.json({ error: "Update failed" }, { status: 500 });
-    if (!updated) {
-      const { data: paid, error } = await supabaseAdmin.from("orders").select("id")
-        .eq("p24_session_id", sessionId).eq("total_price", amountGr / 100)
-        .eq("payment_status", "paid").eq("p24_order_id", String(orderIdFromGateway)).maybeSingle();
-      if (error) return NextResponse.json({ error: "Lookup failed" }, { status: 500 });
-      return NextResponse.json({ ok: Boolean(paid) }, { status: paid ? 200 : 409 });
-    }
-
-    await dispatchOrderToOperations({
-      orderId: String(updated.id),
-      totalPln: Number(updated.total_price),
-      selectedOption: updated.selected_option,
-      appUrl: new URL(req.url).origin,
-      logPrefix: "[p24]",
-    });
-    return NextResponse.json({ ok: true });
+    const outcome = await confirmVerifiedP24(supabaseAdmin, {
+      sessionId: String(sessionId), gatewayOrderId: String(orderIdFromGateway), amountGrosze: amountGr,
+    }, new URL(req.url).origin);
+    return NextResponse.json({ ok: outcome !== "mismatch" }, { status: outcome === "mismatch" ? 409 : 200 });
   } catch (e: any) {
     console.error("[P24_WEBHOOK_ERROR]", e);
     return NextResponse.json({ error: "Server error" }, { status: 500 });

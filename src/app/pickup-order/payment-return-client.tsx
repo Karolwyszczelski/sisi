@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { completePendingPurchase, trackEvent } from "@/lib/analytics";
 
-type PaymentState = "pending" | "paid" | "failed" | "error";
+type PaymentState = "pending" | "paid" | "failed" | "cancelled" | "error";
 
 export default function PaymentReturnClient() {
   const params = useSearchParams();
@@ -26,6 +26,15 @@ export default function PaymentReturnClient() {
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || "Nie udało się sprawdzić płatności.");
+
+      if (data.order_status === "cancelled") {
+        stopped.current = true;
+        setState("cancelled");
+        setMessage(data.payment_status === "paid"
+          ? "Płatność została zarejestrowana. Restauracja rozliczy ją jako płatność za anulowane zamówienie."
+          : "Zamówienie nie trafi do realizacji. Jeśli środki zostały pobrane, skontaktuj się z restauracją.");
+        return;
+      }
 
       if (data.payment_status === "paid") {
         stopped.current = true;
@@ -69,10 +78,10 @@ export default function PaymentReturnClient() {
     <main className="min-h-[60vh] grid place-items-center p-6">
       <div className="max-w-md rounded-2xl bg-black text-white p-8 text-center shadow-xl">
         <h1 className="text-2xl font-bold mb-3">
-          {state === "paid" ? "Płatność potwierdzona" : state === "failed" ? "Płatność nieudana" : "Status płatności"}
+          {state === "paid" ? "Płatność potwierdzona" : state === "failed" ? "Płatność nieudana" : state === "cancelled" ? "Zamówienie anulowane" : "Status płatności"}
         </h1>
         <p className="text-white/75 mb-6">{message}</p>
-        {orderId && state !== "paid" && (
+        {orderId && state !== "paid" && state !== "cancelled" && (
           <button
             type="button"
             onClick={() => {

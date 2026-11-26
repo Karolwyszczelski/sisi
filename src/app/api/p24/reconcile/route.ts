@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { hostFromEnv, p24SignVerifyMD5, amountToGrosze } from "@/lib/p24";
-import { dispatchOrderToOperations } from "@/lib/orderOperations";
+import { confirmVerifiedP24 } from "@/lib/orderLifecycle";
 
 const { P24_MERCHANT_ID, P24_POS_ID, CRON_SECRET } = process.env;
 
@@ -92,25 +92,9 @@ export async function GET(req: NextRequest) {
           })());
 
       if (ok) {
-        const { data: updated, error: updateError } = await supabase
-          .from("orders")
-          .update({ payment_status: "paid", paid_at: new Date().toISOString() })
-          .eq("id", o.id)
-          .eq("p24_session_id", o.p24_session_id)
-          .eq("total_price", o.total_price)
-          .in("payment_status", ["pending", "failed"]).select("id").maybeSingle();
-        if (updateError || !updated) {
-          results[o.id] = updateError ? "update-error" : "unchanged";
-          continue;
-        }
-        await dispatchOrderToOperations({
-          orderId: String(o.id),
-          totalPln: Number(o.total_price ?? 0),
-          selectedOption: o.selected_option,
-          appUrl: new URL(req.url).origin,
-          logPrefix: "[p24.reconcile]",
-        });
-        results[o.id] = "paid";
+        results[o.id] = await confirmVerifiedP24(supabase, {
+          sessionId: String(sessionId), gatewayOrderId: String(orderId), amountGrosze: amountGr,
+        }, new URL(req.url).origin);
       } else {
         results[o.id] = "no-change";
       }

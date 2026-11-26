@@ -1,54 +1,25 @@
-// src/app/api/orders/webhook/route.ts
-import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
-
-// Lazy initialization - klient tworzony dopiero przy pierwszym użyciu
-const getSupabase = () => {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) {
-    throw new Error("Missing Supabase environment variables");
-  }
-  return createClient(url, key);
-};
+import { changeOrder, orderChangeError, orderIdSchema, orderServiceClient, staffOrderStatus } from "@/lib/orderLifecycle";
 
 export async function POST(request: Request) {
-  const supabase = getSupabase();
-  // 1. Weryfikacja tajnego nagłówka
-  const secret = request.headers.get("x-webhook-secret");
-  if (secret !== process.env.WEBHOOK_SECRET) {
+  const expected = process.env.WEBHOOK_SECRET;
+  if (!expected || request.headers.get("x-webhook-secret") !== expected) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  try {
-    const data = await request.json();
-
-    const orderId = data.orderId || data.sessionId || data.id;
-    if (!orderId) {
-      return NextResponse.json({ error: "Brak orderId" }, { status: 400 });
-    }
-
-    // 2. Zbuduj obiekt update’u (tylko te pola które podał webhook)
-    const updates: Record<string, any> = { status: data.status ?? "new" };
-    if (typeof data.address === "string")   updates.address     = data.address;
-    if (typeof data.phone   === "string")   updates.phone       = data.phone;
-    if (typeof data.products=== "string")   updates.products    = data.products;
-    if (typeof data.total_price === "number") updates.total_price = data.total_price;
-
-    // 3. Wykonaj update
-    const { error } = await supabase
-      .from("orders")
-      .update(updates)
-      .eq("id", orderId);
-
-    if (error) {
-      console.error("[Webhook] błąd update’u:", error);
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-
-    return NextResponse.json({ success: true });
-  } catch (err: any) {
-    console.error("[Webhook] nieoczekiwany błąd:", err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+  const body = await request.json().catch(() => null);
+  const id = orderIdSchema.safeParse(body?.orderId ?? body?.sessionId ?? body?.id);
+  const status = staffOrderStatus.optional().safeParse(body?.status);
+  if (!id.success || !status.success || body?.total_price !== undefined || body?.products !== undefined) {
+    return NextResponse.json({ error: "Niepoprawna zmiana zamówienia." }, { status: 400 });
   }
+
+  const patch: Record<string, string> = {};
+  if (status.data) patch.status = status.data;
+  if (typeof body.address === "string") patch.address = body.address;
+  if (typeof body.phone === "string") patch.phone = body.phone;
+  if (!Object.keys(patch).length) return NextResponse.json({ error: "Brak zmian." }, { status: 400 });
+
+  const { data, error } = await changeOrder(orderServiceClient(), id.data, patch, null);
+  return orderChangeError(error, data?.outcome === "ok") ?? NextResponse.json({ success: true });
 }

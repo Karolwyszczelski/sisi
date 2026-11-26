@@ -36,6 +36,7 @@ export default function CancelButton({
 
       // powiadamiamy rodzica o zmianie statusu
       onOrderUpdated(orderId, { status: "cancelled" });
+      window.dispatchEvent(new Event("sisi:order-cancelled"));
     } catch (err) {
       console.error("Błąd anulowania zamówienia:", err);
       alert("Błąd sieci podczas anulowania zamówienia.");
