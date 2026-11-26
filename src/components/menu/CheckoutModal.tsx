@@ -8,6 +8,7 @@ import Script from "next/script";
 import { X, MapPin, ShoppingBag, Truck } from "lucide-react";
 import useIsClient from "@/lib/useIsClient";
 import { inferDefaultMeat, resolveOrderMeat } from "@/lib/orderMeat";
+import { canAcceptOrder, orderSettingsSchema, type OrderSettings } from "@/lib/orderAvailability";
 import useCartStore from "@/store/cartStore";
 import { createClient } from "@supabase/supabase-js";
 import QRCode from "react-qr-code";
@@ -495,17 +496,11 @@ export default function CheckoutModal() {
     costPerKm: number;
   } | null>(null);
 
-  // Ustawienia zamówień (włącz/wyłącz typy zamówień)
-  const [orderSettings, setOrderSettings] = useState<{
-    orders_enabled: boolean;
-    local_enabled: boolean;
-    takeaway_enabled: boolean;
-    delivery_enabled: boolean;
-  }>({
-    orders_enabled: true,
-    local_enabled: true,
-    takeaway_enabled: true,
-    delivery_enabled: true,
+  const [orderSettings, setOrderSettings] = useState<OrderSettings>({
+    orders_enabled: false,
+    local_enabled: false,
+    takeaway_enabled: false,
+    delivery_enabled: false,
   });
 
   const [legalAccepted, setLegalAccepted] = useState(false);
@@ -619,21 +614,22 @@ export default function CheckoutModal() {
         }
       });
 
-    // Pobierz ustawienia zamówień (czy typy zamówień są włączone)
-    fetch("/api/settings/orders")
-      .then((r) => r.json())
+  }, []);
+
+  useEffect(() => {
+    if (!isCheckoutOpen) return;
+    const controller = new AbortController();
+    const closed = { orders_enabled: false, local_enabled: false, takeaway_enabled: false, delivery_enabled: false };
+    setOrderSettings(closed);
+    fetch("/api/settings/orders", { signal: controller.signal, cache: "no-store" })
+      .then((response) => response.ok ? response.json() : null)
       .then((data) => {
-        if (data && !data.error) {
-          setOrderSettings({
-            orders_enabled: data.orders_enabled ?? true,
-            local_enabled: data.local_enabled ?? true,
-            takeaway_enabled: data.takeaway_enabled ?? true,
-            delivery_enabled: data.delivery_enabled ?? true,
-          });
-        }
+        const settings = orderSettingsSchema.safeParse(data);
+        if (!controller.signal.aborted && settings.success) setOrderSettings(settings.data);
       })
       .catch(() => {});
-  }, []);
+    return () => controller.abort();
+  }, [isCheckoutOpen]);
 
   /* Mapa cen dodatków z bazy */
   const addonPriceMap = useMemo(() => {
@@ -1071,7 +1067,10 @@ export default function CheckoutModal() {
       const sanitizedAddons: string[] = burger
         ? (item.addons ?? [])
         : fries
-          ? (item.addons ?? []).filter((a: string) => SAUCES.includes(a))
+          ? (item.addons ?? []).filter((name: string) => addonsFromDb.length
+              ? addonsFromDb.some((addon) => addon.name === name &&
+                  (addon.category === "sos" || (addon.category === "premium" && !item.name.toLowerCase().includes("ser"))))
+              : SAUCES.includes(name) || (PREMIUM_ADDONS.includes(name) && !item.name.toLowerCase().includes("ser")))
           : [];
 
       return {
@@ -1356,6 +1355,7 @@ export default function CheckoutModal() {
 
   // Przycisk nieaktywny gdy brak weryfikacji Turnstile
   const confirmDisabled =
+    !selectedOption || !canAcceptOrder(orderSettings, selectedOption) ||
     !paymentMethod ||
     !legalAccepted ||
     (TURNSTILE_SITE_KEY && !turnstileToken) ||

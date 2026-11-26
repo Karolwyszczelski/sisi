@@ -1,7 +1,8 @@
 import { depositForOrder } from "@/lib/containerDeposit";
 import { ORDER_TERMS_TEXT, ORDER_TERMS_VERSION } from "@/config/termsSnapshot";
 import { getSessionAndRole } from "@/lib/serverAuth";
-import { resolveOrderMeat } from "@/lib/orderMeat";
+import { checkoutSelectionSchema, validateCheckoutLine, type CheckoutAddon } from "@/lib/checkoutValidation";
+import { canAcceptOrder, readOrderAvailability } from "@/lib/orderAvailability";
 // src/app/api/orders/create/route.ts
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -441,10 +442,10 @@ function normalizeBody(raw: any, req: Request) {
     postal_code: base?.postal_code ?? null,
     city: base?.city ?? null,
     flat_number: base?.flat_number ?? null,
-    selected_option: (base?.selected_option as any) ?? "local",
-    payment_method: base?.payment_method ?? "Gotówka",
+    selected_option: base?.selected_option,
+    payment_method: base?.payment_method,
     payment_status:
-      (base?.payment_method ?? "Gotówka") === "Online" ? "pending" : null,
+      base?.payment_method === "Online" ? "pending" : null,
     total_price: num(base?.total_price, 0),
     promo_code: pickPromo(base) ?? pickPromo(raw),
     discount_amount: num(base?.discount_amount, 0) ?? 0,
@@ -479,10 +480,10 @@ const SAUCES = [
 ];
 
 // Mapa cen dodatków pobierana z bazy
-type AddonPriceMap = Map<string, number>;
+type AddonPriceMap = Map<string, CheckoutAddon>;
 
 function getAddonPriceFromMap(addonName: string, addonPriceMap: AddonPriceMap): number {
-  const price = addonPriceMap.get(addonName.toLowerCase());
+  const price = addonPriceMap.get(addonName.toLowerCase())?.price;
   if (price !== undefined) return price;
   // Fallback jeśli nie znaleziono w mapie
   if (addonName.toLowerCase() === "płynny ser") return 6;
@@ -535,104 +536,15 @@ export async function POST(req: Request) {
   // Domyślna wartość packaging_cost (fallback)
   let packagingCostSetting = 2;
   // Mapa cen dodatków z bazy
-  let addonPriceMap: AddonPriceMap = new Map();
+  const addonPriceMap: AddonPriceMap = new Map();
   // Mapa kategorii produktów (dla kaucji)
   const productsMap = new Map<string, ProductRow & { price: unknown; deposit_grosze: number; available: boolean | null; category: string | null; subcategory: string | null }>();
-  let productCategoryMap: ProductCategoryMap = new Map();
+  const productCategoryMap: ProductCategoryMap = new Map();
 
   try {
-    // 0) Kill-switch + packaging_cost + addon prices + product categories + order_settings
-    // Przechowaj ustawienia zamówień do walidacji selected_option
-    let orderSettings = {
-      orders_enabled: true,
-      local_enabled: true,
-      takeaway_enabled: true,
-      delivery_enabled: true,
-    };
-    {
-      const [cfgRes, addonsRes, productsRes, orderSettingsRes] = await Promise.all([
-        supabaseAdmin
-          .from("restaurant_info")
-          .select("ordering_open,packaging_cost")
-          .eq("id", 1)
-          .single(),
-        supabaseAdmin
-          .from("addons")
-          .select("name, price")
-          .eq("available", true),
-        supabaseAdmin
-          .from("products")
-          .select("id, name, category, subcategory, price, available, description, ingredients, deposit_grosze"),
-        supabaseAdmin
-          .from("order_settings")
-          .select("*")
-          .single(),
-      ]);
-
-      const { data: cfg, error: cfgErr } = cfgRes;
-      const { data: addons, error: addonsErr } = addonsRes;
-      const { data: products, error: productsErr } = productsRes;
-      const { data: settings } = orderSettingsRes;
-
-      if (cfgErr || !cfg) {
-        return NextResponse.json({ error: "Konfiguracja sklepu niedostępna." }, { status: 503 });
-      }
-      if (cfg.ordering_open === false) {
-        return NextResponse.json(
-          { error: "Zamawianie jest tymczasowo wyłączone. Zapraszamy później!" },
-          { status: 503 }
-        );
-      }
-
-      // Sprawdź ustawienia zamówień z tabeli order_settings
-      if (settings) {
-        orderSettings = {
-          orders_enabled: settings.orders_enabled ?? true,
-          local_enabled: settings.local_enabled ?? true,
-          takeaway_enabled: settings.takeaway_enabled ?? true,
-          delivery_enabled: settings.delivery_enabled ?? true,
-        };
-      }
-
-      // Blokuj wszystkie zamówienia jeśli wyłączone
-      if (!orderSettings.orders_enabled) {
-        return NextResponse.json(
-          { error: "Przyjmowanie zamówień jest tymczasowo wyłączone. Zapraszamy później!" },
-          { status: 503 }
-        );
-      }
-
-      // Pobierz packaging_cost z bazy (jeśli istnieje)
-      if (typeof cfg.packaging_cost === "number") {
-        packagingCostSetting = cfg.packaging_cost;
-      }
-
-      // Buduj mapę cen dodatków
-      if (!addonsErr && addons) {
-        for (const addon of addons) {
-          if (addon.name && typeof addon.price === "number") {
-            addonPriceMap.set(addon.name.toLowerCase(), addon.price);
-          }
-        }
-      }
-
-      if (productsErr || addonsErr) {
-        return NextResponse.json({ error: "Katalog zamówień jest niedostępny." }, { status: 503 });
-      }
-
-      // Buduj mapę kategorii produktów (dla kaucji)
-      if (!productsErr && products) {
-        for (const product of products) {
-          productsMap.set(String(product.id), product);
-          if (product.name && product.category) {
-            productCategoryMap.set(`id:${String(product.id)}`, product.category);
-            productCategoryMap.set(
-              `name:${normalizeProductNameForLookup(product.name)}`,
-              product.category,
-            );
-          }
-        }
-      }
+    const availability = await readOrderAvailability(supabaseAdmin).catch(() => null);
+    if (!availability || !availability.effective.orders_enabled) {
+      return NextResponse.json({ error: "Przyjmowanie zamówień jest tymczasowo wyłączone." }, { status: 503 });
     }
 
     // --- PROMO: helpery bez joinów i bez RPC ---
@@ -825,6 +737,14 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
     }
 
+    const selection = checkoutSelectionSchema.safeParse(raw?.orderPayload ?? raw);
+    if (!selection.success) {
+      return NextResponse.json({ error: "Wybierz poprawny tryb zamówienia i metodę płatności." }, { status: 400 });
+    }
+    if (!canAcceptOrder(availability.effective, selection.data.selected_option)) {
+      return NextResponse.json({ error: "Wybrany tryb zamówienia jest tymczasowo niedostępny." }, { status: 503 });
+    }
+
     // 2.0) Turnstile
 if (TURNSTILE_SECRET_KEY) {
   // token z nagłówka (różne warianty) lub z body (fallback)
@@ -890,27 +810,6 @@ if (TURNSTILE_SECRET_KEY) {
 
     if (!n.legal_accept) return NextResponse.json({ error: "Zaakceptuj regulamin zamówień." }, { status: 400 });
 
-    // Sprawdź czy wybrany typ zamówienia jest włączony
-    const selectedOpt = n.selected_option || "local";
-    if (selectedOpt === "local" && !orderSettings.local_enabled) {
-      return NextResponse.json(
-        { error: "Zamówienia na miejscu są tymczasowo niedostępne." },
-        { status: 503 }
-      );
-    }
-    if (selectedOpt === "takeaway" && !orderSettings.takeaway_enabled) {
-      return NextResponse.json(
-        { error: "Odbiór osobisty jest tymczasowo niedostępny." },
-        { status: 503 }
-      );
-    }
-    if (selectedOpt === "delivery" && !orderSettings.delivery_enabled) {
-      return NextResponse.json(
-        { error: "Dostawa jest tymczasowo niedostępna." },
-        { status: 503 }
-      );
-    }
-
     // wymagamy telefonu (E.164), e-maila oraz pozycji
     const phoneE164 = normalizePhone(n.phone);
     if (!phoneE164) {
@@ -930,43 +829,67 @@ if (TURNSTILE_SECRET_KEY) {
     if (!Array.isArray(n.itemsArray) || n.itemsArray.length === 0) {
       return NextResponse.json({ error: "Koszyk jest pusty." }, { status: 400 });
     }
-    const hasInvalidQuantity = n.itemsArray.some((item) => {
-      const quantity = Number(item.quantity ?? 1);
-      return !Number.isSafeInteger(quantity) || quantity < 1 || quantity > 99;
-    });
-    if (hasInvalidQuantity) {
-      return NextResponse.json(
-        { error: "Ilość każdego produktu musi być liczbą całkowitą od 1 do 99." },
-        { status: 400 },
-      );
+    {
+      const [addonsRes, productsRes] = await Promise.all([
+        supabaseAdmin.from("addons").select("name,price,category").eq("available", true),
+        supabaseAdmin
+          .from("products")
+          .select("id, name, category, subcategory, price, available, description, ingredients, deposit_grosze"),
+      ]);
+      const { data: addons, error: addonsErr } = addonsRes;
+      const { data: products, error: productsErr } = productsRes;
+
+      if (typeof availability.packagingCost === "number") {
+        packagingCostSetting = availability.packagingCost;
+      }
+
+      if (!addonsErr && addons) {
+        for (const addon of addons) {
+          if (typeof addon.name === "string" && addon.name.trim() && typeof addon.price === "number" && Number.isFinite(addon.price) && addon.price >= 0) {
+            const name = addon.name.trim().toLowerCase();
+            addonPriceMap.set(name, { price: addon.price, category: addon.category });
+          }
+        }
+      }
+
+      if (productsErr || addonsErr) {
+        return NextResponse.json({ error: "Katalog zamówień jest niedostępny." }, { status: 503 });
+      }
+
+      // Buduj mapę kategorii produktów (dla kaucji)
+      if (!productsErr && products) {
+        for (const product of products) {
+          productsMap.set(String(product.id), product);
+          if (product.name && product.category) {
+            productCategoryMap.set(`id:${String(product.id)}`, product.category);
+            productCategoryMap.set(
+              `name:${normalizeProductNameForLookup(product.name)}`,
+              product.category,
+            );
+          }
+        }
+      }
     }
 
     const catalogItems: Any[] = [];
     for (const item of n.itemsArray) {
-      const product = productsMap.get(String(item.product_id ?? item.productId ?? item.id ?? ""));
+      const product = productsMap.get(String(item?.product_id ?? item?.productId ?? item?.id ?? ""));
       const price = Number(product?.price);
       if (!product?.name || product.available === false || product.price == null || !Number.isFinite(price) || price < 0) {
         return NextResponse.json({ error: "Produkt jest niedostępny. Odśwież menu i sprawdź koszyk." }, { status: 409 });
       }
-      const options = item.options ?? {};
-      const addons = options.addons ?? item.addons ?? [];
-      if (!Array.isArray(addons) || addons.some((addon) => typeof addon !== "string" || !addonPriceMap.has(addon.trim().toLowerCase()))) {
-        return NextResponse.json({ error: "Wybrany dodatek jest niedostępny." }, { status: 409 });
-      }
-      const selected = options.meatType;
-      const meatType = resolveOrderMeat(product, selected === "wołowina" || selected === "kurczak" ? selected : null);
-      const extraMeatCount = Number(options.extraMeatCount ?? 0);
-      if (!Number.isSafeInteger(extraMeatCount) || extraMeatCount < 0 || extraMeatCount > 99 || (extraMeatCount > 0 && !meatType)) {
-        return NextResponse.json({ error: "Niepoprawna liczba dodatkowych porcji mięsa." }, { status: 400 });
+      const line = validateCheckoutLine(item, product, addonPriceMap);
+      if ("error" in line) {
+        return NextResponse.json({ error: line.error }, { status: 400 });
       }
       catalogItems.push({
         product_id: product.id,
         name: product.name,
         category: product.category,
         deposit_grosze: product.deposit_grosze,
-        quantity: Number(item.quantity ?? item.qty ?? 1),
+        quantity: line.quantity,
         price,
-        options: { addons: addons.map((addon: string) => addon.trim()), meatType, extraMeatCount, swaps: options.swaps, note: options.note ?? item.note },
+        options: line.options,
       });
     }
     n.itemsArray = catalogItems;
@@ -1127,6 +1050,11 @@ if (TURNSTILE_SECRET_KEY) {
     const quotedGrosze = Math.round((baseTotal - quotedDiscount + deposit) * 100);
     if (quotedGrosze !== expectedGrosze) {
       return changedQuote(quotedGrosze / 100, quotedDiscount);
+    }
+
+    const latestAvailability = await readOrderAvailability(supabaseAdmin).catch(() => null);
+    if (!latestAvailability || !canAcceptOrder(latestAvailability.effective, selection.data.selected_option)) {
+      return NextResponse.json({ error: "Przyjmowanie zamówień w tym trybie jest tymczasowo wyłączone." }, { status: 503 });
     }
 
     // 5) Zapis do orders

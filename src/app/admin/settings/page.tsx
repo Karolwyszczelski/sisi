@@ -51,7 +51,6 @@ interface TableRow {
 }
 
 interface RestaurantSettings {
-  ordering_open: boolean;
   packaging_cost: number;
 }
 
@@ -91,18 +90,18 @@ export default function SettingsPage() {
 
   // ==================== RESTAURANT SETTINGS ====================
   const [restaurantSettings, setRestaurantSettings] = useState<RestaurantSettings>({
-    ordering_open: true,
     packaging_cost: 2,
   });
   const [orderSettings, setOrderSettings] = useState<OrderSettings>({
-    orders_enabled: true,
-    local_enabled: true,
-    takeaway_enabled: true,
-    delivery_enabled: true,
+    orders_enabled: false,
+    local_enabled: false,
+    takeaway_enabled: false,
+    delivery_enabled: false,
   });
   const [loadingSettings, setLoadingSettings] = useState(true);
   const [savingSettings, setSavingSettings] = useState(false);
   const [orderSettingsLoading, setOrderSettingsLoading] = useState(false);
+  const [orderSettingsReady, setOrderSettingsReady] = useState(false);
 
   // ==================== GENERAL ====================
   const [error, setError] = useState<string | null>(null);
@@ -155,13 +154,12 @@ export default function SettingsPage() {
     try {
       const { data } = await supabase
         .from("restaurant_info")
-        .select("ordering_open, packaging_cost")
+        .select("packaging_cost")
         .eq("id", 1)
         .single();
 
       if (data) {
         setRestaurantSettings({
-          ordering_open: data.ordering_open ?? true,
           packaging_cost: data.packaging_cost ?? 2,
         });
       }
@@ -179,6 +177,7 @@ export default function SettingsPage() {
       if (res.ok) {
         const data = await res.json();
         setOrderSettings(data);
+        setOrderSettingsReady(true);
       }
     } catch (e) {
       console.error("Błąd pobierania ustawień zamówień:", e);
@@ -188,6 +187,7 @@ export default function SettingsPage() {
   // ==================== TOGGLE ORDER SETTING ====================
   const toggleOrderSetting = async (key: keyof OrderSettings) => {
     setOrderSettingsLoading(true);
+    setError(null);
     try {
       const newValue = !orderSettings[key];
       const res = await fetch("/api/settings/orders", {
@@ -195,11 +195,10 @@ export default function SettingsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ [key]: newValue }),
       });
-      if (res.ok) {
-        setOrderSettings((prev) => ({ ...prev, [key]: newValue }));
-      }
+      if (!res.ok) throw new Error("Nie udało się zapisać ustawień zamówień.");
+      setOrderSettings(await res.json());
     } catch (e) {
-      console.error("Błąd aktualizacji ustawienia:", e);
+      setError("Nie udało się zapisać ustawień zamówień. Wymagane są uprawnienia administratora.");
     } finally {
       setOrderSettingsLoading(false);
     }
@@ -339,7 +338,6 @@ export default function SettingsPage() {
       const { error: updateError } = await supabase
         .from("restaurant_info")
         .update({
-          ordering_open: restaurantSettings.ordering_open,
           packaging_cost: restaurantSettings.packaging_cost,
         })
         .eq("id", 1);
@@ -631,12 +629,12 @@ export default function SettingsPage() {
                       <div className="grid gap-3">
                         {/* Główny przełącznik */}
                         <div
-                          onClick={() => !orderSettingsLoading && toggleOrderSetting("orders_enabled")}
+                          onClick={() => orderSettingsReady && !orderSettingsLoading && toggleOrderSetting("orders_enabled")}
                           className={`flex items-center justify-between p-4 rounded-xl cursor-pointer transition ${
                             orderSettings.orders_enabled
                               ? isDark ? "bg-emerald-500/10 border border-emerald-500/30" : "bg-emerald-50 border border-emerald-200"
                               : isDark ? "bg-slate-700/50 hover:bg-slate-700" : "bg-gray-50 hover:bg-gray-100"
-                          } ${orderSettingsLoading ? "opacity-50 pointer-events-none" : ""}`}
+                          } ${!orderSettingsReady || orderSettingsLoading ? "opacity-50 pointer-events-none" : ""}`}
                         >
                           <div className="flex items-center gap-4">
                             <div className={`p-3 rounded-xl ${orderSettings.orders_enabled ? "bg-emerald-500/20" : isDark ? "bg-slate-600" : "bg-gray-200"}`}>
@@ -663,7 +661,7 @@ export default function SettingsPage() {
                             orderSettings.local_enabled && orderSettings.orders_enabled
                               ? isDark ? "bg-purple-500/10 border border-purple-500/30" : "bg-purple-50 border border-purple-200"
                               : isDark ? "bg-slate-700/50 hover:bg-slate-700" : "bg-gray-50 hover:bg-gray-100"
-                          } ${orderSettingsLoading ? "opacity-50 pointer-events-none" : ""}`}
+                          } ${!orderSettingsReady || orderSettingsLoading ? "opacity-50 pointer-events-none" : ""}`}
                         >
                           <div className="flex items-center gap-4">
                             <div className={`p-3 rounded-xl ${orderSettings.local_enabled && orderSettings.orders_enabled ? "bg-purple-500/20" : isDark ? "bg-slate-600" : "bg-gray-200"}`}>
@@ -690,7 +688,7 @@ export default function SettingsPage() {
                             orderSettings.takeaway_enabled && orderSettings.orders_enabled
                               ? isDark ? "bg-amber-500/10 border border-amber-500/30" : "bg-amber-50 border border-amber-200"
                               : isDark ? "bg-slate-700/50 hover:bg-slate-700" : "bg-gray-50 hover:bg-gray-100"
-                          } ${orderSettingsLoading ? "opacity-50 pointer-events-none" : ""}`}
+                          } ${!orderSettingsReady || orderSettingsLoading ? "opacity-50 pointer-events-none" : ""}`}
                         >
                           <div className="flex items-center gap-4">
                             <div className={`p-3 rounded-xl ${orderSettings.takeaway_enabled && orderSettings.orders_enabled ? "bg-amber-500/20" : isDark ? "bg-slate-600" : "bg-gray-200"}`}>
@@ -717,7 +715,7 @@ export default function SettingsPage() {
                             orderSettings.delivery_enabled && orderSettings.orders_enabled
                               ? isDark ? "bg-blue-500/10 border border-blue-500/30" : "bg-blue-50 border border-blue-200"
                               : isDark ? "bg-slate-700/50 hover:bg-slate-700" : "bg-gray-50 hover:bg-gray-100"
-                          } ${orderSettingsLoading ? "opacity-50 pointer-events-none" : ""}`}
+                          } ${!orderSettingsReady || orderSettingsLoading ? "opacity-50 pointer-events-none" : ""}`}
                         >
                           <div className="flex items-center gap-4">
                             <div className={`p-3 rounded-xl ${orderSettings.delivery_enabled && orderSettings.orders_enabled ? "bg-blue-500/20" : isDark ? "bg-slate-600" : "bg-gray-200"}`}>

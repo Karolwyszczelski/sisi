@@ -1,9 +1,10 @@
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getSessionAndRole } from "@/lib/serverAuth";
+import { orderSettingsSchema, readOrderAvailability } from "@/lib/orderAvailability";
 
 const getSupabase = () => {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -12,90 +13,42 @@ const getSupabase = () => {
   return createClient(url, key, { auth: { persistSession: false } });
 };
 
-export interface OrderSettings {
-  orders_enabled: boolean;
-  local_enabled: boolean;
-  takeaway_enabled: boolean;
-  delivery_enabled: boolean;
-}
+const unavailable = () => NextResponse.json({ error: "Ustawienia zamówień są niedostępne." }, { status: 503 });
+const patchSchema = orderSettingsSchema.partial().strict().refine((value) => Object.keys(value).length > 0);
 
-const DEFAULT_SETTINGS: OrderSettings = {
-  orders_enabled: true,
-  local_enabled: true,
-  takeaway_enabled: true,
-  delivery_enabled: true,
-};
-
-// GET - pobierz ustawienia zamówień
 export async function GET() {
   try {
-    const supabase = getSupabase();
-    const { data, error } = await supabase
-      .from("order_settings")
-      .select("*")
-      .single();
-
-    if (error || !data) {
-      // Jeśli nie ma jeszcze wiersza, zwróć domyślne
-      return NextResponse.json(DEFAULT_SETTINGS);
-    }
-
-    return NextResponse.json({
-      orders_enabled: data.orders_enabled ?? true,
-      local_enabled: data.local_enabled ?? true,
-      takeaway_enabled: data.takeaway_enabled ?? true,
-      delivery_enabled: data.delivery_enabled ?? true,
+    const availability = await readOrderAvailability(getSupabase());
+    if (!availability) return unavailable();
+    return NextResponse.json(availability.effective, {
+      headers: { "Cache-Control": "no-store" },
     });
-  } catch (e: any) {
-    return NextResponse.json({ error: e?.message || "Server error" }, { status: 500 });
+  } catch {
+    return unavailable();
   }
 }
 
-// PATCH - aktualizuj ustawienia zamówień
-export async function PATCH(req: NextRequest) {
+export async function PATCH(req: Request) {
   try {
     const { session, role } = await getSessionAndRole();
-    if (!session || (role !== "admin" && role !== "employee")) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!session) return NextResponse.json({ error: "Zaloguj się." }, { status: 401 });
+    if (role !== "admin") return NextResponse.json({ error: "Brak uprawnień." }, { status: 403 });
+
+    const settings = patchSchema.safeParse(await req.json().catch(() => null));
+    if (!settings.success) {
+      return NextResponse.json({ error: "Niepoprawne ustawienia zamówień." }, { status: 400 });
     }
 
-    const body = await req.json();
     const supabase = getSupabase();
-
-    // Sprawdź czy istnieje wiersz
-    const { data: existing } = await supabase
-      .from("order_settings")
-      .select("id")
-      .single();
-
-    const updateData: Partial<OrderSettings> = {};
-    if (typeof body.orders_enabled === "boolean") updateData.orders_enabled = body.orders_enabled;
-    if (typeof body.local_enabled === "boolean") updateData.local_enabled = body.local_enabled;
-    if (typeof body.takeaway_enabled === "boolean") updateData.takeaway_enabled = body.takeaway_enabled;
-    if (typeof body.delivery_enabled === "boolean") updateData.delivery_enabled = body.delivery_enabled;
-
-    let result;
-    if (existing?.id) {
-      result = await supabase
-        .from("order_settings")
-        .update(updateData)
-        .eq("id", existing.id)
-        .select()
-        .single();
-    } else {
-      result = await supabase
-        .from("order_settings")
-        .insert({ ...DEFAULT_SETTINGS, ...updateData })
-        .select()
-        .single();
-    }
-
-    if (result.error) {
-      return NextResponse.json({ error: result.error.message }, { status: 500 });
-    }
-
+    const availability = await readOrderAvailability(supabase);
+    if (!availability) return unavailable();
+    const result = await supabase.rpc("sisi_update_order_availability", {
+      settings_id: availability.id,
+      changes: settings.data,
+    });
+    if (result.error) return unavailable();
     return NextResponse.json(result.data);
-  } catch (e: any) {
-    return NextResponse.json({ error: e?.message || "Server error" }, { status: 500 });
+  } catch {
+    return unavailable();
   }
 }
