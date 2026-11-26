@@ -1,4 +1,6 @@
-import { depositForOrder } from "@/lib/containerDeposit";
+import { createHash } from "node:crypto";
+import { parseDepositGrosze } from "@/lib/containerDeposit";
+import { EXTRA_MEAT_GROSZE, fromGrosze, productLineGrosze, quoteInPln, toGrosze } from "@/lib/orderPricing";
 import { ORDER_TERMS_TEXT, ORDER_TERMS_VERSION } from "@/config/termsSnapshot";
 import { getSessionAndRole } from "@/lib/serverAuth";
 import { checkoutSelectionSchema, validateCheckoutLine, type CheckoutAddon } from "@/lib/checkoutValidation";
@@ -12,7 +14,6 @@ import { createClient } from "@supabase/supabase-js";
 import { toZonedTime, fromZonedTime } from "date-fns-tz";
 import { dispatchOrderToOperations, isOnlinePaymentPending } from "@/lib/orderOperations";
 import {
-  normalizeProductNameForLookup,
   requiresPackaging,
 } from "@/lib/packaging";
 import {
@@ -446,10 +447,8 @@ function normalizeBody(raw: any, req: Request) {
     payment_method: base?.payment_method,
     payment_status:
       base?.payment_method === "Online" ? "pending" : null,
-    total_price: num(base?.total_price, 0),
     promo_code: pickPromo(base) ?? pickPromo(raw),
-    discount_amount: num(base?.discount_amount, 0) ?? 0,
-    delivery_cost: num(base?.delivery_cost, null),
+    delivery_cost: 0,
     delivery_place_id:
       base?.delivery_place_id ??
       base?.deliveryPlaceId ??
@@ -474,247 +473,79 @@ function normalizeBody(raw: any, req: Request) {
   };
 }
 
-/* ===== Kalkulacja subtotalu po stronie serwera (spójna z frontem) ===== */
-const SAUCES = [
-  "Amerykański","Ketchup","Majonez","Musztarda","Meksykański","Serowy chili","Czosnkowy","Musztardowo-miodowy","BBQ",
-];
+type CheckoutPrice = Parameters<typeof quoteInPln>[0];
+type SavedCheckout = {
+  orderId: string;
+  price: CheckoutPrice;
+  promoCode: string | null;
+  paymentMethod: string;
+  createdAt: string;
+};
 
-// Mapa cen dodatków pobierana z bazy
-type AddonPriceMap = Map<string, CheckoutAddon>;
-
-function getAddonPriceFromMap(addonName: string, addonPriceMap: AddonPriceMap): number {
-  const price = addonPriceMap.get(addonName.toLowerCase())?.price;
-  if (price !== undefined) return price;
-  // Fallback jeśli nie znaleziono w mapie
-  if (addonName.toLowerCase() === "płynny ser") return 6;
-  if (SAUCES.map(s => s.toLowerCase()).includes(addonName.toLowerCase())) return 3;
-  return 4;
+function checkoutResponse(result: SavedCheckout, replayed: boolean) {
+  return NextResponse.json({
+    orderId: result.orderId,
+    total: fromGrosze(result.price.total),
+    discount_amount: fromGrosze(result.price.discount),
+    promo_code: result.promoCode,
+    ...(result.paymentMethod === "Online" && {
+      paymentToken: signPayment(result.orderId, Date.parse(result.createdAt)),
+    }),
+  }, { status: replayed ? 200 : 201, headers: { "Cache-Control": "no-store" } });
 }
 
-// Mapa kategorii produktów
-type ProductCategoryMap = Map<string, string>;
-
-function resolveProductCategory(it: Any, productCategoryMap: ProductCategoryMap): string {
-  const productId = it.product_id ?? it.productId ?? it.id ?? null;
-  if (productId != null) {
-    const categoryById = productCategoryMap.get(`id:${String(productId)}`);
-    if (categoryById) return categoryById;
-  }
-
-  const normalizedName = normalizeProductNameForLookup(it.name);
-  if (normalizedName) {
-    const categoryByName = productCategoryMap.get(`name:${normalizedName}`);
-    if (categoryByName) return categoryByName;
-  }
-
-  return typeof it.category === "string" ? it.category : "";
-}
-
-function calcSubtotalFromItems(selected_option: string, itemsArray: Any[], packagingCostSetting: number = 2, addonPriceMap: AddonPriceMap = new Map(), productCategoryMap: ProductCategoryMap = new Map()): number {
-  const itemsSum = itemsArray.reduce((acc, it) => {
-    const qty = Number(it.quantity ?? 1);
-    const basePrice = money(it.price ?? it.unit_price ?? 0);
-    const addons = Array.isArray(it?.options?.addons) ? it.options.addons : (Array.isArray(it.addons) ? it.addons : []);
-    const addonsCost = (addons ?? []).reduce((s: number, a: any) => s + getAddonPriceFromMap(String(a), addonPriceMap), 0);
-    const extraMeat = Number(it?.options?.extraMeatCount ?? 0) || 0;
-    const extraMeatCost = extraMeat * 15;
-    const productCategory = resolveProductCategory(it, productCategoryMap);
-    const packagingCostPerUnit =
-      (selected_option === "delivery" || selected_option === "takeaway") &&
-      requiresPackaging(productCategory)
-        ? packagingCostSetting
-        : 0;
-
-    
-    return acc + (basePrice + addonsCost + extraMeatCost + packagingCostPerUnit) * qty;
-  }, 0);
-  return Math.max(0, Math.round(itemsSum * 100) / 100);
-}
-
-/* ===================== Handler ===================== */
 export async function POST(req: Request) {
-  // Domyślna wartość packaging_cost (fallback)
   let packagingCostSetting = 2;
-  // Mapa cen dodatków z bazy
-  const addonPriceMap: AddonPriceMap = new Map();
-  // Mapa kategorii produktów (dla kaucji)
+  const addonPriceMap = new Map<string, CheckoutAddon>();
   const productsMap = new Map<string, ProductRow & { price: unknown; deposit_grosze: number; available: boolean | null; category: string | null; subcategory: string | null }>();
-  const productCategoryMap: ProductCategoryMap = new Map();
 
   try {
+    const raw = await req.json().catch(() => null);
+    const selection = checkoutSelectionSchema.safeParse(raw?.orderPayload ?? raw);
+    if (!selection.success) {
+      return NextResponse.json({ error: "Wybierz poprawny tryb zamówienia i metodę płatności." }, { status: 400 });
+    }
+    const key = req.headers.get("x-idempotency-key");
+    if (!key || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(key)) {
+      return NextResponse.json({ error: "Brakuje poprawnego identyfikatora próby zamówienia." }, { status: 400 });
+    }
+
+    const n = normalizeBody(raw, req);
+    if (n.payment_method === "Online" && !process.env.ORDER_LINK_SECRET) {
+      return NextResponse.json({ error: "Płatność online jest chwilowo niedostępna." }, { status: 503 });
+    }
+    const { session } = await getSessionAndRole();
+    n.user = session?.user.id ?? null;
+    const displayedTotal = (raw.orderPayload ?? raw).total_price;
+    const expectedGrosze = typeof displayedTotal === "number" ? toGrosze(displayedTotal) : NaN;
+    if (!Number.isSafeInteger(expectedGrosze) || displayedTotal < 0) {
+      return NextResponse.json({ error: "Brakuje kwoty do potwierdzenia." }, { status: 400 });
+    }
+
+    // Bind retries to the submitted order and authenticated identity, without
+    // including the one-time Turnstile token or request metadata.
+    const { legal_accept, ...intent } = n;
+    const fingerprint = createHash("sha256").update(JSON.stringify(
+      { ...intent, client_delivery_time: (raw.orderPayload ?? raw).client_delivery_time ?? (raw.orderPayload ?? raw).delivery_time ?? null,
+        delivery_time: undefined, terms: legal_accept?.terms_version, expectedGrosze },
+      (_key, value) => value && typeof value === "object" && !Array.isArray(value)
+        ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, value[key]]))
+        : value,
+    )).digest("hex");
+    const keyConflict = () => NextResponse.json({ code: "KEY_CONFLICT", error: "Ta próba dotyczy innego zamówienia." }, { status: 409 });
+    const orderUnavailable = () => NextResponse.json({ error: "Zapisane zamówienie jest niedostępne." }, { status: 409 });
+    const closed = () => NextResponse.json({ error: "Przyjmowanie zamówień w tym trybie jest tymczasowo wyłączone." }, { status: 503 });
+
+    const previous = await supabaseAdmin.from("checkout_requests").select("fingerprint,order_id,result").eq("key", key).maybeSingle();
+    if (previous.error) throw previous.error;
+    if (previous.data) {
+      if (previous.data.fingerprint !== fingerprint) return keyConflict();
+      if (!previous.data.order_id) return orderUnavailable();
+      return checkoutResponse(previous.data.result as SavedCheckout, true);
+    }
+
     const availability = await readOrderAvailability(supabaseAdmin).catch(() => null);
-    if (!availability || !availability.effective.orders_enabled) {
-      return NextResponse.json({ error: "Przyjmowanie zamówień jest tymczasowo wyłączone." }, { status: 503 });
-    }
-
-    // --- PROMO: helpery bez joinów i bez RPC ---
-    type DiscountCode = {
-      id: string;
-      code: string;
-      type: "amount" | "percent";
-      value: number;
-      active: boolean;
-      auto_apply: boolean;
-      starts_at: string | null;
-      expires_at: string | null;
-      min_order: number | null;
-      max_uses: number | null;
-      per_user_max_uses: number | null;
-    };
-
-    async function getDiscountByCode(codeInput: string): Promise<DiscountCode> {
-      const { data: dc, error } = await supabaseAdmin
-        .from("discount_codes")
-        .select(
-          "id, code, type, value, active, auto_apply, starts_at, expires_at, min_order, max_uses, per_user_max_uses"
-        )
-        .ilike("code", codeInput)
-        .maybeSingle();
-
-      if (error || !dc) throw new Error("invalid_code");
-
-      const nowMs = Date.now();
-      if (!dc.active || (dc.auto_apply && dc.type === "percent" && Number(dc.value) === 10)) throw new Error("inactive");
-      
-      // Porównanie dat jako timestamps
-      const startsMs = dc.starts_at ? new Date(dc.starts_at).getTime() : 0;
-      const expiresMs = dc.expires_at ? new Date(dc.expires_at).getTime() : Infinity;
-      
-      if (dc.starts_at && startsMs > nowMs) throw new Error("not_started");
-      if (dc.expires_at && expiresMs < nowMs) throw new Error("expired");
-
-      return {
-        id: String(dc.id),
-        code: String(dc.code),
-        type:
-          (dc.type === "amount" ? "amount" : "percent") as "amount" | "percent",
-        value: Number(dc.value || 0),
-        active: !!dc.active,
-        auto_apply: !!dc.auto_apply,
-        starts_at: dc.starts_at ? String(dc.starts_at) : null,
-        expires_at: dc.expires_at ? String(dc.expires_at) : null,
-        min_order: dc.min_order == null ? null : Number(dc.min_order),
-        max_uses: dc.max_uses == null ? null : Number(dc.max_uses),
-        per_user_max_uses:
-          dc.per_user_max_uses == null ? null : Number(dc.per_user_max_uses),
-      };
-    }
-
-    async function getUsageCounts(
-      codeId: string,
-      userId: string | null,
-      emailLower: string | null
-    ) {
-      const [allQ, userQ, emailLowerQ] = await Promise.all([
-        supabaseAdmin
-          .from("discount_redemptions")
-          .select("*", { head: true, count: "exact" })
-          .eq("code_id", codeId),
-        userId
-          ? supabaseAdmin
-              .from("discount_redemptions")
-              .select("*", { head: true, count: "exact" })
-              .eq("code_id", codeId)
-              .eq("user_id", userId)
-          : Promise.resolve({ count: 0 }),
-        emailLower
-          ? supabaseAdmin
-              .from("discount_redemptions")
-              .select("*", { head: true, count: "exact" })
-              .eq("code_id", codeId)
-              .eq("email_lower", emailLower)
-          : Promise.resolve({ count: 0 }),
-      ]);
-
-      return {
-        all: Number((allQ as any).count || 0),
-        byUser: Number((userQ as any).count || 0),
-        byEmail: Number((emailLowerQ as any).count || 0),
-      };
-    }
-
-    function computeDiscount(base: number, dc: DiscountCode): number {
-      const raw = dc.type === "percent" ? base * (dc.value / 100) : dc.value;
-      const clamped = Math.min(Math.max(0, raw), base);
-      return Math.round(clamped * 100) / 100;
-    }
-
-    // wybór najlepszej auto-promocji (auto_apply = true) dla danego koszyka
-    async function getBestAutoDiscount(
-      baseTotal: number,
-      userId: string | null,
-      emailLower: string | null
-    ): Promise<{ dc: DiscountCode; amount: number } | null> {
-      const { data, error } = await supabaseAdmin
-        .from("discount_codes")
-        .select(
-          "id, code, type, value, active, auto_apply, starts_at, expires_at, min_order, max_uses, per_user_max_uses"
-        )
-        .eq("auto_apply", true)
-        .eq("active", true);
-
-      if (error || !data || !data.length) {
-        if (error) console.error("[orders.create] getBestAutoDiscount query error:", error.message);
-        else console.warn("[orders.create] getBestAutoDiscount: no active auto_apply codes found");
-        return null;
-      }
-
-      const nowMs = Date.now();
-      let best: { dc: DiscountCode; amount: number } | null = null;
-
-      for (const row of data as any[]) {
-        const dc: DiscountCode = {
-          id: String(row.id),
-          code: String(row.code),
-          type: row.type === "amount" ? "amount" : "percent",
-          value: Number(row.value || 0),
-          active: !!row.active,
-          auto_apply: !!row.auto_apply,
-          starts_at: row.starts_at ? String(row.starts_at) : null,
-          expires_at: row.expires_at ? String(row.expires_at) : null,
-          min_order: row.min_order == null ? null : Number(row.min_order),
-          max_uses: row.max_uses == null ? null : Number(row.max_uses),
-          per_user_max_uses:
-            row.per_user_max_uses == null
-              ? null
-              : Number(row.per_user_max_uses),
-        };
-
-        if (!dc.value || dc.value <= 0 || (dc.type === "percent" && dc.value === 10)) continue;
-        
-        // Porównanie dat jako timestamps (ms)
-        const startsMs = dc.starts_at ? new Date(dc.starts_at).getTime() : 0;
-        const expiresMs = dc.expires_at ? new Date(dc.expires_at).getTime() : Infinity;
-        
-        if (dc.starts_at && startsMs > nowMs) continue;
-        if (dc.expires_at && expiresMs < nowMs) continue;
-        if (dc.min_order != null && baseTotal < Number(dc.min_order)) continue;
-
-        const { all, byUser, byEmail } = await getUsageCounts(
-          dc.id,
-          userId,
-          emailLower
-        );
-
-        if (dc.max_uses != null && all >= Number(dc.max_uses)) continue;
-
-        // null = brak limitu na użytkownika (nieograniczone użycie)
-        const perUserLimit =
-          dc.per_user_max_uses == null ? Infinity : Number(dc.per_user_max_uses);
-
-        if (userId && byUser >= perUserLimit) continue;
-        if (emailLower && byEmail >= perUserLimit) continue;
-
-        const amount = computeDiscount(baseTotal, dc);
-        if (amount <= 0) continue;
-
-        if (!best || amount > best.amount) {
-          best = { dc, amount };
-        }
-      }
-
-      return best;
-    }
+    if (!availability || !canAcceptOrder(availability.effective, selection.data.selected_option)) return closed();
 
     // 1) Godziny (Europe/Warsaw)
     const nowPl = toZonedTime(new Date(), "Europe/Warsaw");
@@ -727,22 +558,6 @@ export async function POST(req: Request) {
         { error: "Zamówienia przyjmujemy w godz. 10:40–21:45." },
         { status: 400 }
       );
-    }
-
-    // 2) Body
-    let raw: any;
-    try {
-      raw = await req.json();
-    } catch {
-      return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
-    }
-
-    const selection = checkoutSelectionSchema.safeParse(raw?.orderPayload ?? raw);
-    if (!selection.success) {
-      return NextResponse.json({ error: "Wybierz poprawny tryb zamówienia i metodę płatności." }, { status: 400 });
-    }
-    if (!canAcceptOrder(availability.effective, selection.data.selected_option)) {
-      return NextResponse.json({ error: "Wybrany tryb zamówienia jest tymczasowo niedostępny." }, { status: 503 });
     }
 
     // 2.0) Turnstile
@@ -796,18 +611,6 @@ if (TURNSTILE_SECRET_KEY) {
   }
 }
 
-    const n = normalizeBody(raw, req);
-    if (n.payment_method === "Online" && !process.env.ORDER_LINK_SECRET) {
-      return NextResponse.json({ error: "Płatność online jest chwilowo niedostępna." }, { status: 503 });
-    }
-    const { session } = await getSessionAndRole();
-    n.user = session?.user.id ?? null;
-    const displayedTotal = (raw.orderPayload ?? raw).total_price;
-    if (typeof displayedTotal !== "number" || !Number.isFinite(displayedTotal) || displayedTotal < 0) {
-      return NextResponse.json({ error: "Brakuje kwoty do potwierdzenia." }, { status: 400 });
-    }
-    const expectedGrosze = Math.round(displayedTotal * 100);
-
     if (!n.legal_accept) return NextResponse.json({ error: "Zaakceptuj regulamin zamówień." }, { status: 400 });
 
     // wymagamy telefonu (E.164), e-maila oraz pozycji
@@ -860,13 +663,7 @@ if (TURNSTILE_SECRET_KEY) {
       if (!productsErr && products) {
         for (const product of products) {
           productsMap.set(String(product.id), product);
-          if (product.name && product.category) {
-            productCategoryMap.set(`id:${String(product.id)}`, product.category);
-            productCategoryMap.set(
-              `name:${normalizeProductNameForLookup(product.name)}`,
-              product.category,
-            );
-          }
+
         }
       }
     }
@@ -888,15 +685,36 @@ if (TURNSTILE_SECRET_KEY) {
         category: product.category,
         deposit_grosze: product.deposit_grosze,
         quantity: line.quantity,
-        price,
+        price: fromGrosze(toGrosze(price)),
         options: line.options,
       });
     }
     n.itemsArray = catalogItems;
 
-    // 2.1) Subtotal po stronie serwera
-    const baseFromItems = calcSubtotalFromItems(n.selected_option, n.itemsArray, packagingCostSetting, addonPriceMap, productCategoryMap);
-    const discount = 0;
+    const takeout = n.selected_option === "takeaway" || n.selected_option === "delivery";
+    const lineDetails = n.itemsArray.map((item) => {
+      const unitPrice = toGrosze(item.price);
+      const addons = item.options.addons.map((name: string) => ({
+        name, unitPrice: toGrosze(addonPriceMap.get(name.toLowerCase())!.price),
+      })) as { name: string; unitPrice: number }[];
+      const extraMeatCount = item.options.extraMeatCount;
+      const quantity = item.quantity;
+      return {
+        productId: item.product_id,
+        quantity,
+        unitPrice,
+        addons,
+        extraMeatCount,
+        extraMeatUnitPrice: EXTRA_MEAT_GROSZE,
+        products: productLineGrosze(unitPrice, addons.map((addon) => addon.unitPrice), extraMeatCount, quantity),
+        packaging: takeout && requiresPackaging(item.category) ? quantity * toGrosze(packagingCostSetting) : 0,
+        deposit: takeout ? parseDepositGrosze(item.deposit_grosze ?? 0) * quantity : 0,
+      };
+    });
+    const lines = lineDetails.map((line) => line.products);
+    const products = lines.reduce((sum, amount) => sum + amount, 0);
+    const packaging = lineDetails.reduce((sum, line) => sum + line.packaging, 0);
+    const deposit = lineDetails.reduce((sum, line) => sum + line.deposit, 0);
 
     let deliveryMinRequired = 0;
 
@@ -958,7 +776,7 @@ if (TURNSTILE_SECRET_KEY) {
         );
       }
 
-      const productsOnlyTotal = calcSubtotalFromItems("local", n.itemsArray, 0, addonPriceMap, productCategoryMap);
+      const productsOnlyTotal = fromGrosze(products);
       const deliveryQuote = calculateDeliveryQuote(
         distanceKm,
         zones as DeliveryZonePricing[],
@@ -991,18 +809,6 @@ if (TURNSTILE_SECRET_KEY) {
       n.delivery_lat = deliveryPlace.lat;
       n.delivery_lng = deliveryPlace.lng;
       n.delivery_cost = deliveryQuote.cost;
-      n.total_price = Math.max(
-        0,
-        Math.round(
-          (baseFromItems +
-            deliveryQuote.cost -
-            Math.min(discount, baseFromItems + deliveryQuote.cost)) *
-            100,
-        ) / 100,
-      );
-    } else {
-      n.delivery_cost = 0;
-      n.total_price = Math.max(0, Math.round((baseFromItems - Math.min(discount, baseFromItems)) * 100) / 100);
     }
 
     // 4) Pozycje
@@ -1011,61 +817,19 @@ if (TURNSTILE_SECRET_KEY) {
       const db = productsMap.get(key);
       return {
         ...buildItemFromDbAndOptions(db, it),
-        category: resolveProductCategory(it, productCategoryMap) || null,
+        category: it.category ?? null,
       };
     });
 
-    // >>> USTAW MINIMA (przed insertem do orders)
-    const baseBeforeDiscount = baseFromItems;
-    // <<<
-
-    const baseTotal = Math.max(
-      0,
-      Math.round((baseFromItems + (n.delivery_cost ?? 0)) * 100) / 100
-    );
-    const deposit = n.itemsArray.reduce((sum, item) => sum + depositForOrder(n.selected_option, item.deposit_grosze, item.quantity), 0);
-    n.total_price = Math.round((baseTotal + deposit) * 100) / 100;
-    const emailLower = (n.contact_email || "").toLowerCase() || null;
-    const lines = n.itemsArray.map((item) => calcSubtotalFromItems("local", [item], 0, addonPriceMap, productCategoryMap));
-    const productsTotal = Math.round(lines.reduce((sum, amount) => sum + amount, 0) * 100) / 100;
-    const delivery = n.delivery_cost ?? 0;
-    const packaging = Math.round((baseTotal - productsTotal - delivery) * 100) / 100;
-    const changedQuote = (total: number, discount: number) => NextResponse.json({
-      code: "PRICE_CHANGED",
-      total,
-      quote: { total, products: productsTotal, packaging, delivery, discount, deposit, lines },
-    }, { status: 409 });
-
-    let quotedDiscount = 0;
-    if (n.promo_code) {
-      try {
-        quotedDiscount = computeDiscount(baseTotal, await getDiscountByCode(n.promo_code));
-      } catch {
-        return NextResponse.json({ error: "Kod promocyjny jest nieważny." }, { status: 400 });
-      }
-    } else {
-      const quote = await getBestAutoDiscount(baseTotal, n.user ?? null, emailLower);
-      quotedDiscount = quote?.amount ?? 0;
-    }
-    const quotedGrosze = Math.round((baseTotal - quotedDiscount + deposit) * 100);
-    if (quotedGrosze !== expectedGrosze) {
-      return changedQuote(quotedGrosze / 100, quotedDiscount);
-    }
-
-    const latestAvailability = await readOrderAvailability(supabaseAdmin).catch(() => null);
-    if (!latestAvailability || !canAcceptOrder(latestAvailability.effective, selection.data.selected_option)) {
-      return NextResponse.json({ error: "Przyjmowanie zamówień w tym trybie jest tymczasowo wyłączone." }, { status: 503 });
-    }
-
-    // 5) Zapis do orders
-    const itemsForOrdersColumn = JSON.stringify(normalizedItems);
-    const { data: orderRow, error: orderErr } = await supabaseAdmin
-      .from("orders")
-      .insert({
+    const delivery = toGrosze(n.delivery_cost);
+    const { data: result, error: checkoutError } = await supabaseAdmin.rpc("sisi_create_checkout", {
+      request_key: key,
+      request_fingerprint: fingerprint,
+      order_data: {
         name: n.name,
         phone: n.phone,
         contact_email: n.contact_email,
-        order_note: (n as any).order_note ?? null,
+        order_note: n.order_note,
         address: n.address,
         street: n.street,
         postal_code: n.postal_code,
@@ -1074,276 +838,48 @@ if (TURNSTILE_SECRET_KEY) {
         selected_option: n.selected_option,
         payment_method: n.payment_method,
         payment_status: n.payment_status,
-        items: itemsForOrdersColumn,
-        total_price: n.total_price,
-        delivery_cost: n.delivery_cost,
-        base_before_discount: baseBeforeDiscount,     // NOWE
-        delivery_min_required: deliveryMinRequired,   // NOWE
+        items: JSON.stringify(normalizedItems),
+        delivery_min_required: deliveryMinRequired,
         status: n.status,
         client_delivery_time: n.client_delivery_time,
-        ["delivery_time"]: n.delivery_time,
+        delivery_time: n.delivery_time,
         eta: n.eta,
         user: n.user,
-        promo_code: null,     // policzymy niżej
-        discount_amount: 0,   // policzymy niżej
-        legal_accept: { ...n.legal_accept, packaging_total: packaging, deposit_total: deposit },
-      })
-      .select("id, selected_option, total_price, name")
-      .single();
-
-    if (orderErr || !orderRow) {
-      console.error("[orders.create] insert orders error:", orderErr?.message);
-      return NextResponse.json({ error: "Nie udało się zapisać zamówienia." }, { status: 500 });
-    }
-
-     const newOrderId = orderRow.id;
-
-    const priceChanged = async (total: number, discount: number) => {
-      const { error } = await supabaseAdmin.from("orders").delete().eq("id", newOrderId);
-      if (error) throw error;
-      return changedQuote(total, discount);
-    };
-
-
-    // Zużycie kodu (z amount)
-    let currentTotal = n.total_price;
-    let appliedCode: DiscountCode | null = null;
-    let appliedDiscount = 0;
-
-    // 5.1) Kod wpisany przez klienta – ma pierwszeństwo nad auto-promocją
-    if (n.promo_code) {
-      try {
-        const dc = await getDiscountByCode(n.promo_code);
-
-        if (dc.min_order != null && baseTotal < Number(dc.min_order)) {
-          throw new Error(`min_order:${Number(dc.min_order).toFixed(2)}`);
-        }
-
-        const { all, byUser, byEmail } = await getUsageCounts(
-          dc.id,
-          n.user ?? null,
-          emailLower
-        );
-
-        if (dc.max_uses != null && all >= Number(dc.max_uses)) {
-          throw new Error("limit_exhausted");
-        }
-
-        // null = brak limitu na użytkownika (nieograniczone użycie)
-        const perUserLimit =
-          dc.per_user_max_uses == null ? Infinity : Number(dc.per_user_max_uses);
-
-        if (n.user && byUser >= perUserLimit) {
-          throw new Error("used_by_user");
-        }
-
-        if (emailLower && byEmail >= perUserLimit) {
-          throw new Error("used_by_email");
-        }
-
-        const applied = computeDiscount(baseTotal, dc);
-        const newTotal = Math.max(
-          0,
-          Math.round((baseTotal - applied + deposit) * 100) / 100
-        );
-
-        if (Math.round(newTotal * 100) !== expectedGrosze) return await priceChanged(newTotal, applied);
-
-        const { error: redErr } = await supabaseAdmin
-          .from("discount_redemptions")
-          .insert({
-            code_id: dc.id,
-            code: dc.code,
-            order_id: newOrderId,
-            user_id: n.user ?? null,
-            email_lower: emailLower,
-            amount: applied,
-          });
-        if (redErr) throw redErr;
-
-        const { error: updErr } = await supabaseAdmin
-          .from("orders")
-          .update({
-            promo_code: dc.code,
-            discount_amount: applied,
-            total_price: newTotal,
-          })
-          .eq("id", newOrderId);
-
-        if (updErr) {
-          await supabaseAdmin
-            .from("discount_redemptions")
-            .delete()
-            .eq("order_id", newOrderId);
-          throw updErr;
-        }
-
-        currentTotal = newTotal;
-        appliedCode = dc;
-        appliedDiscount = applied;
-      } catch (e: any) {
-        console.error("[orders.create] promo apply error:", e?.message || e);
-        await supabaseAdmin.from("orders").delete().eq("id", newOrderId);
-        return NextResponse.json(
-          {
-            error:
-              "Kod promocyjny jest nieważny lub został już wykorzystany.",
-          },
-          { status: 400 }
-        );
-      }
-    }
-
-    // 5.2) Auto-promocja (auto_apply) – tylko jeśli brak ręcznie podanego kodu
-    if (!appliedCode) {
-      try {
-        const auto = await getBestAutoDiscount(
-          baseTotal,
-          (n.user as string | null) ?? null,
-          emailLower
-        );
-
-        if (auto) {
-          const { dc, amount } = auto;
-          const newTotal = Math.max(
-            0,
-            Math.round((baseTotal - amount + deposit) * 100) / 100
-          );
-
-          if (Math.round(newTotal * 100) !== expectedGrosze) return await priceChanged(newTotal, amount);
-
-          // Zapisz redempcję (tracking) — zwykły insert.
-          // Auto-rabat może być wielokrotnie użyty przez ten sam email
-          // na różne zamówienia, więc nie potrzebujemy unique constraint.
-          const { error: redErr } = await supabaseAdmin
-            .from("discount_redemptions")
-            .insert({
-              code_id: dc.id,
-              code: dc.code,
-              order_id: newOrderId,
-              user_id: n.user ?? null,
-              email_lower: emailLower,
-              amount,
-            });
-
-          if (redErr) {
-            // Kontynuuj — rabat i tak zostanie zastosowany na zamówieniu
-            console.warn("[orders.create] auto discount_redemptions insert warning:", redErr.message);
-          }
-
-          // ZAWSZE aplikuj rabat na zamówieniu – niezależnie od redempcji
-          const { error: updErr } = await supabaseAdmin
-            .from("orders")
-            .update({
-              promo_code: dc.code,
-              discount_amount: amount,
-              total_price: newTotal,
-            })
-            .eq("id", newOrderId);
-
-          if (!updErr) {
-            currentTotal = newTotal;
-            appliedCode = dc;
-            appliedDiscount = amount;
-          } else {
-            console.error("[orders.create] auto orders update error:", updErr.message, updErr);
-            // Cofnij redempcję jeśli była wstawiona
-            if (!redErr) {
-              await supabaseAdmin
-                .from("discount_redemptions")
-                .delete()
-                .eq("order_id", newOrderId);
-            }
-          }
-        } else {
-          console.warn("[orders.create] auto promo: getBestAutoDiscount returned null for baseTotal:", baseTotal);
-        }
-      } catch (e: any) {
-        console.error(
-          "[orders.create] auto promo error (order still created without discount):",
-          e?.message || e
-        );
-      }
-    }
-
-    if (Math.round(currentTotal * 100) !== expectedGrosze) return await priceChanged(currentTotal, appliedDiscount);
-
-    // 6) order_items
-if (Array.isArray(n.itemsArray) && n.itemsArray.length > 0) {
-  try {
-    // pomocniczo: lookup po nazwie -> id (tylko dla pewnych dopasowań)
-    const nameToId = new Map<string, string>();
-    for (const [id, row] of productsMap.entries()) {
-      const nm =
-        (row?.name || row?.title || row?.label || "").toString().trim().toLowerCase();
-      if (nm) nameToId.set(nm, String(id));
-    }
-
-    const shaped = n.itemsArray.map((rawIt: Any, i: number) => {
-      const rawKey = rawIt.product_id ?? rawIt.productId ?? rawIt.id ?? null;
-      let pid = rawKey != null ? String(rawKey) : "";
-
-      // fallback po nazwie (gdy brak pid, a nazwa pasuje do produktu z bazy)
-      if (!pid) {
-        const nm = (rawIt.name || "").toString().trim().toLowerCase();
-        if (nm && nameToId.has(nm)) pid = nameToId.get(nm)!;
-      }
-
-      // walidacja pid: nie przyjmujemy pustych/„null”/„undefined”
-      const validPid =
-        !!pid && pid !== "null" && pid !== "undefined";
-
-      // zbuduj linię
-      const db = validPid ? productsMap.get(pid) : undefined;
-      const ni = buildItemFromDbAndOptions(db as any, rawIt);
-
-      return {
-        order_id: newOrderId,
-        product_id: validPid ? pid : null, // odfiltrujemy poniżej
-        name: ni.name,
-        quantity: ni.quantity,
-        unit_price: ni.price,
+        legal_accept: { ...n.legal_accept, packaging_total: fromGrosze(packaging), deposit_total: fromGrosze(deposit) },
+      },
+      order_lines: normalizedItems.map((item, i) => ({
+        product_id: item.product_id,
+        name: item.name,
+        quantity: item.quantity,
+        unit_price: item.price,
         line_no: i + 1,
-      };
+      })),
+      price: { products, packaging, delivery, deposit, lines, lineDetails },
+      expected_grosze: expectedGrosze,
+      requested_code: n.promo_code,
     });
-
-    // Wstaw WSZYSTKIE pozycje — product_id może być null dla pozycji legacy
-    // lub specjalnych, które nie mają jeszcze rekordu w products.
-    if (shaped.length) {
-      const { error: oiErr } = await supabaseAdmin
-        .from("order_items")
-        .insert(shaped);
-      if (oiErr) {
-        // Jeśli DB wymaga NOT NULL na product_id, spróbuj bez tego pola
-        console.warn("[orders.create] order_items insert error:", oiErr.message);
-        
-        // Fallback: spróbuj bez product_id dla pozycji gdzie jest null
-        const withId = shaped.filter(r => r.product_id !== null);
-        const withoutId = shaped
-          .filter(r => r.product_id === null)
-          // eslint-disable-next-line @typescript-eslint/no-unused-vars
-          .map(({ product_id: _pid, ...rest }) => rest);
-        
-        if (withId.length) {
-          const { error: e2 } = await supabaseAdmin.from("order_items").insert(withId);
-          if (e2) console.warn("[orders.create] order_items (with id) error:", e2.message);
-        }
-        if (withoutId.length) {
-          const { error: e3 } = await supabaseAdmin.from("order_items").insert(withoutId);
-          if (e3) console.warn("[orders.create] order_items (no id) error:", e3.message);
-        }
+    if (checkoutError) throw checkoutError;
+    switch (result?.status) {
+      case "KEY_CONFLICT": return keyConflict();
+      case "ORDER_UNAVAILABLE": return orderUnavailable();
+      case "CLOSED": return closed();
+      case "PROMO_UNAVAILABLE":
+        return NextResponse.json({ error: "Kod promocyjny jest nieważny lub został już wykorzystany." }, { status: 400 });
+      case "ZERO_ONLINE":
+        return NextResponse.json({ error: "Dla zamówienia o wartości 0 zł wybierz inną metodę płatności." }, { status: 400 });
+      case "PRICE_CHANGED": {
+        const quote = quoteInPln(result.price);
+        return NextResponse.json({ code: "PRICE_CHANGED", total: quote.total, quote }, { status: 409 });
       }
+      case "OK": break;
+      default: throw new Error("Unexpected checkout outcome");
     }
 
-    // diagnostyka: pokaż pozycje bez product_id
-    const noId = shaped.filter(r => r.product_id === null).map(r => r.name);
-    if (noId.length) {
-      console.info("[orders.create] items without product_id:", noId);
-    }
-  } catch (e: any) {
-    console.warn("[orders.create] order_items insert not executed:", e?.message);
-  }
-}
+    const saved = result as SavedCheckout;
+    if (result.replayed) return checkoutResponse(saved, true);
+    const newOrderId = saved.orderId;
+    const quote = quoteInPln(saved.price);
+    const currentTotal = quote.total;
 
     // 6.9) Dopiero gotowe do realizacji zamowienia ida do obslugi/POS.
     // Online musi najpierw przejsc przez P24 i dostac payment_status=paid.
@@ -1382,10 +918,6 @@ if (Array.isArray(n.itemsArray) && n.itemsArray.length > 0) {
           ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!
         );
         const formatMoney = (value: number) => `${value.toFixed(2).replace(".", ",")} zł`;
-        const packaging = ["takeaway", "delivery"].includes(n.selected_option)
-          ? n.itemsArray.reduce((sum, item) => sum + (requiresPackaging(item.category) ? item.quantity * packagingCostSetting : 0), 0)
-          : 0;
-        const delivery = n.delivery_cost ?? 0;
         const lineItems = normalizedItems.map((item) => {
           const options = [...item.addons];
           for (const swap of item._src?.options?.swaps ?? []) {
@@ -1410,14 +942,14 @@ if (Array.isArray(n.itemsArray) && n.itemsArray.length > 0) {
               </a>
             </p>
             <ul>${lineItems}</ul>
-            <p>Produkty i dodatki: ${formatMoney(baseTotal - packaging - delivery)}<br>
-            Opakowania: ${formatMoney(packaging)}<br>
-            Dostawa: ${formatMoney(delivery)}<br>
-            Kaucja: ${formatMoney(deposit)}<br>
-            Rabat: ${formatMoney(appliedDiscount)}</p>
+            <p>Produkty i dodatki: ${formatMoney(quote.products)}<br>
+            Opakowania: ${formatMoney(quote.packaging)}<br>
+            Dostawa: ${formatMoney(quote.delivery)}<br>
+            Kaucja: ${formatMoney(quote.deposit)}<br>
+            Rabat: ${formatMoney(quote.discount)}</p>
             <p>Płatność: ${escape(paymentLabel)}</p>
             <p style="margin:8px 0">Do zapłaty: <strong>${total} zł</strong></p>
-            <p style="margin:8px 0">Opcja: <strong>${optLabel(orderRow.selected_option)}</strong></p>
+            <p style="margin:8px 0">Opcja: <strong>${optLabel(n.selected_option)}</strong></p>
             ${clientTimeDisplay}
             <hr style="margin:20px 0;border:none;border-top:1px solid #eee" />
             <p style="font-size:12px;color:#555;margin:0">
@@ -1433,19 +965,9 @@ if (Array.isArray(n.itemsArray) && n.itemsArray.length > 0) {
       console.error("[orders.create] Customer email failed");
     }
 
-    // 7) OK
-    return NextResponse.json(
-      {
-        orderId: newOrderId,
-        total: currentTotal,
-        ...(n.payment_method === "Online" ? { paymentToken: signPayment(String(newOrderId)) } : {}),
-        discount_amount: appliedDiscount,
-        promo_code: appliedCode?.code ?? null,
-      },
-      { status: 201 }
-    );
+    return checkoutResponse(saved, false);
   } catch (e: any) {
-    console.error("[orders.create] unexpected:", e?.message ?? e);
+    console.error("[orders.create] unexpected error", e?.code ?? "internal");
     return NextResponse.json({ error: "Wystąpił nieoczekiwany błąd." }, { status: 500 });
   }
 }

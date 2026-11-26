@@ -9,6 +9,8 @@ import { X, MapPin, ShoppingBag, Truck } from "lucide-react";
 import useIsClient from "@/lib/useIsClient";
 import { inferDefaultMeat, resolveOrderMeat } from "@/lib/orderMeat";
 import { canAcceptOrder, orderSettingsSchema, type OrderSettings } from "@/lib/orderAvailability";
+import { fromGrosze, productLineGrosze, toGrosze, totalGrosze } from "@/lib/orderPricing";
+import { checkoutBodyFingerprint, readCheckoutAttempt, storeCheckoutAttempt } from "@/lib/checkoutAttempt";
 import useCartStore from "@/store/cartStore";
 import { createClient } from "@supabase/supabase-js";
 import QRCode from "react-qr-code";
@@ -521,12 +523,7 @@ export default function CheckoutModal() {
   const tsDesktopRef = useRef<HTMLDivElement | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  // Idempotency key for create/charge requests
-  const makeIdem = () =>
-    typeof crypto !== "undefined" && "randomUUID" in crypto
-      ? crypto.randomUUID()
-      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const idemKeyRef = useRef<string>(makeIdem());
+  const checkoutAttempt = useRef<ReturnType<typeof readCheckoutAttempt>>(null);
 
   // dodatkowe stany dostawy
   const [deliveryMinOk, setDeliveryMinOk] = useState(true);
@@ -751,7 +748,7 @@ export default function CheckoutModal() {
     if (TURNSTILE_SITE_KEY && turnstileError) setShowConfirmation(false);
   }, [turnstileError]);
 
-  const baseTotal = useMemo<number>(() => {
+  const productsGrosze = useMemo<number>(() => {
     return items.reduce((acc: number, it: any) => {
       const qty = it.quantity || 1;
       const priceNum = toPrice(it.price);
@@ -781,18 +778,16 @@ export default function CheckoutModal() {
           : [];
       const sanitizedAddons: string[] = (it.addons ?? []).filter((a: string) => addonPool.includes(a));
 
-      // Używamy cen z bazy
-      const addonsCost = sanitizedAddons.reduce((sum: number, addon: string) => sum + getAddonPrice(addon), 0);
-
-      const extraMeatCost = burger ? (it.extraMeatCount || 0) * 15 : 0;
-      
-      // Kaucja za napoje (oprócz wody)
-      
-      return acc + (priceNum + addonsCost + extraMeatCost) * qty;
-
+      return acc + productLineGrosze(
+        toGrosze(priceNum),
+        sanitizedAddons.map((addon) => toGrosze(getAddonPrice(addon))),
+        burger ? it.extraMeatCount || 0 : 0,
+        qty,
+      );
     }, 0);
   }, [items, productByNorm, addonsFromDb, getAddonPrice]);
 
+  const baseTotal = fromGrosze(productsGrosze);
   const packagingUnits =
     selectedOption === "takeaway" || selectedOption === "delivery"
       ? countPackagingUnits(items, (item) => {
@@ -800,8 +795,9 @@ export default function CheckoutModal() {
           return item.category ?? meta?.category;
         })
       : 0;
-  const packagingCost = packagingUnits * packagingCostSetting;
-  const subtotal = baseTotal + packagingCost;
+  const packagingGrosze = packagingUnits * toGrosze(packagingCostSetting);
+  const packagingCost = fromGrosze(packagingGrosze);
+  const subtotal = fromGrosze(productsGrosze + packagingGrosze);
   const deposit = items.reduce((sum, item) => {
     const product = productByNorm.get(normalizeName(item.name));
     return sum + depositForOrder(selectedOption, product?.deposit_grosze, item.quantity || 1);
@@ -896,12 +892,12 @@ export default function CheckoutModal() {
         promo.type === "percent"
           ? base * (Number(promo.value) / 100)
           : Number(promo.value || 0);
-      return Math.max(0, Math.min(val, base));
+      return fromGrosze(Math.max(0, Math.min(toGrosze(val), toGrosze(base))));
     }
 
     if (autoPromo && typeof autoPromo.amount === "number") {
       const val = Number(autoPromo.amount || 0);
-      return Math.max(0, Math.min(val, base));
+      return fromGrosze(Math.max(0, Math.min(toGrosze(val), toGrosze(base))));
     }
 
     return 0;
@@ -964,7 +960,9 @@ export default function CheckoutModal() {
     autoPromoKey,
   ]);
 
-  const calculatedTotal = Math.max(0, subtotal + (deliveryInfo?.cost || 0) - discount + deposit);
+  const calculatedTotal = fromGrosze(totalGrosze(
+    productsGrosze, packagingGrosze, toGrosze(deliveryInfo?.cost ?? 0), toGrosze(discount), toGrosze(deposit),
+  ));
   const [serverQuote, setServerQuote] = useState<{ total: number; products: number; packaging: number; delivery: number; discount: number; deposit: number; lines: number[] } | null>(null);
   useEffect(() => {
     setServerQuote(null);
@@ -1172,7 +1170,14 @@ export default function CheckoutModal() {
   };
 
   // --- POST z Turnstile + 1x retry na 409 (timeout-or-duplicate)
-  const postWithTurnstile = async (url: string, payload: any) => {
+  const postWithTurnstile = async (url: string, payload: unknown) => {
+    const body = JSON.stringify(payload);
+    const fingerprint = await checkoutBodyFingerprint(body);
+    const previous = checkoutAttempt.current ?? readCheckoutAttempt();
+    const key = previous?.fingerprint === fingerprint ? previous.key : crypto.randomUUID();
+    checkoutAttempt.current = { fingerprint, key };
+    storeCheckoutAttempt(checkoutAttempt.current);
+
     const attempt = async () => {
       const tsToken = TURNSTILE_SITE_KEY ? await getFreshTurnstileToken() : "";
       const res = await fetch(url, {
@@ -1180,15 +1185,17 @@ export default function CheckoutModal() {
         headers: {
           "Content-Type": "application/json",
           "CF-Turnstile-Response": tsToken,
-          "X-Idempotency-Key": idemKeyRef.current,
+          "X-Idempotency-Key": key,
         },
-        body: JSON.stringify(payload),
+        body,
         cache: "no-store",
       });
 
       const text = await res.text();
       let data: any; try { data = JSON.parse(text); } catch { data = { raw: text }; }
       if (res.status === 409 && data.code === "PRICE_CHANGED" && typeof data.total === "number") {
+        checkoutAttempt.current = null;
+        storeCheckoutAttempt(null);
         setServerQuote(data.quote ?? null);
         setShowConfirmation(false);
         throw new Error(`Kwota zmieniła się na ${data.total.toFixed(2).replace(".", ",")} zł. Sprawdź ją i potwierdź zamówienie ponownie.`);
@@ -1242,6 +1249,8 @@ export default function CheckoutModal() {
       trackPurchase(purchase);
 
       try { tsIdsRef.current.forEach(({ id }) => window.turnstile?.reset(id)); } catch {}
+      checkoutAttempt.current = null;
+      storeCheckoutAttempt(null);
       clearCart();
       setOrderSent(true);
     } catch (err: any) {
@@ -1249,7 +1258,6 @@ export default function CheckoutModal() {
       try { tsIdsRef.current.forEach(({ id }) => window.turnstile?.reset(id)); } catch {}
     } finally {
       setSubmitting(false);
-      idemKeyRef.current = makeIdem(); // nowy klucz po próbie
     }
   };
 
@@ -1293,7 +1301,6 @@ export default function CheckoutModal() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-Idempotency-Key": idemKeyRef.current, // ta sama idempotencja dla pary create+charge
         },
         body: JSON.stringify({
           orderId: newOrderId,
@@ -1313,6 +1320,8 @@ export default function CheckoutModal() {
           fulfillment_type: selectedOption,
         });
         storePendingPurchase(purchase);
+        checkoutAttempt.current = null;
+        storeCheckoutAttempt(null);
         window.location.href = pay.paymentUrl;
       }
       else throw new Error("Brak URL do płatności");
@@ -1323,7 +1332,6 @@ export default function CheckoutModal() {
       } catch {}
     } finally {
       setSubmitting(false);
-      idemKeyRef.current = makeIdem(); // nowy klucz po próbie
     }
   };
 

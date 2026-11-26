@@ -9,8 +9,8 @@ function digest(scope: string, id: string, expires: number) {
   return createHmac("sha256", secret).update(JSON.stringify([scope, id, expires])).digest("hex");
 }
 
-function issue(scope: string, id: string, ttl: number) {
-  const expires = Math.floor(Date.now() / 1000) + ttl;
+function issue(scope: string, id: string, ttl: number, issuedAt = Date.now()) {
+  const expires = Math.floor(issuedAt / 1000) + ttl;
   return `${expires}.${digest(scope, id, expires)}`;
 }
 
@@ -33,8 +33,8 @@ export function trackingUrl(origin: string, id: string) {
   return url.href;
 }
 
-export function signPayment(orderId: string) {
-  return issue("payment", orderId, PAYMENT_TTL);
+export function signPayment(orderId: string, issuedAt?: number) {
+  return issue("payment", orderId, PAYMENT_TTL, issuedAt);
 }
 
 export function verifyPayment(orderId: string, token: unknown) {
