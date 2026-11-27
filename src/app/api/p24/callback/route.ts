@@ -7,7 +7,7 @@ import { hostFromEnv, p24SignVerifyMD5, parseP24Amount } from "@/lib/p24";
 import { kickOrderJobs } from "@/lib/kickOrderJobs";
 import { confirmVerifiedP24 } from "@/lib/orderLifecycle";
 
-const { P24_MERCHANT_ID, P24_POS_ID, DEBUG_P24 } = process.env;
+const { P24_MERCHANT_ID, P24_POS_ID } = process.env;
 
 const getSupabase = () => {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -73,8 +73,6 @@ async function handle(req: NextRequest) {
   const currency = String(pick(data, "currency", "p24_currency") || "");
   const orderIdFromGateway = String(pick(data, "orderId", "p24_order_id") || "");
 
-  if (DEBUG_P24 === "1") console.log("P24 cb in:", { ct: req.headers.get("content-type"), method: req.method, sessionId, rawAmount, currency, orderIdFromGateway });
-
   if (!sessionId || rawAmount === undefined || !orderIdFromGateway) {
     return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
   }
@@ -103,7 +101,6 @@ async function handle(req: NextRequest) {
     body: verifyBody.toString(),
   });
   const text = await res.text();
-  if (DEBUG_P24 === "1") console.log("P24 verify:", { status: res.status, text });
 
   const ok =
     (res.ok && new URLSearchParams(text).get("error") === "0") ||
